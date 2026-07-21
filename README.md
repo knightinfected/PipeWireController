@@ -23,20 +23,67 @@ More screenshots:
 [Surround Setup wizard](screenshots/surround-setup.png) ·
 [Surround Setup, advanced mode](screenshots/surround-advanced.png)
 
+## Requirements
+
+Linux with a running **PipeWire** audio session — PipeWire ≥ 1.0 and
+WirePlumber ≥ 0.5 (port/profile switching uses `wpctl set-route` /
+`set-profile`). GTK 4 with **libadwaita ≥ 1.4**, Python ≥ 3.10. Pure
+Python, no build step. Developed and tested on PipeWire 1.6 /
+libadwaita 1.9.
+
+## Install
+
+### Arch / CachyOS / EndeavourOS / Manjaro
+
+```bash
+sudo pacman -S --needed pipewire wireplumber pipewire-pulse gtk4 libadwaita \
+    python-gobject python-numpy python-soundfile
+```
+
+### Fedora
+
+```bash
+sudo dnf install pipewire wireplumber pipewire-pulseaudio gtk4 libadwaita \
+    python3-gobject python3-numpy python3-soundfile
+```
+
+### Ubuntu 24.04+ / Debian 13+
+
+```bash
+sudo apt install pipewire wireplumber pipewire-pulse gir1.2-gtk-4.0 \
+    gir1.2-adw-1 python3-gi python3-numpy python3-soundfile
+```
+
+Older releases ship a libadwaita before 1.4 and won't work.
+
+### Other distros
+
+Install GTK 4 + libadwaita (≥ 1.4) with GObject introspection and
+PyGObject from your package manager, then grab the Python audio bits via
+pip if your distro doesn't package them:
+
+```bash
+python3 -m pip install --user numpy soundfile
+```
+
+Optional extras on any distro: `noise-suppression-for-voice` (RNNoise mic
+template), `lsp-plugins-ladspa` (extra LADSPA plugins for imported
+chains), PipeWire built with libmysofa (SOFA spatializer templates).
+
 ## Run
 
 ```bash
+git clone https://github.com/knightinfected/PipeWireController.git
+cd PipeWireController
 ./pipewire-controller
 ```
 
-Dependencies (all in the Arch repos): `pipewire` `wireplumber` `gtk4`
-`libadwaita` `python-gobject` `python-soundfile` `python-numpy`.
-Optional: `noise-suppression-for-voice` (RNNoise mic template),
-`lsp-plugins-ladspa` (extra LADSPA plugins for imported chains).
-
-Install the launcher entry:
+Optional app-menu entry (the desktop file expects `pipewire-controller`
+on your `PATH`, which the symlink provides):
 
 ```bash
+mkdir -p ~/.local/bin ~/.local/share/applications
+ln -sf "$PWD/pipewire-controller" ~/.local/bin/
 cp pipewire-controller.desktop ~/.local/share/applications/
 ```
 
