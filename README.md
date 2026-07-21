@@ -3,8 +3,7 @@
 A native GTK4/libadwaita control center for PipeWire on Arch-based systems.
 Everything under PipeWire's *Configuration* documentation — clock/quantum
 tuning, stream processing, session policy, filter chains, HRIR virtual
-surround — exposed as toggles and dropdowns. No hand-editing of config files,
-ever.
+surround — exposed as toggles and dropdowns. 
 
 ![Dashboard — Overview](screenshots/dashboard-overview.png)
 
@@ -44,8 +43,8 @@ More screenshots:
   — easily the best EasyEffects preset collection
 - [HRIR database](https://airtable.com/appayGNkn3nSuXkaz/shruimhjdSakUPg2m/tbloLjoZKWJDnLtTc)
   — big searchable HRIR database (Airtable)
-- [GentleDynamics](https://github.com/droidwayin/GentleDynamics) — the best
-  HRIRs if you want something editable
+- [GentleDynamics](https://github.com/droidwayin/GentleDynamics) — the best presets 
+  if you want add your own HRIRs
 - [JackHack96/EasyEffects-Presets](https://github.com/JackHack96/EasyEffects-Presets)
   — the default recommendation for EasyEffects presets
 - [JamesDSP DDC library](https://media.aicp-rom.com/JamesDSP/DDC/) —
