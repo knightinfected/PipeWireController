@@ -23,6 +23,32 @@ More screenshots:
 [Surround Setup wizard](screenshots/surround-setup.png) ·
 [Surround Setup, advanced mode](screenshots/surround-advanced.png)
 
+## If you like tinkering like me…
+
+…here are some cool GitHubs to visit for sound tools:
+
+- [JDSP4Linux](https://github.com/Audio4Linux/JDSP4Linux) — JamesDSP audio
+  effects processor for PipeWire/PulseAudio
+- [EasyEffects](https://github.com/wwmm/easyeffects) — the classic effects
+  rack for PipeWire
+- [coppwr](https://github.com/dimtpap/coppwr) — low-level PipeWire graph
+  inspector and patchbay
+- [polybar-pulseaudio-control](https://github.com/marioortizmanero/polybar-pulseaudio-control)
+  — volume/sink switcher module for Polybar
+
+…and some goated repos for presets, HRIRs and DDCs:
+
+- [M0Rf30/easyeffects-presets](https://github.com/M0Rf30/easyeffects-presets)
+  — easily the best EasyEffects preset collection
+- [HRIR database](https://airtable.com/appayGNkn3nSuXkaz/shruimhjdSakUPg2m/tbloLjoZKWJDnLtTc)
+  — big searchable HRIR database (Airtable)
+- [GentleDynamics](https://github.com/droidwayin/GentleDynamics) — the best
+  HRIRs if you want something editable
+- [JackHack96/EasyEffects-Presets](https://github.com/JackHack96/EasyEffects-Presets)
+  — the default recommendation for EasyEffects presets
+- [JamesDSP DDC library](https://media.aicp-rom.com/JamesDSP/DDC/) —
+  headphone DDC correction files
+
 ## Requirements
 
 Linux with a running **PipeWire** audio session — PipeWire ≥ 1.0 and
