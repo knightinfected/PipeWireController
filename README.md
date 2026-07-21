@@ -38,7 +38,7 @@ More screenshots:
 - [virtual-surround-manager](https://github.com/Berny23/virtual-surround-manager)
   — HRIR-based virtual surround setup tool for Windows and Linux
 
-…and some goated repos for presets, HRIRs and DDCs:
+…and some goated repos for presets, HRIRs, and DDCs:
 
 - [M0Rf30/easyeffects-presets](https://github.com/M0Rf30/easyeffects-presets)
   — easily the best EasyEffects preset collection
@@ -50,6 +50,8 @@ More screenshots:
   — the default recommendation for EasyEffects presets
 - [JamesDSP DDC library](https://media.aicp-rom.com/JamesDSP/DDC/) —
   headphone DDC correction files
+- [Linux_Audio](https://github.com/BayouGuru67/Linux_Audio) — hard stuff
+  for large speaker systems
 
 ## Requirements
 
