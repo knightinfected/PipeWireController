@@ -8,20 +8,22 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, Gdk, Gio, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from .backend import system
+from .backend import presets, prefs, pw, system
 from .ui.chains_page import ChainsPage
 from .ui.dashboard import Dashboard
 from .ui.devices import DevicesPage
 from .ui.hrir_page import HrirPage
 from .ui.settings_pages import ServerPage, StreamsPage, WirePlumberPage
+from .ui.surround_page import SurroundPage
 from .ui.tools_page import ToolsPage
 from .ui.widgets import async_call
 
 PAGES = [
     ('dashboard', 'Dashboard', 'utilities-system-monitor-symbolic'),
     ('devices', 'Devices', 'audio-speakers-symbolic'),
+    ('surround', 'Surround Setup', 'audio-card-symbolic'),
     ('server', 'Server', 'preferences-system-symbolic'),
     ('streams', 'Streams', 'emblem-music-symbolic'),
     ('wireplumber', 'Session & Bluetooth', 'bluetooth-active-symbolic'),
@@ -41,8 +43,15 @@ RESTART_UNITS = {
 class Window(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title='PipeWire Controller',
-                         default_width=1080, default_height=760)
+                         default_width=int(prefs.get('win_width') or 1080),
+                         default_height=int(prefs.get('win_height') or 760))
+        if prefs.get('win_maximized'):
+            self.maximize()
+        self.connect('close-request', self._save_window_state)
         self._pending_restarts: set[str] = set()
+        self.advanced = bool(prefs.get('advanced'))
+        self._advanced_widgets: list = []
+        self._last_default_sink = None
 
         self.toaster = Adw.ToastOverlay()
         self.stack = Gtk.Stack(
@@ -71,12 +80,28 @@ class Window(Adw.ApplicationWindow):
         side_sw.set_child(self.listbox)
         side_view.set_content(side_sw)
 
+        # advanced-settings toggle, bottom-left
+        adv_box = Gtk.Box(spacing=8, margin_top=10, margin_bottom=10,
+                          margin_start=16, margin_end=16)
+        adv_box.append(Gtk.Image.new_from_icon_name(
+            'applications-engineering-symbolic'))
+        adv_label = Gtk.Label(label='Advanced', xalign=0, hexpand=True)
+        adv_box.append(adv_label)
+        self.adv_switch = Gtk.Switch(valign=Gtk.Align.CENTER,
+                                     active=self.advanced,
+                                     tooltip_text='Show advanced settings '
+                                                  'throughout the app')
+        self.adv_switch.connect('notify::active', self._on_advanced)
+        adv_box.append(self.adv_switch)
+        side_view.add_bottom_bar(adv_box)
+
         # content
         self.banner = Adw.Banner(revealed=False, button_label='Restart now')
         self.banner.connect('button-clicked', self._restart_pending)
         self.content_title = Adw.WindowTitle(title='Dashboard')
         content_header = Adw.HeaderBar()
         content_header.set_title_widget(self.content_title)
+        content_header.pack_end(self._build_presets_button())
         content_view = Adw.ToolbarView()
         content_view.add_top_bar(content_header)
         content_view.add_top_bar(self.banner)
@@ -93,6 +118,7 @@ class Window(Adw.ApplicationWindow):
         self.pages = {
             'dashboard': Dashboard(self),
             'devices': DevicesPage(self),
+            'surround': SurroundPage(self),
             'server': ServerPage(self),
             'streams': StreamsPage(self),
             'wireplumber': WirePlumberPage(self),
@@ -104,12 +130,141 @@ class Window(Adw.ApplicationWindow):
             self.stack.add_named(page.widget, name)
         start = 0
         import os
-        want = os.environ.get('PWCTL_PAGE')
+        self._debug_page = bool(os.environ.get('PWCTL_PAGE'))
+        want = os.environ.get('PWCTL_PAGE') or prefs.get('last_page')
         if want:
             for i, (n, _t, _i2) in enumerate(PAGES):
                 if n == want:
                     start = i
         self.listbox.select_row(self.listbox.get_row_at_index(start))
+        GLib.timeout_add_seconds(5, self._autoload_tick)
+
+    # ------------------------------------------------------------ advanced --
+    def register_advanced(self, widget):
+        """Track a widget that is only visible while Advanced mode is on."""
+        self._advanced_widgets.append(widget)
+        widget.set_visible(self.advanced)
+
+    def _on_advanced(self, switch, _p):
+        self.advanced = switch.get_active()
+        prefs.save(advanced=self.advanced)
+        for w in self._advanced_widgets:
+            w.set_visible(self.advanced)
+
+    # ------------------------------------------------------ device presets --
+    def _build_presets_button(self):
+        btn = Gtk.MenuButton(icon_name='user-bookmarks-symbolic',
+                             tooltip_text='Device presets')
+        self._presets_popover = Gtk.Popover()
+        self._presets_popover.connect('show', self._fill_presets_popover)
+        btn.set_popover(self._presets_popover)
+        return btn
+
+    def _fill_presets_popover(self, _pop):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                      margin_top=12, margin_bottom=12,
+                      margin_start=12, margin_end=12, width_request=340)
+        title = Gtk.Label(label='Device presets', xalign=0)
+        title.add_css_class('heading')
+        box.append(title)
+        hint = Gtk.Label(
+            label='A preset stores channel-mix settings, volume and card '
+                  'profile for one output device.',
+            xalign=0, wrap=True, max_width_chars=42)
+        hint.add_css_class('caption')
+        hint.add_css_class('dim-label')
+        box.append(hint)
+
+        auto = Gtk.Box(spacing=8, margin_top=6)
+        auto_lbl = Gtk.Label(label='Auto-load when default output changes',
+                             xalign=0, hexpand=True, wrap=True)
+        sw = Gtk.Switch(valign=Gtk.Align.CENTER,
+                        active=bool(prefs.get('autoload_presets')))
+        sw.connect('notify::active',
+                   lambda s, _p: prefs.save(autoload_presets=s.get_active()))
+        auto.append(auto_lbl)
+        auto.append(sw)
+        box.append(auto)
+        box.append(Gtk.Separator(margin_top=4, margin_bottom=4))
+
+        save_btn = Gtk.Button()
+        save_btn.set_child(Adw.ButtonContent(
+            icon_name='document-save-symbolic',
+            label='Save preset for current output'))
+        save_btn.connect('clicked', self._save_preset)
+        box.append(save_btn)
+
+        saved = presets.all_presets()
+        if saved:
+            box.append(Gtk.Separator(margin_top=4, margin_bottom=4))
+            for name, p in sorted(saved.items()):
+                row = Gtk.Box(spacing=8)
+                labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                 hexpand=True)
+                t = Gtk.Label(label=p.get('description', name), xalign=0)
+                labels.append(t)
+                sub = Gtk.Label(label=f'saved {p.get("saved", "?")}',
+                                xalign=0)
+                sub.add_css_class('caption')
+                sub.add_css_class('dim-label')
+                labels.append(sub)
+                row.append(labels)
+                apply_b = Gtk.Button(icon_name='media-playback-start-symbolic',
+                                     tooltip_text='Apply now')
+                apply_b.add_css_class('flat')
+                apply_b.connect('clicked', self._apply_preset, p)
+                del_b = Gtk.Button(icon_name='user-trash-symbolic',
+                                   tooltip_text='Delete preset')
+                del_b.add_css_class('flat')
+                del_b.connect('clicked', self._delete_preset, name)
+                row.append(apply_b)
+                row.append(del_b)
+                box.append(row)
+        self._presets_popover.set_child(box)
+
+    def _save_preset(self, _b):
+        self._presets_popover.popdown()
+        async_call(presets.snapshot,
+                   lambda p, e: self.toast(
+                       f'Preset saved for {p["description"]}' if p and not e
+                       else 'Could not save preset'))
+
+    def _apply_preset(self, _b, preset):
+        self._presets_popover.popdown()
+
+        def done(actions, e):
+            if e or actions is None:
+                self.toast('Preset failed')
+                return
+            if any('channel-mix' in a for a in actions):
+                self.flag_restart('pulse')
+            self.toast(f'Applied preset for {preset["description"]}: '
+                       + (', '.join(actions) if actions else 'nothing to do'))
+        async_call(lambda: presets.apply(preset), done)
+
+    def _delete_preset(self, _b, name):
+        presets.delete(name)
+        self._presets_popover.popdown()
+        self.toast('Preset deleted')
+
+    def _autoload_tick(self):
+        if not prefs.get('autoload_presets'):
+            return True
+
+        def check():
+            return pw.read_default_names().get('default.audio.sink')
+
+        def done(name, e):
+            if e or not name:
+                return
+            prev, self._last_default_sink = self._last_default_sink, name
+            if prev is None or name == prev:
+                return
+            preset = presets.preset_for(name)
+            if preset:
+                self._apply_preset(None, preset)
+        async_call(check, done)
+        return True
 
     # ---------------------------------------------------------- navigation --
     def _on_select(self, _lb, row):
@@ -117,6 +272,14 @@ class Window(Adw.ApplicationWindow):
             self.stack.set_visible_child_name(row.page_name)
             title = next(t for n, t, _i in PAGES if n == row.page_name)
             self.content_title.set_title(title)
+            if not self._debug_page:
+                prefs.save(last_page=row.page_name)
+
+    def _save_window_state(self, *_a):
+        prefs.save(win_width=self.get_width() or 1080,
+                   win_height=self.get_height() or 760,
+                   win_maximized=self.is_maximized())
+        return False
 
     def goto(self, name):
         for i, (n, _t, _i2) in enumerate(PAGES):

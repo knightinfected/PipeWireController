@@ -28,6 +28,7 @@ class Setting:
     max: float = 0
     step: float = 1
     restart: str = 'pipewire'      # pipewire | pulse | wireplumber
+    advanced: bool = False         # only shown when the Advanced toggle is on
 
 
 PIPEWIRE_CLOCK = [
@@ -56,31 +57,35 @@ PIPEWIRE_CLOCK = [
 ]
 
 PIPEWIRE_ADVANCED = [
+    Setting('default.clock.quantum-limit', 'Quantum hard limit',
+            'Absolute ceiling for any quantum in the graph. Only raise for '
+            'special offline-processing setups.',
+            'enum', 8192, choices=QUANTA[6:], advanced=True),
     Setting('mem.allow-mlock', 'Lock realtime memory',
             'Pin audio buffers in RAM so they can never be swapped out. '
             'Disable only on very low-memory systems.',
-            'bool', True),
+            'bool', True, advanced=True),
     Setting('cpu.zero.denormals', 'Zero denormal floats',
             'Flush denormals to zero in the audio thread — prevents rare CPU '
             'spikes with some plugins (recommended when using filter chains).',
-            'bool', False),
+            'bool', False, advanced=True),
     Setting('loop.rt-prio', 'Realtime priority',
             'Priority of audio data threads. -1 = use module default (88). '
             '0 disables realtime scheduling.',
-            'int', -1, min=-1, max=99),
+            'int', -1, min=-1, max=99, advanced=True),
     Setting('link.max-buffers', 'Max buffers per link',
             '16 works for pure PipeWire graphs; 64 is needed for old JACK apps.',
-            'enum', 64, choices=[16, 32, 64]),
+            'enum', 64, choices=[16, 32, 64], advanced=True),
     Setting('settings.check-quantum', 'Strict quantum check',
             'Refuse metadata quantum changes outside min/max bounds.',
-            'bool', False),
+            'bool', False, advanced=True),
     Setting('settings.check-rate', 'Strict rate check',
             'Refuse metadata rate changes not in the allowed-rates list.',
-            'bool', False),
+            'bool', False, advanced=True),
     Setting('log.level', 'Daemon log level',
             '0 errors only … 5 trace. Level 3+ is useful when debugging '
             'devices; keep at 2 normally.',
-            'int', 2, min=0, max=5),
+            'int', 2, min=0, max=5, advanced=True),
 ]
 
 # client.conf → native apps; pipewire-pulse.conf → PulseAudio apps.
@@ -95,7 +100,7 @@ STREAM = [
             'Never resample — streams must already match the graph rate. '
             'Only sensible with a locked rate and matching sources.',
             'bool', False, conf='client.conf', section='stream.properties',
-            restart='pulse'),
+            restart='pulse', advanced=True),
     Setting('channelmix.upmix', 'Upmix stereo → surround',
             'Expand stereo content to fill surround outputs.',
             'bool', True, conf='client.conf', section='stream.properties',
@@ -119,11 +124,36 @@ STREAM = [
             'Scale channel volumes to avoid clipping when downmixing surround '
             'to stereo.',
             'bool', False, conf='client.conf', section='stream.properties',
-            restart='pulse'),
+            restart='pulse', advanced=True),
     Setting('monitor.channel-volumes', 'Monitor follows volume',
             'Monitor ports reflect the node volume instead of raw signal.',
             'bool', False, conf='client.conf', section='stream.properties',
-            restart='pulse'),
+            restart='pulse', advanced=True),
+    Setting('channelmix.fc-cutoff', 'Center extraction cutoff (Hz)',
+            'When upmixing, frequencies below this go to the front-center '
+            'speaker. 0 disables; 12000 is a good start for dialogue clarity.',
+            'float', 0, conf='client.conf', section='stream.properties',
+            min=0, max=20000, step=500, restart='pulse', advanced=True),
+    Setting('channelmix.rear-delay', 'Rear ambience delay (ms)',
+            'Delay applied to upmixed rear channels — adds depth. 12 ms is '
+            'the psychoacoustic sweet spot; 0 disables.',
+            'float', 0, conf='client.conf', section='stream.properties',
+            min=0, max=50, step=1, restart='pulse', advanced=True),
+    Setting('channelmix.stereo-widen', 'Stereo widen',
+            'Subtracts a little cross-talk to widen the front stage when '
+            'upmixing. 0 = off, keep below 0.5.',
+            'float', 0, conf='client.conf', section='stream.properties',
+            min=0, max=1, step=0.1, restart='pulse', advanced=True),
+    Setting('channelmix.hilbert-taps', 'Rear phase-shift taps',
+            'Apply a Hilbert transform to upmixed rear channels (0 = off, '
+            'try 63). Creates a more diffuse, "wrap-around" ambience.',
+            'int', 0, conf='client.conf', section='stream.properties',
+            min=0, max=128, restart='pulse', advanced=True),
+    Setting('channelmix.disable', 'Disable channel mixing',
+            'Never remix channels — streams only play if their channel '
+            'layout exactly matches the device. Breaks upmix/downmix.',
+            'bool', False, conf='client.conf', section='stream.properties',
+            restart='pulse', advanced=True),
 ]
 
 WIREPLUMBER = [
@@ -141,6 +171,9 @@ WIREPLUMBER = [
     ('bt_autoswitch', 'Auto-switch to headset profile',
      'Jump to the (low-fidelity) headset profile automatically when an app '
      'opens the Bluetooth mic.'),
+    ('alsa_headroom', 'Extra ALSA headroom',
+     'Reserve 1024 extra frames in the device buffer — the classic fix for '
+     'crackling USB audio interfaces.'),
 ]
 
 RESTART_LABEL = {

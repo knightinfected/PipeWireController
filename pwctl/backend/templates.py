@@ -123,6 +123,20 @@ def _per_channel_convolver(meta, channel_map):
     return graph, cap, play
 
 
+def _passthrough_sink(meta, speakers):
+    """Plain multichannel virtual sink: apps see all channels, PipeWire's
+    channelmix folds them down to whatever the target device offers."""
+    nodes = [{'type': 'builtin', 'label': 'copy', 'name': f'copy{s}'}
+             for s in speakers]
+    graph = {'nodes': nodes,
+             'inputs': [f'copy{s}:In' for s in speakers],
+             'outputs': [f'copy{s}:Out' for s in speakers]}
+    cap, play = _sink_props(meta, len(speakers), speakers)
+    play['audio.channels'] = len(speakers)
+    play['audio.position'] = speakers
+    return graph, cap, play
+
+
 def _true_stereo(meta):
     """4ch true-stereo IR: channels LL, LR, RL, RR."""
     hrir = meta.hrir or 'MISSING-IR.wav'
@@ -270,6 +284,16 @@ def _rnnoise(meta):
 
 
 TEMPLATES = {
+    'plain-71-sink': {
+        'title': 'Virtual 7.1 Sink (plain downmix)',
+        'desc': 'Gives apps a full 8-channel device; the signal is folded '
+                'down to the real output by PipeWire using your channel-mix '
+                'settings. No HRIR — for surround content on plain '
+                'headphones/stereo, or as an input for other chains.',
+        'needs': None,
+        'build': lambda m: _passthrough_sink(
+            m, ['FL', 'FR', 'FC', 'LFE', 'RL', 'RR', 'SL', 'SR']),
+    },
     'virtual-surround-7.1': {
         'title': 'Virtual Surround 7.1 → Headphones',
         'desc': 'Binaural 7.1 downmix using a 14-channel HeSuVi HRIR. '

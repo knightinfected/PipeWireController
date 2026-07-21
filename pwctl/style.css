@@ -58,3 +58,37 @@ row.overridden {
     border-radius: 8px;
     margin: 2px 8px;
 }
+
+/* ------------------------------------------------ dashboard stream rows -- */
+
+.vol-list > row {
+    padding: 4px 2px;
+}
+
+scale.vol-stepped trough {
+    min-height: 10px;
+    border-radius: 6px;
+}
+
+/* floating slider-style picker, bottom right */
+menubutton.style-picker > button {
+    border-radius: 99px;
+    padding: 8px 18px;
+    background: @headerbar_bg_color;
+    border: 1px solid alpha(currentColor, 0.12);
+    box-shadow: 0 3px 12px alpha(black, 0.35);
+}
+
+menubutton.style-picker > button:hover {
+    background: @card_bg_color;
+}
+
+.style-picker-list {
+    background: transparent;
+}
+
+.style-picker-list row {
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin: 2px;
+}

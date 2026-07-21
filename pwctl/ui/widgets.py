@@ -55,14 +55,14 @@ def group(title: str, description: str = '') -> Adw.PreferencesGroup:
     return g
 
 
-def page_scroller(*groups) -> Gtk.ScrolledWindow:
+def page_scroller(*groups, width=760) -> Gtk.ScrolledWindow:
     """A scrollable, clamped column of PreferencesGroups."""
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24,
                   margin_top=24, margin_bottom=36,
                   margin_start=16, margin_end=16)
     for g in groups:
         box.append(g)
-    clamp = Adw.Clamp(maximum_size=760, tightening_threshold=600)
+    clamp = Adw.Clamp(maximum_size=width, tightening_threshold=min(600, width))
     clamp.set_child(box)
     sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
                             vexpand=True)

@@ -182,7 +182,12 @@ class SettingRow:
 def _schema_group(title, desc, settings, window):
     g = group(title, desc)
     for s in settings:
-        g.add(SettingRow(s, window).row)
+        row = SettingRow(s, window).row
+        g.add(row)
+        if s.advanced:
+            window.register_advanced(row)
+    if all(s.advanced for s in settings):
+        window.register_advanced(g)
     return g
 
 
@@ -286,7 +291,10 @@ class WirePlumberPage:
             row.set_active(bool(state.get(key)))
             row.connect('notify::active', self._toggled, key)
             self.rows[key] = row
-            (power if key == 'disable_suspend' else bt).add(row)
+            in_power = key in ('disable_suspend', 'alsa_headroom')
+            (power if in_power else bt).add(row)
+            if key == 'alsa_headroom':
+                window.register_advanced(row)
         self.widget = page_scroller(power, bt)
 
     def _toggled(self, row, _p, key):

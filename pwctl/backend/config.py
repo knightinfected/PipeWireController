@@ -140,6 +140,7 @@ WP_DEFAULTS = {
     'msbc': True,                  # bluez5.enable-msbc (headset mic quality)
     'bt_hw_volume': True,          # bluez5.enable-hw-volume
     'bt_autoswitch': True,         # bluez5.autoswitch-profile
+    'alsa_headroom': False,        # api.alsa.headroom 1024 (USB crackle fix)
 }
 
 
@@ -158,13 +159,21 @@ def write_wp_toggles(state: dict):
     WP_STATE.write_text(_json.dumps(state, indent=2))
 
     data = {}
+    alsa_rules = []
     if state.get('disable_suspend'):
-        data['monitor.alsa.rules'] = [{
+        alsa_rules.append({
             'matches': [{'node.name': '~alsa_input.*'},
                         {'node.name': '~alsa_output.*'}],
             'actions': {'update-props': {
                 'session.suspend-timeout-seconds': 0}},
-        }]
+        })
+    if state.get('alsa_headroom'):
+        alsa_rules.append({
+            'matches': [{'node.name': '~alsa_output.*'}],
+            'actions': {'update-props': {'api.alsa.headroom': 1024}},
+        })
+    if alsa_rules:
+        data['monitor.alsa.rules'] = alsa_rules
     bt = {}
     if state.get('sbc_xq') != WP_DEFAULTS['sbc_xq']:
         bt['bluez5.enable-sbc-xq'] = state['sbc_xq']
