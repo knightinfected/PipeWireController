@@ -6,11 +6,18 @@ tuning, stream processing, session policy, filter chains, HRIR virtual
 surround — exposed as toggles and dropdowns. No hand-editing of config files,
 ever.
 
-![Dashboard — Playback tab](screenshots/dashboard-playback.png)
+![Dashboard — Overview](screenshots/dashboard-overview.png)
+
+<p align="center">
+  <img src="screenshots/dashboard-led-meter.png" alt="Playback tab with LED-meter volume style" width="49.5%">
+  <img src="screenshots/filter-chains-hrir.png" alt="Filter Chains and HRIR Library" width="49.5%">
+</p>
+<p align="center">
+  <img src="screenshots/server.png" alt="Server settings" width="70%">
+</p>
 
 More screenshots:
-[Overview with latency calculator](screenshots/dashboard-overview.png) ·
-[LED-meter volume style](screenshots/dashboard-led-meter.png) ·
+[Playback tab](screenshots/dashboard-playback.png) ·
 [Output Devices with ports](screenshots/output-devices.png) ·
 [Recording tab](screenshots/dashboard-recording.png) ·
 [Surround Setup wizard](screenshots/surround-setup.png) ·
