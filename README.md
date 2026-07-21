@@ -35,6 +35,8 @@ More screenshots:
   inspector and patchbay
 - [polybar-pulseaudio-control](https://github.com/marioortizmanero/polybar-pulseaudio-control)
   — volume/sink switcher module for Polybar
+- [virtual-surround-manager](https://github.com/Berny23/virtual-surround-manager)
+  — HRIR-based virtual surround setup tool for Windows and Linux
 
 …and some goated repos for presets, HRIRs and DDCs:
 
