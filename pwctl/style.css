@@ -1,0 +1,60 @@
+/* PipeWire Controller styling */
+
+.status-pill {
+    padding: 2px 10px;
+    border-radius: 99px;
+    font-size: 0.8em;
+    font-weight: 700;
+}
+
+.pill-success {
+    background: alpha(@success_color, 0.18);
+    color: @success_color;
+}
+
+.pill-warning {
+    background: alpha(@warning_color, 0.18);
+    color: @warning_color;
+}
+
+.pill-error {
+    background: alpha(@error_color, 0.18);
+    color: @error_color;
+}
+
+.pill-dim {
+    background: alpha(currentColor, 0.09);
+    color: alpha(currentColor, 0.6);
+}
+
+.numeric-value {
+    font-feature-settings: "tnum";
+    font-weight: 700;
+    color: @accent_color;
+}
+
+row.overridden {
+    box-shadow: inset 3px 0 0 0 @accent_color;
+}
+
+.dim-row {
+    font-size: 0.9em;
+}
+
+.dim-row label.title {
+    color: alpha(currentColor, 0.65);
+    font-weight: 400;
+}
+
+.star-active {
+    color: @yellow_4;
+}
+
+.destructive-flat {
+    color: @error_color;
+}
+
+.navigation-sidebar row {
+    border-radius: 8px;
+    margin: 2px 8px;
+}

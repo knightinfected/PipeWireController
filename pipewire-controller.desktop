@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PipeWire Controller
+Comment=Configure PipeWire, filter chains and HRIR virtual surround without editing files
+Exec=/home/testuser/PipeWireController/pipewire-controller
+Icon=audio-card
+Terminal=false
+Categories=AudioVideo;Audio;Settings;
+Keywords=pipewire;audio;surround;hrir;equalizer;filter;
