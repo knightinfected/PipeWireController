@@ -8,12 +8,16 @@ surround — exposed as toggles and dropdowns.
 ![Dashboard — Overview](screenshots/dashboard-overview.png)
 
 <p align="center">
-  <img src="screenshots/dashboard-led-meter.png" alt="Playback tab with LED-meter volume style" width="49.5%">
-  <img src="screenshots/filter-chains.png" alt="Filter Chains — per-chain processes with independent toggles" width="49.5%">
+  <img src="screenshots/output-devices-led-meter.png" alt="Output Devices with LED-meter volume style — hardware and virtual sinks side by side" width="45%">
+  <img src="screenshots/output-devices-stepped.png" alt="Output Devices with stepped volume style and port selector" width="53%">
 </p>
 <p align="center">
-  <img src="screenshots/hrir-library.png" alt="HRIR Library — import, analyze and classify impulse responses" width="52%">
-  <img src="screenshots/session-bluetooth.png" alt="Session and Bluetooth — device power and Bluetooth codec policy" width="43%">
+  <img src="screenshots/dashboard-playback.png" alt="Playback tab — move any stream between devices live" width="44%">
+  <img src="screenshots/session-bluetooth.png" alt="Session and Bluetooth — device power and Bluetooth codec policy" width="52.5%">
+</p>
+<p align="center">
+  <img src="screenshots/hrir-library.png" alt="HRIR Library — import, analyze and classify impulse responses" width="45%">
+  <img src="screenshots/filter-chains.png" alt="Filter Chains — per-chain processes with independent toggles" width="52%">
 </p>
 <p align="center">
   <img src="screenshots/streams.png" alt="Stream processing defaults — upmix, LFE, resampler and advanced knobs" width="46%">
@@ -28,7 +32,7 @@ surround — exposed as toggles and dropdowns.
 </p>
 
 More screenshots:
-[Playback tab](screenshots/dashboard-playback.png) ·
+[Playback tab, LED meters](screenshots/dashboard-led-meter.png) ·
 [Output Devices with ports](screenshots/output-devices.png) ·
 [Recording tab](screenshots/dashboard-recording.png) ·
 [Surround Setup wizard](screenshots/surround-setup.png) ·
