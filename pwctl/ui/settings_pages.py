@@ -8,8 +8,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gtk  # noqa: E402
 
-from ..backend import config, pw, schema
-from .widgets import group, icon_button, page_scroller
+from ..backend import bluetooth, config, pw, schema
+from .widgets import async_call, group, icon_button, page_scroller
 
 # both native and pulse clients get the same stream defaults
 STREAM_CONFS = ('client.conf', 'pipewire-pulse.conf')
@@ -74,7 +74,6 @@ class SettingRow:
     # ---- widgets ----
     def _build(self):
         s = self.s
-        val, _ = (None, None)
         cur = self._peek()
         if s.kind == 'bool':
             row = Adw.SwitchRow(title=s.title, subtitle=s.subtitle)
@@ -295,7 +294,14 @@ class WirePlumberPage:
             (power if in_power else bt).add(row)
             if key == 'alsa_headroom':
                 window.register_advanced(row)
-        self.widget = page_scroller(power, bt)
+
+        self.bt_devs = group(
+            'Connected Bluetooth devices',
+            'Profile switches instantly through WirePlumber; the codec list '
+            'shows what the device supports in its current profile.')
+        self._bt_rows = []
+        self.widget = page_scroller(power, bt, self.bt_devs)
+        self.widget.connect('map', lambda *_: self.refresh_bt())
 
     def _toggled(self, row, _p, key):
         if self.updating:
@@ -304,3 +310,96 @@ class WirePlumberPage:
         state[key] = row.get_active()
         config.write_wp_toggles(state)
         self.window.flag_restart('wireplumber')
+
+    # ------------------------------------------------- per-device bluetooth --
+    def refresh_bt(self):
+        async_call(bluetooth.list_devices, self._apply_bt)
+
+    def _apply_bt(self, devices, error):
+        if error or devices is None:
+            return
+        for row in self._bt_rows:
+            self.bt_devs.remove(row)
+        self._bt_rows = []
+        if not devices:
+            row = Adw.ActionRow(
+                title='No Bluetooth audio devices connected',
+                subtitle='Pair and connect a device; it appears here with '
+                         'its profile and codec options.')
+            self.bt_devs.add(row)
+            self._bt_rows.append(row)
+            return
+        for dev in devices:
+            self._bt_rows.append(self._bt_device_rows(dev))
+
+    def _bt_device_rows(self, dev):
+        exp = Adw.ExpanderRow(
+            title=dev.description,
+            subtitle=dev.name + (f' · battery {dev.battery}' if dev.battery
+                                 else ''))
+        exp.set_expanded(True)
+        exp.add_prefix(Gtk.Image.new_from_icon_name(
+            'bluetooth-active-symbolic'))
+
+        profile = Adw.ComboRow(
+            title='Profile',
+            subtitle='A2DP for listening quality; HFP/HSP when the '
+                     'microphone is needed.')
+        labels = [desc + (' (unavailable)' if avail == 'no' else '')
+                  for _i, desc, avail in dev.profiles]
+        profile.set_model(Gtk.StringList.new(labels))
+        idx = next((i for i, (pidx, _d, _a) in enumerate(dev.profiles)
+                    if pidx == dev.active_profile), None)
+        updating = {'v': True}
+        if idx is not None:
+            profile.set_selected(idx)
+
+        def profile_changed(row, _p):
+            if updating['v']:
+                return
+            sel = row.get_selected()
+            if sel >= len(dev.profiles):
+                return
+            pidx, desc, _a = dev.profiles[sel]
+            async_call(lambda: bluetooth.set_profile(dev.id, pidx),
+                       lambda ok, e: (self.window.toast(
+                           f'Profile: {desc}' if ok and not e
+                           else 'Profile change failed'),
+                           self.refresh_bt()))
+        profile.connect('notify::selected', profile_changed)
+        exp.add_row(profile)
+
+        codec = Adw.ComboRow(
+            title='Codec',
+            subtitle='Higher-quality codecs need support on both ends.')
+        if dev.codecs:
+            codec.set_model(Gtk.StringList.new(
+                [f'{desc} ({name})' if desc != name else name
+                 for name, desc in dev.codecs]))
+            cur = next((i for i, (name, _d) in enumerate(dev.codecs)
+                        if name == dev.active_codec), None)
+            if cur is not None:
+                codec.set_selected(cur)
+
+            def codec_changed(row, _p):
+                if updating['v']:
+                    return
+                sel = row.get_selected()
+                if sel >= len(dev.codecs):
+                    return
+                name = dev.codecs[sel][0]
+                async_call(lambda: bluetooth.switch_codec(dev.name, name),
+                           lambda res, e: (self.window.toast(
+                               f'Codec: {name}' if res and res[0]
+                               else 'Codec switch failed — the device may '
+                                    'not support it in this profile'),
+                               self.refresh_bt()))
+            codec.connect('notify::selected', codec_changed)
+        else:
+            codec.set_subtitle('Codec switching not available for this '
+                               'device/profile')
+            codec.set_sensitive(False)
+        exp.add_row(codec)
+        updating['v'] = False
+        self.bt_devs.add(exp)
+        return exp

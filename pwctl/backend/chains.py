@@ -113,7 +113,7 @@ def list_chains() -> list[ChainMeta]:
 
 def save_meta(meta: ChainMeta):
     ensure_dirs()
-    meta.meta_path.write_text(json.dumps(asdict(meta), indent=2))
+    system.atomic_write(meta.meta_path, json.dumps(asdict(meta), indent=2))
 
 
 def new_chain(name: str, template: str, **kw) -> ChainMeta:
@@ -181,7 +181,7 @@ def apply(meta: ChainMeta) -> tuple[bool, str]:
     """Regenerate config and (re)start/stop the unit to match `enabled`."""
     try:
         generate(meta)
-    except spa_json.SpaJsonError as e:
+    except (spa_json.SpaJsonError, ValueError) as e:
         return False, f'Invalid config: {e}'
     ensure_unit()
     if meta.enabled:

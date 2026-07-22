@@ -8,7 +8,10 @@ running PipeWire (packaged on the AUR, install instructions for Fedora,
 Ubuntu/Debian and others below).
 Everything under PipeWire's *Configuration* documentation — clock/quantum
 tuning, stream processing, session policy, filter chains, HRIR virtual
-surround — exposed as toggles and dropdowns. 
+surround — exposed as toggles and dropdowns, plus a live **patchbay**,
+performance **monitoring**, **virtual devices**, routing snapshots,
+per-application **policies** and LADSPA/LV2 **effect inserts**
+([new in v0.3.0](#new-in-v030)).
 
 ![Dashboard — Overview](screenshots/dashboard-overview.png)
 
@@ -43,6 +46,61 @@ More screenshots:
 [Surround Setup wizard](screenshots/surround-setup.png) ·
 [Surround Setup, advanced mode](screenshots/surround-advanced.png) ·
 [Filter Chains + HRIR close-up](screenshots/filter-chains-hrir.png)
+
+## New in v0.3.0
+
+v0.3 grows the app from a config editor into a full graph tool: a live
+patchbay, performance monitoring, virtual devices, routing snapshots,
+per-application policies and plugin effect inserts — all built on the same
+"one process per thing, drop-ins only, never touch base files" foundation.
+
+**Patchbay** — a live node graph of the whole session, audio *and* MIDI.
+Drag a port onto another to connect, select a link and press Delete to
+disconnect, drag nodes to arrange them (layout persists), pan/zoom, toggle
+MIDI and monitor ports, and watch the signal flow animate along active
+links. Double-click any node for its properties, per-node latency, and a
+live **metadata editor** (e.g. pin a stream with `target.object`).
+
+![Patchbay — live graph with drag-to-connect patching](screenshots/patchbay.png)
+
+**Live Monitor** — per-service CPU and RAM sparklines, xrun and DSP-load
+meters, a live `pw-top` table and a cursor-followed journal with a
+warnings-only filter. Optional desktop notifications fire when a link
+breaks, a service fails, or new dropouts appear.
+
+<p align="center">
+  <img src="screenshots/monitor.png" alt="Live Monitor — CPU/RAM, xruns, DSP load, pw-top and logs" width="45%">
+  <img src="screenshots/effects.png" alt="Effects — insert LADSPA/LV2 plugin racks into the signal path" width="51%">
+</p>
+
+**Effects** — insert racks of **LADSPA/LV2 plugins** into the signal path;
+the rack shows up as an output device you route apps through. Plugins are
+discovered by introspection (164 LADSPA + 71 LV2 found on the dev machine),
+reorderable in series, and mono plugins run as an L/R pair automatically.
+VST3/CLAP presence is detected with a bridge-host hint.
+
+**Virtual Devices** — create null sinks, virtual microphones,
+combined/aggregate devices (one sink that plays on several cards at once)
+and buses/sub-mixes. Each runs as its own tiny process — temporary or
+persistent — so creating or removing one never interrupts playback.
+
+<p align="center">
+  <img src="screenshots/virtual-combined.png" alt="Virtual device dialog — combine several outputs into one" width="38%">
+  <img src="screenshots/app-policies.png" alt="App Policies — per-app routing, default priority, clock master" width="59%">
+</p>
+
+**App Policies** — per-application routing rules (send an app to a fixed
+device, stop it auto-connecting, or pin it in place), default-device
+priority, and a preferred graph **clock master**.
+
+<p align="center">
+  <img src="screenshots/virtual-devices.png" alt="Virtual Devices — null sinks, virtual mics, aggregates and buses" width="70%">
+</p>
+
+Also new: **routing snapshots** (save / recall / export / import the whole
+patch by name), **per-device settings** on the Devices page (sample rate,
+bit depth, period size, headroom, rename, hide), **per-device Bluetooth
+profile & codec**, and **solo** toggles in the Dashboard mixer.
 
 ## If you like tinkering like me…
 
@@ -164,8 +222,31 @@ cp pipewire-controller.desktop ~/.local/share/applications/
   (−/+ nudge buttons for trackpads), LED meter (studio segment bar) —
   switchable from the pill in the bottom-right corner.
 
+**Patchbay** — a live, draggable node graph of every node, port and link in
+the session (audio and MIDI). Connect by dragging a port onto another,
+disconnect a selected link with Delete, and double-click a node to edit its
+metadata and read its declared latency. Save the whole routing as a named
+**snapshot** and recall, export or import it later.
+
 **Devices** — every sink and source (including virtual filter-chain sinks):
-set default, volume, mute.
+set default, volume, mute. Hardware devices expand to **per-device
+settings** — sample rate, bit depth, ALSA period size, headroom, preferred
+quantum, suspend timeout, plus rename/hide — written as WirePlumber rules.
+
+**Virtual Devices** — null sinks, virtual microphones, combined/aggregate
+outputs (play on several cards at once) and buses/sub-mixes, each as its own
+lightweight process; temporary or persistent across reboots.
+
+**App Policies** — per-application rules (fixed target device, disable
+auto-connect, pin in place), per-device default-selection priority, and a
+preferred graph clock master.
+
+**Effects** — a LADSPA/LV2 plugin browser and a rack builder; racks become
+routable output devices. VST3/CLAP are detected with a bridge-host hint.
+
+**Monitor** — service CPU/RAM, xrun and DSP-load meters, a live `pw-top`
+table, a follow-along journal, and optional desktop notifications for broken
+links, service failures and dropouts.
 
 **Surround Setup** — a guided wizard for real 5.1/7.1 rigs: choose the
 layout, pick the matching sound-card profile (★ suggests the right one;
@@ -204,7 +285,8 @@ normalize downmix, monitor volumes. Written to *both* `client.conf.d` and
 
 **Session & Bluetooth** (WirePlumber) — never-suspend devices (fixes pops /
 cut-off first seconds), SBC-XQ, mSBC wideband mic, hardware volume,
-auto-switch to headset profile.
+auto-switch to headset profile, and **per-device Bluetooth profile & codec**
+selection for each connected device.
 
 **Filter Chains** — the core:
 - Create / edit / clone / delete / enable / disable from the GUI; valid SPA
@@ -247,11 +329,14 @@ one-click *reset all overrides*.
 | Server settings | `~/.config/pipewire/pipewire.conf.d/99-pipewire-controller.conf` |
 | Stream settings | `~/.config/pipewire/{client,pipewire-pulse}.conf.d/99-pipewire-controller.conf` |
 | Session settings | `~/.config/wireplumber/wireplumber.conf.d/99-pipewire-controller.conf` |
+| Device & app policy rules | `~/.config/pipewire-controller/rules.json` (regenerates the WirePlumber and stream drop-ins above) |
 | Chain metadata | `~/.config/pipewire-controller/chains/*.json` |
-| Generated chain configs | `~/.config/pipewire-controller/generated/*.conf` |
+| Virtual device metadata | `~/.config/pipewire-controller/virtual/*.json` |
+| Routing snapshots | `~/.config/pipewire-controller/routing/*.json` |
+| Generated chain / virtual-device configs | `~/.config/pipewire-controller/generated/*.conf` |
 | HRIR library | `~/.config/pipewire-controller/hrir/` |
 | UI preferences & device presets | `~/.config/pipewire-controller/ui.json` |
-| Chain runner unit | `~/.config/systemd/user/pwctl-chain@.service` |
+| Chain / virtual-device runner unit | `~/.config/systemd/user/pwctl-chain@.service` |
 
 Deleting those paths removes every trace of the app. Base config files are
 never modified.

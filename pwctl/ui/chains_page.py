@@ -247,7 +247,10 @@ class ChainDialog(Adw.Dialog):
         self.page = page
         self.meta = meta
         self.is_new = meta is None
-        self.template_ids = [t for t in TEMPLATES]
+        # effect racks carry a plugin list and are built on the Effects page
+        self.template_ids = [t for t in TEMPLATES
+                             if TEMPLATES[t]['needs'] != 'plugins'
+                             or (meta and meta.template == t)]
 
         self.name_row = Adw.EntryRow(title='Name')
         self.name_row.set_text(meta.name if meta else '')

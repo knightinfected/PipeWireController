@@ -2,10 +2,30 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 
 APP_DIR_NAME = 'pipewire-controller'
+
+
+def atomic_write(path, text: str):
+    """Write a file via temp + rename so a crash never leaves it truncated."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f'.{path.name}.')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def run(argv, timeout=10, input_text=None):

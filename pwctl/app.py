@@ -10,25 +10,35 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from .backend import presets, prefs, pw, system
+from .backend import graph, prefs, presets, pw, system
 from .ui.chains_page import ChainsPage
 from .ui.dashboard import Dashboard
 from .ui.devices import DevicesPage
+from .ui.effects_page import EffectsPage
+from .ui.graph_page import GraphPage
 from .ui.hrir_page import HrirPage
+from .ui.monitor_page import MonitorPage
+from .ui.policy_page import PolicyPage
 from .ui.settings_pages import ServerPage, StreamsPage, WirePlumberPage
 from .ui.surround_page import SurroundPage
 from .ui.tools_page import ToolsPage
+from .ui.virtual_page import VirtualPage
 from .ui.widgets import async_call
 
 PAGES = [
     ('dashboard', 'Dashboard', 'utilities-system-monitor-symbolic'),
+    ('graph', 'Patchbay', 'network-workgroup-symbolic'),
     ('devices', 'Devices', 'audio-speakers-symbolic'),
+    ('virtual', 'Virtual Devices', 'insert-object-symbolic'),
     ('surround', 'Surround Setup', 'audio-card-symbolic'),
     ('server', 'Server', 'preferences-system-symbolic'),
     ('streams', 'Streams', 'emblem-music-symbolic'),
+    ('policy', 'App Policies', 'system-users-symbolic'),
     ('wireplumber', 'Session & Bluetooth', 'bluetooth-active-symbolic'),
     ('chains', 'Filter Chains', 'audio-headphones-symbolic'),
+    ('effects', 'Effects', 'applications-multimedia-symbolic'),
     ('hrir', 'HRIR Library', 'folder-music-symbolic'),
+    ('monitor', 'Monitor', 'utilities-system-monitor-symbolic'),
     ('tools', 'Tools', 'applications-utilities-symbolic'),
 ]
 
@@ -117,13 +127,18 @@ class Window(Adw.ApplicationWindow):
         # pages
         self.pages = {
             'dashboard': Dashboard(self),
+            'graph': GraphPage(self),
             'devices': DevicesPage(self),
+            'virtual': VirtualPage(self),
             'surround': SurroundPage(self),
             'server': ServerPage(self),
             'streams': StreamsPage(self),
+            'policy': PolicyPage(self),
             'wireplumber': WirePlumberPage(self),
             'chains': ChainsPage(self),
+            'effects': EffectsPage(self),
             'hrir': HrirPage(self),
+            'monitor': MonitorPage(self),
             'tools': ToolsPage(self),
         }
         for name, page in self.pages.items():
@@ -138,6 +153,13 @@ class Window(Adw.ApplicationWindow):
                     start = i
         self.listbox.select_row(self.listbox.get_row_at_index(start))
         GLib.timeout_add_seconds(5, self._autoload_tick)
+
+        # link / service watcher for system notifications
+        self._last_patch_ts = 0.0
+        self._watch_links = None       # set of (out_name, port, in_name, port)
+        self._watch_states: dict[str, str] = {}
+        self._watch_busy = False
+        GLib.timeout_add_seconds(5, self._watch_tick)
 
     # ------------------------------------------------------------ advanced --
     def register_advanced(self, widget):
@@ -287,6 +309,86 @@ class Window(Adw.ApplicationWindow):
                 self.listbox.select_row(self.listbox.get_row_at_index(i))
                 return
 
+    # ------------------------------------------------------- notifications --
+    def notify_user(self, title: str, body: str):
+        """Desktop notification (used for broken links, failures, xruns)."""
+        app = self.get_application()
+        if not app:
+            return
+        note = Gio.Notification.new(title)
+        note.set_body(body)
+        note.set_priority(Gio.NotificationPriority.NORMAL)
+        app.send_notification(None, note)
+
+    def mark_user_patch(self):
+        """Patch changes we made ourselves shouldn't raise link warnings."""
+        import time
+        self._last_patch_ts = time.monotonic()
+
+    def _watch_tick(self):
+        import time
+        want_links = bool(prefs.get('notify_links'))
+        want_services = bool(prefs.get('notify_services'))
+        if (not want_links and not want_services) or self._watch_busy:
+            return True
+        self._watch_busy = True
+
+        def collect():
+            states = {}
+            if want_services:
+                for unit in ('pipewire.service', 'wireplumber.service',
+                             'pipewire-pulse.service'):
+                    states[unit] = system.unit_state(unit)
+            links, names = None, {}
+            if want_links:
+                g = graph.snapshot()
+                ports = {p.id: p for n in g.nodes.values()
+                         for p in n.inputs + n.outputs}
+                links = set()
+                for link in g.links:
+                    op, ip = ports.get(link.out_port), ports.get(link.in_port)
+                    if not op or not ip:
+                        continue
+                    key = (g.nodes[link.out_node].name, op.name,
+                           g.nodes[link.in_node].name, ip.name)
+                    links.add(key)
+                names = {n.name: n.label for n in g.nodes.values()}
+            return states, links, names
+
+        def done(result, error):
+            self._watch_busy = False
+            if error or result is None:
+                return
+            states, links, names = result
+            for unit, state in states.items():
+                prev = self._watch_states.get(unit)
+                if state == 'failed' and prev not in (None, 'failed'):
+                    self.notify_user('Audio service failed',
+                                     f'{unit} entered the failed state — '
+                                     'check the Monitor page.')
+                self._watch_states[unit] = state
+            if links is not None:
+                prev_links = self._watch_links
+                self._watch_links = links
+                recent_patch = (time.monotonic() - self._last_patch_ts) < 15
+                if prev_links is not None and not recent_patch:
+                    gone = prev_links - links
+                    # only links whose endpoints still exist: a closed app
+                    # takes its node away and is not a broken link
+                    broken = [(o, i) for o, _op, i, _ip in gone
+                              if o in names and i in names]
+                    if broken:
+                        o, i = broken[0]
+                        extra = (f' (and {len(broken) - 1} more)'
+                                 if len(broken) > 1 else '')
+                        self.notify_user(
+                            'Audio link disconnected',
+                            f'{names.get(o, o)} → {names.get(i, i)} was '
+                            f'disconnected{extra}.')
+            return
+        async_call(collect, done)
+        return True
+
     # ------------------------------------------------------------ feedback --
     def toast(self, message, timeout=3):
         self.toaster.add_toast(Adw.Toast(title=message, timeout=timeout))
@@ -308,6 +410,7 @@ class Window(Adw.ApplicationWindow):
             for w in pending:
                 RESTART_UNITS[w][1]()
             return True
+        self.mark_user_patch()      # don't report the restart as broken links
         self.banner.set_revealed(False)
         self._pending_restarts.clear()
         self.toast('Restarting audio services…')

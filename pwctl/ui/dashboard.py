@@ -45,6 +45,17 @@ def _mute_button():
     return btn
 
 
+def _solo_button():
+    btn = Gtk.ToggleButton(label='S',
+                           tooltip_text='Solo — mute everything else in '
+                                        'this list (toggling off unmutes '
+                                        'them again)')
+    btn.add_css_class('flat')
+    btn.add_css_class('solo-btn')
+    btn.set_valign(Gtk.Align.CENTER)
+    return btn
+
+
 class _VolumeRowBase(Gtk.ListBoxRow):
     """Two-line row: header line + full-width volume control, pavucontrol style."""
 
@@ -57,8 +68,10 @@ class _VolumeRowBase(Gtk.ListBoxRow):
         self.vol = make_volume(style, self._on_volume)
         self.pct = _pct_label()
         self.mute = _mute_button()
+        self.solo = _solo_button()
         vol_line = Gtk.Box(spacing=10)
         vol_line.append(self.mute)
+        vol_line.append(self.solo)
         vol_line.append(self.vol.widget)
         vol_line.append(self.pct)
 
@@ -70,9 +83,17 @@ class _VolumeRowBase(Gtk.ListBoxRow):
         self.set_child(box)
 
         self.mute.connect('toggled', self._on_mute)
+        self.solo.connect('toggled', self._on_solo)
 
     # -- subclass provides the node id to control ------------------------
     node_id = None
+    tab = None
+
+    def _on_solo(self, btn):
+        if self.updating or self.tab is None:
+            return
+        self.touch()
+        self.tab.toggle_solo(self)
 
     def touch(self):
         self._local_ts = time.monotonic()
@@ -268,6 +289,7 @@ class _ListTab:
     def __init__(self, dash, empty_text):
         self.dash = dash
         self.rows = {}          # key -> row
+        self.soloed = set()     # node ids currently soloed in this list
         self.listbox = Gtk.ListBox(css_classes=['boxed-list', 'vol-list'],
                                    selection_mode=Gtk.SelectionMode.NONE)
         self.empty = Gtk.Label(label=empty_text, margin_top=48)
@@ -279,6 +301,27 @@ class _ListTab:
         for row in self.rows.values():
             self.listbox.remove(row)
         self.rows = {}
+        self.soloed = set()
+
+    def toggle_solo(self, row):
+        """Solo: everything else in this list is muted while any solo is on."""
+        if row.solo.get_active():
+            self.soloed.add(row.node_id)
+        else:
+            self.soloed.discard(row.node_id)
+        live = {r.node_id for r in self.rows.values()}
+        self.soloed &= live
+        soloing = bool(self.soloed)
+        for r in self.rows.values():
+            want_mute = soloing and r.node_id not in self.soloed
+            r.touch()
+            r.updating = True
+            try:
+                r.mute.set_active(want_mute)
+            finally:
+                r.updating = False
+            nid = r.node_id
+            async_call(lambda n=nid, m=want_mute: pw.set_mute(n, m))
 
     def _sync_rows(self, items, make_row):
         """items: list of (key, obj). Rebuild only when membership changes."""
@@ -287,6 +330,7 @@ class _ListTab:
             for row in self.rows.values():
                 self.listbox.remove(row)
             self.rows = {}
+            self.soloed = set()
             for key, obj in items:
                 row = make_row(obj)
                 self.listbox.append(row)
@@ -620,8 +664,17 @@ class Dashboard:
 
     def _restart_service(self, _b, unit, label):
         self.window.toast(f'Restarting {label}…')
-        async_call(lambda: system.restart_unit(unit),
-                   lambda r, e: self.window.toast(f'{label} restarted'))
+
+        def done(result, error):
+            rc = result[0] if result else 1
+            if error or rc != 0:
+                detail = (result[2].strip() if result else str(error or ''))
+                self.window.toast(f'{label} restart failed'
+                                  + (f': {detail}' if detail else ''))
+            else:
+                self.window.toast(f'{label} restarted')
+            self.refresh_soon()
+        async_call(lambda: system.restart_unit(unit), done)
 
     # -------------------------------------------------------------- refresh --
     def _on_map(self, *_a):

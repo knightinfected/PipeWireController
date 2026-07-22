@@ -50,6 +50,16 @@ row.overridden {
     color: @yellow_4;
 }
 
+.solo-btn {
+    font-weight: 800;
+    min-width: 28px;
+}
+
+.solo-btn:checked {
+    color: @accent_fg_color;
+    background: @accent_bg_color;
+}
+
 .destructive-flat {
     color: @error_color;
 }

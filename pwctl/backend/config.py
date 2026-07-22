@@ -94,8 +94,19 @@ def write_our_dropin(conf_name: str, data: dict, dirs=PW_DIRS):
         if p.is_file():
             p.unlink()
         return
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(spa_json.dumps(data, header=HEADER), encoding='utf-8')
+    from .system import atomic_write
+    atomic_write(p, spa_json.dumps(data, header=HEADER))
+
+
+def write_our_dropin_section(conf_name: str, data: dict, dirs=PW_DIRS,
+                             owned: tuple = ()):
+    """Replace the `owned` sections of our drop-in with `data`, leaving any
+    other sections (written by other parts of the app) untouched."""
+    cur = read_our_dropin(conf_name, dirs)
+    for key in owned:
+        cur.pop(key, None)
+    cur.update(data)
+    write_our_dropin(conf_name, cur, dirs)
 
 
 def set_override(conf_name: str, section: str, key: str, value, dirs=PW_DIRS):
@@ -114,7 +125,8 @@ def get_override(conf_name: str, section: str, key: str, dirs=PW_DIRS):
 
 
 def clear_all_overrides():
-    """Delete every drop-in the app has written. Returns removed paths."""
+    """Delete every drop-in the app has written (plus the state files they
+    are regenerated from, so they don't come back). Returns removed paths."""
     removed = []
     for conf, dirs in (('pipewire.conf', PW_DIRS), ('client.conf', PW_DIRS),
                        ('pipewire-pulse.conf', PW_DIRS),
@@ -123,6 +135,11 @@ def clear_all_overrides():
         if p.is_file():
             p.unlink()
             removed.append(str(p))
+    from .rules import RULES_PATH
+    for state in (WP_STATE, RULES_PATH):
+        if state.is_file():
+            state.unlink()
+            removed.append(str(state))
     return removed
 
 
@@ -155,35 +172,9 @@ def read_wp_toggles() -> dict:
 
 
 def write_wp_toggles(state: dict):
-    WP_STATE.parent.mkdir(parents=True, exist_ok=True)
-    WP_STATE.write_text(_json.dumps(state, indent=2))
-
-    data = {}
-    alsa_rules = []
-    if state.get('disable_suspend'):
-        alsa_rules.append({
-            'matches': [{'node.name': '~alsa_input.*'},
-                        {'node.name': '~alsa_output.*'}],
-            'actions': {'update-props': {
-                'session.suspend-timeout-seconds': 0}},
-        })
-    if state.get('alsa_headroom'):
-        alsa_rules.append({
-            'matches': [{'node.name': '~alsa_output.*'}],
-            'actions': {'update-props': {'api.alsa.headroom': 1024}},
-        })
-    if alsa_rules:
-        data['monitor.alsa.rules'] = alsa_rules
-    bt = {}
-    if state.get('sbc_xq') != WP_DEFAULTS['sbc_xq']:
-        bt['bluez5.enable-sbc-xq'] = state['sbc_xq']
-    if state.get('msbc') != WP_DEFAULTS['msbc']:
-        bt['bluez5.enable-msbc'] = state['msbc']
-    if state.get('bt_hw_volume') != WP_DEFAULTS['bt_hw_volume']:
-        bt['bluez5.enable-hw-volume'] = state['bt_hw_volume']
-    if bt:
-        data['monitor.bluez.properties'] = bt
-    if state.get('bt_autoswitch') != WP_DEFAULTS['bt_autoswitch']:
-        data['wireplumber.settings'] = {
-            'bluetooth.autoswitch-to-headset-profile': state['bt_autoswitch']}
-    write_our_dropin('wireplumber.conf', data, WP_DIRS)
+    from .system import atomic_write
+    atomic_write(WP_STATE, _json.dumps(state, indent=2))
+    # the WirePlumber drop-in combines these toggles with per-device rules,
+    # so regeneration lives in rules.py
+    from . import rules
+    rules.regen_all()

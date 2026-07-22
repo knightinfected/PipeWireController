@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import threading
 
 from .config import XDG_CONFIG
+from .system import atomic_write
 
 PREFS_PATH = XDG_CONFIG / 'pipewire-controller' / 'ui.json'
+_LOCK = threading.Lock()
 
 DEFAULTS = {
     'volume_style': 'classic',   # classic | stepped | precision | meter
@@ -19,6 +22,10 @@ DEFAULTS = {
     'win_width': 1080,
     'win_height': 760,
     'win_maximized': False,
+    'graph_positions': {},       # node.name -> [x, y] on the patchbay
+    'notify_links': False,       # desktop notification on broken links
+    'notify_services': True,     # … on failed audio services
+    'notify_xruns': False,       # … on new xruns (Monitor page polling)
 }
 
 
@@ -31,10 +38,10 @@ def load() -> dict:
 
 
 def save(**updates):
-    prefs = load()
-    prefs.update(updates)
-    PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    PREFS_PATH.write_text(json.dumps(prefs, indent=2) + '\n')
+    with _LOCK:
+        prefs = load()
+        prefs.update(updates)
+        atomic_write(PREFS_PATH, json.dumps(prefs, indent=2) + '\n')
     return prefs
 
 

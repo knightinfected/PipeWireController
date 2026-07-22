@@ -283,6 +283,61 @@ def _rnnoise(meta):
     return graph, cap, play
 
 
+def _effect_rack(meta):
+    """Series chain of LADSPA/LV2 plugins as a stereo insert sink.
+
+    params['plugins']: list of dicts with type/plugin/label/name/audio_in/
+    audio_out (see backend.plugins.Plugin).  Stereo plugins run as one
+    instance, mono plugins as an L/R pair; a single plugin with unknown
+    ports is emitted as a bare one-node graph (filter-chain infers ports).
+    """
+    specs = meta.params.get('plugins') or []
+    if not specs:
+        raise ValueError('effect rack has no plugins')
+
+    def node_def(spec, name):
+        d = {'type': spec['type'], 'name': name, 'plugin': spec['plugin']}
+        if spec['type'] == 'ladspa':
+            d['label'] = spec['label']
+        controls = (spec.get('controls') or {})
+        if controls:
+            d['control'] = dict(controls)
+        return d
+
+    if len(specs) == 1 and not (specs[0].get('audio_in')
+                                and specs[0].get('audio_out')):
+        graph = {'nodes': [node_def(specs[0], 'fx0')]}
+        cap, play = _sink_props(meta, 2, ['FL', 'FR'])
+        return graph, cap, play
+
+    nodes, links = [], []
+    stages = []                    # [(in_ports, out_ports)] with node prefix
+    for i, spec in enumerate(specs):
+        ins, outs = spec.get('audio_in') or [], spec.get('audio_out') or []
+        if not ins or not outs:
+            raise ValueError(
+                f"{spec.get('name', spec['plugin'])}: audio ports unknown — "
+                'it can only be used alone in a rack')
+        if len(ins) >= 2 and len(outs) >= 2:
+            name = f'fx{i}'
+            nodes.append(node_def(spec, name))
+            stages.append(([f'{name}:{ins[0]}', f'{name}:{ins[1]}'],
+                           [f'{name}:{outs[0]}', f'{name}:{outs[1]}']))
+        else:                      # mono: run an L/R pair
+            nl, nr = f'fx{i}L', f'fx{i}R'
+            nodes.append(node_def(spec, nl))
+            nodes.append(node_def(spec, nr))
+            stages.append(([f'{nl}:{ins[0]}', f'{nr}:{ins[0]}'],
+                           [f'{nl}:{outs[0]}', f'{nr}:{outs[0]}']))
+    for (_, prev_out), (next_in, _) in zip(stages, stages[1:]):
+        links.append({'output': prev_out[0], 'input': next_in[0]})
+        links.append({'output': prev_out[1], 'input': next_in[1]})
+    graph = {'nodes': nodes, 'links': links,
+             'inputs': stages[0][0], 'outputs': stages[-1][1]}
+    cap, play = _sink_props(meta, 2, ['FL', 'FR'])
+    return graph, cap, play
+
+
 TEMPLATES = {
     'plain-71-sink': {
         'title': 'Virtual 7.1 Sink (plain downmix)',
@@ -364,6 +419,15 @@ TEMPLATES = {
         'desc': 'Low-shelf boost with adjustable frequency and gain.',
         'needs': None,
         'build': _bass_boost,
+    },
+    'effect-rack': {
+        'title': 'Effect Rack (LADSPA / LV2 inserts)',
+        'desc': 'A stereo sink that routes audio through a series of '
+                'LADSPA/LV2 plugins before it reaches the output device. '
+                'Built from the Effects page.',
+        'needs': 'plugins',        # created via the Effects page, not the
+        #                            generic chain dialog
+        'build': _effect_rack,
     },
     'rnnoise-source': {
         'title': 'Noise-Cancelling Microphone',
