@@ -81,6 +81,16 @@ libadwaita 1.9.
 
 ### Arch / CachyOS / EndeavourOS / Manjaro
 
+Available on the [AUR](https://aur.archlinux.org/packages/pipewire-controller):
+
+```bash
+paru -S pipewire-controller   # or: yay -S pipewire-controller
+```
+
+This installs everything (app, dependencies, desktop entry) — skip the
+Run section below. To run from a git checkout instead, install the
+dependencies manually:
+
 ```bash
 sudo pacman -S --needed pipewire wireplumber pipewire-pulse gtk4 libadwaita \
     python-gobject python-numpy python-soundfile
