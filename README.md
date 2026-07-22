@@ -9,10 +9,22 @@ surround — exposed as toggles and dropdowns.
 
 <p align="center">
   <img src="screenshots/dashboard-led-meter.png" alt="Playback tab with LED-meter volume style" width="49.5%">
-  <img src="screenshots/filter-chains-hrir.png" alt="Filter Chains and HRIR Library" width="49.5%">
+  <img src="screenshots/filter-chains.png" alt="Filter Chains — per-chain processes with independent toggles" width="49.5%">
+</p>
+<p align="center">
+  <img src="screenshots/hrir-library.png" alt="HRIR Library — import, analyze and classify impulse responses" width="52%">
+  <img src="screenshots/session-bluetooth.png" alt="Session and Bluetooth — device power and Bluetooth codec policy" width="43%">
+</p>
+<p align="center">
+  <img src="screenshots/streams.png" alt="Stream processing defaults — upmix, LFE, resampler and advanced knobs" width="46%">
+  <img src="screenshots/tools.png" alt="Tools — service control, latency calculator and maintenance" width="46%">
 </p>
 <p align="center">
   <img src="screenshots/server.png" alt="Server settings" width="70%">
+</p>
+<p align="center">
+  <img src="screenshots/device-presets.png" alt="Device presets menu with auto-load on device switch" width="53%">
+  <img src="screenshots/volume-style-picker.png" alt="Volume slider style picker" width="25%">
 </p>
 
 More screenshots:
@@ -20,7 +32,8 @@ More screenshots:
 [Output Devices with ports](screenshots/output-devices.png) ·
 [Recording tab](screenshots/dashboard-recording.png) ·
 [Surround Setup wizard](screenshots/surround-setup.png) ·
-[Surround Setup, advanced mode](screenshots/surround-advanced.png)
+[Surround Setup, advanced mode](screenshots/surround-advanced.png) ·
+[Filter Chains + HRIR close-up](screenshots/filter-chains-hrir.png)
 
 ## If you like tinkering like me…
 
