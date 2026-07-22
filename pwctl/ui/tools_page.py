@@ -11,6 +11,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gtk  # noqa: E402
 
+from .. import __version__
 from ..backend import config, system
 from ..backend.schema import QUANTA, RATES
 from .widgets import (async_call, confirm, group, icon_button, page_scroller,
@@ -102,7 +103,16 @@ class ToolsPage:
             title='PipeWire Controller',
             subtitle='Config drop-ins, filter chains and HRIR management for '
                      'PipeWire — without hand-editing files.')
+        ver = Gtk.Label(label=f'v{__version__}', css_classes=['dim-label'])
+        row.add_suffix(ver)
         about.add(row)
+        credit = Adw.ActionRow(
+            title='Created by knightinfected',
+            subtitle='github.com/knightinfected/PipeWireController',
+            activatable=True)
+        credit.add_suffix(Gtk.Image(icon_name='adw-external-link-symbolic'))
+        credit.connect('activated', self._open_repo)
+        about.add(credit)
 
         self.widget = page_scroller(svc, calc, maint, about)
 
@@ -139,6 +149,10 @@ class ToolsPage:
     def _open_folder(self, path: Path):
         path.mkdir(parents=True, exist_ok=True)
         subprocess.Popen(['xdg-open', str(path)])
+
+    def _open_repo(self, _row):
+        subprocess.Popen(
+            ['xdg-open', 'https://github.com/knightinfected/PipeWireController'])
 
     def _reset_overrides(self, _b):
         def do():
