@@ -136,16 +136,17 @@ class VirtualPage:
                    lambda r, e: (self.window.toast('Deleted'), self.refresh()))
 
     def _open_dialog(self, dev):
-        VirtualDialog(self.window, self, dev).present(self.window)
+        VirtualDialog(self.window, self, dev).present()
 
 
-class VirtualDialog(Adw.Dialog):
+class VirtualDialog(Adw.Window):
     KIND_KEYS = list(virtual.KINDS)
 
     def __init__(self, window, page, dev: virtual.VirtualDevice | None):
         super().__init__(title='Edit virtual device' if dev
                          else 'New virtual device',
-                         content_width=520, content_height=620)
+                         transient_for=window, modal=True, resizable=True,
+                         default_width=640, default_height=760)
         self.window = window
         self.page = page
         self.dev = dev
@@ -257,7 +258,7 @@ class VirtualDialog(Adw.Dialog):
         view = Adw.ToolbarView()
         view.add_top_bar(Adw.HeaderBar())
         view.set_content(sw)
-        self.set_child(view)
+        self.set_content(view)
 
         self._kind_changed()
         async_call(pw.list_audio_nodes, self._nodes_loaded)
