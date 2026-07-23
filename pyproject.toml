@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pipewire-controller"
+dynamic = ["version"]                       # single source: pwctl/__init__.py
+description = "GTK4/libadwaita control center for PipeWire — patchbay, monitoring, virtual devices, effect inserts, filter chains, HRIR virtual surround, and drop-in config management"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.10"
+authors = [{ name = "knightinfected", email = "hmzmahmood5@gmail.com" }]
+keywords = [
+    "pipewire", "wireplumber", "gtk4", "libadwaita", "audio",
+    "jack", "filter-chain", "surround", "hrir",
+]
+classifiers = [
+    "Environment :: X11 Applications :: GTK",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+
+# IMPORTANT: these install from PyPI, but the app also needs SYSTEM libraries
+# that pip/uv CANNOT provide — GTK 4, libadwaita (>= 1.4), and the
+# GObject-Introspection typelibs PyGObject binds to. Install those from your
+# distro (see README > Requirements). At runtime the app also shells out to
+# PipeWire/WirePlumber CLI tools (pw-dump, wpctl, pw-metadata, …). So a bare
+# `uv sync` sets up the Python deps but does NOT yield a runnable GUI on its
+# own — the GTK stack must come from the system.
+dependencies = [
+    "PyGObject>=3.42",
+    "pycairo>=1.20",
+    "numpy>=1.24",
+    "soundfile>=0.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/knightinfected/PipeWireController"
+Repository = "https://github.com/knightinfected/PipeWireController"
+Issues = "https://github.com/knightinfected/PipeWireController/issues"
+
+[project.scripts]
+pipewire-controller = "pwctl.app:main"
+
+[dependency-groups]
+# Dev-only tooling. `uv sync` installs these; none are needed to run the app.
+# pygobject-stubs gives BasedPyright/Pyright the gi.repository type info.
+dev = [
+    "pygobject-stubs>=2.10",
+    "basedpyright>=1.12",
+    "ruff>=0.5",
+]
+
+[tool.hatch.version]
+path = "pwctl/__init__.py"                  # reads __version__
+
+[tool.hatch.build.targets.wheel]
+packages = ["pwctl"]
+
+[tool.basedpyright]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
+include = ["pwctl"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 79

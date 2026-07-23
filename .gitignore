@@ -2,3 +2,10 @@ __pycache__/
 *.pyc
 .claude/
 .directory
+
+# Python build / uv
+dist/
+build/
+*.egg-info/
+.venv/
+uv.lock
