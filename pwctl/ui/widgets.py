@@ -88,6 +88,26 @@ def confirm(parent, heading, body, action_label, on_confirm,
     dlg.present(parent)
 
 
+def prompt_number(parent, heading, body, initial, on_accept,
+                  action_label='Set'):
+    """AlertDialog with a numeric entry; calls on_accept(text) on OK."""
+    dlg = Adw.AlertDialog(heading=heading, body=body)
+    entry = Gtk.Entry(input_purpose=Gtk.InputPurpose.DIGITS,
+                      text=str(initial), activates_default=True)
+    dlg.set_extra_child(entry)
+    dlg.add_response('cancel', 'Cancel')
+    dlg.add_response('ok', action_label)
+    dlg.set_response_appearance('ok', Adw.ResponseAppearance.SUGGESTED)
+    dlg.set_default_response('ok')
+
+    def on_resp(_d, resp):
+        if resp == 'ok':
+            on_accept(entry.get_text())
+    dlg.connect('response', on_resp)
+    dlg.present(parent)
+    entry.grab_focus()
+
+
 def text_viewer_dialog(parent, title, text, editable=False, on_save=None):
     dlg = Adw.Dialog(title=title, content_width=720, content_height=560)
     tv = Gtk.TextView(editable=editable, monospace=True,

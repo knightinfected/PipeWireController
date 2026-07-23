@@ -9,10 +9,15 @@ gi.require_version('Adw', '1')
 from gi.repository import Adw, Gtk  # noqa: E402
 
 from ..backend import bluetooth, config, pw, schema
-from .widgets import async_call, group, icon_button, page_scroller
+from .widgets import (async_call, group, icon_button, page_scroller,
+                      prompt_number)
 
 # both native and pulse clients get the same stream defaults
 STREAM_CONFS = ('client.conf', 'pipewire-pulse.conf')
+
+CUSTOM_LABEL = 'Custom…'
+# PipeWire clamps any quantum to CLOCK_QUANTUM_LIMIT (2^16) internally.
+QUANTUM_MAX = 65536
 
 
 class SettingRow:
@@ -81,13 +86,10 @@ class SettingRow:
                            else cur == 'true')
             row.connect('notify::active', self._changed_bool)
         elif s.kind == 'enum':
-            labels = [str(c) for c in s.choices]
+            labels, sel = self._enum_model(cur)
             row = Adw.ComboRow(title=s.title, subtitle=s.subtitle,
                                model=Gtk.StringList.new(labels))
-            try:
-                row.set_selected(s.choices.index(self._coerce(cur)))
-            except ValueError:
-                pass
+            row.set_selected(sel)
             row.connect('notify::selected', self._changed_enum)
         elif s.kind in ('int', 'float'):
             adj = Gtk.Adjustment(lower=s.min, upper=s.max,
@@ -129,6 +131,39 @@ class SettingRow:
                 return val
         return str(val)
 
+    def _enum_model(self, cur):
+        """Labels + selected index for an enum row.
+
+        For custom-enabled rows the model gains the current out-of-list value
+        (as an "N (custom)" item) and a trailing "Custom…" entry.  Records the
+        shown custom value in self._custom_val so _changed_enum can tell the
+        three item classes (preset / current-custom / Custom…) apart.
+        """
+        coerced = self._coerce(cur)
+        labels = [str(c) for c in self.s.choices]
+        self._custom_val = None
+        if not self.s.custom:
+            try:
+                return labels, self.s.choices.index(coerced)
+            except ValueError:
+                return labels, 0
+        if coerced in self.s.choices:
+            sel = self.s.choices.index(coerced)
+        elif isinstance(coerced, int):
+            self._custom_val = coerced
+            labels.append(f'{coerced} (custom)')
+            sel = len(labels) - 1
+        else:
+            sel = 0
+        labels.append(CUSTOM_LABEL)
+        return labels, sel
+
+    def _rebuild_enum_model(self, val):
+        """Swap the ComboRow model to reflect val (custom enums only)."""
+        labels, sel = self._enum_model(val)
+        self.row.set_model(Gtk.StringList.new(labels))
+        self.row.set_selected(sel)
+
     @staticmethod
     def _rates_value(val):
         if isinstance(val, list):
@@ -142,10 +177,13 @@ class SettingRow:
         if s.kind == 'bool':
             self.row.set_active(val is True or val == 'true')
         elif s.kind == 'enum':
-            try:
-                self.row.set_selected(s.choices.index(self._coerce(val)))
-            except ValueError:
-                pass
+            if s.custom:
+                self._rebuild_enum_model(val)
+            else:
+                try:
+                    self.row.set_selected(s.choices.index(self._coerce(val)))
+                except ValueError:
+                    pass
         elif s.kind in ('int', 'float'):
             try:
                 self.row.set_value(float(val))
@@ -162,8 +200,53 @@ class SettingRow:
             self.write(row.get_active())
 
     def _changed_enum(self, row, _p):
-        if not self.updating:
-            self.write(self.s.choices[row.get_selected()])
+        if self.updating:
+            return
+        sel = row.get_selected()
+        if not self.s.custom:
+            self.write(self.s.choices[sel])
+            return
+        n = len(self.s.choices)
+        if sel < n:
+            self.write(self.s.choices[sel])
+        elif self._custom_val is not None and sel == n:
+            return                      # re-picked the current custom value
+        else:
+            self._prompt_custom()       # the trailing "Custom…" item
+
+    def _prompt_custom(self):
+        # Revert the combo off "Custom…" back to the persisted value; we only
+        # re-select on a valid accept.
+        cur = self._coerce(self.current()[0])
+        self.updating = True
+        try:
+            self._rebuild_enum_model(self.current()[0])
+        finally:
+            self.updating = False
+        initial = cur if isinstance(cur, int) else self.s.default
+        prompt_number(
+            self.window, f'Custom {self.s.title.lower()}',
+            'Frames per cycle (1–65536). Non-power-of-two values are '
+            'allowed but get rounded down when “Power-of-two quantum” is on.',
+            initial, self._accept_custom)
+
+    def _accept_custom(self, text):
+        try:
+            val = int(text.strip())
+        except (TypeError, ValueError):
+            self.window.toast('Not a whole number — nothing changed')
+            return
+        clamped = max(1, min(QUANTUM_MAX, val))
+        self.updating = True
+        try:
+            self._rebuild_enum_model(clamped)
+        finally:
+            self.updating = False
+        self.write(clamped)
+        if clamped != val:
+            self.window.toast(f'Clamped to {clamped} (PipeWire limit)')
+        elif clamped & (clamped - 1):
+            self.window.toast(f'Set to {clamped} (not a power of two)')
 
     def _changed_spin(self, row, _p):
         if self.updating:

@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 
 RATES = [44100, 48000, 88200, 96000, 176400, 192000]
 QUANTA = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
+# Hard-limit ceiling goes higher than the everyday buffer sizes: PipeWire
+# clamps quantum-limit to 65536, and 8192 is only ~43 ms at 192 kHz.
+QUANTUM_LIMITS = [1024, 2048, 4096, 8192, 16384, 32768]
 
 
 @dataclass
@@ -29,6 +32,7 @@ class Setting:
     step: float = 1
     restart: str = 'pipewire'      # pipewire | pulse | wireplumber
     advanced: bool = False         # only shown when the Advanced toggle is on
+    custom: bool = False           # enum also accepts a typed value (Custom…)
 
 
 PIPEWIRE_CLOCK = [
@@ -42,15 +46,16 @@ PIPEWIRE_CLOCK = [
             'rates', []),
     Setting('default.clock.quantum', 'Default quantum (buffer size)',
             'Frames per processing cycle. Lower = less latency, more CPU/xrun '
-            'risk. 1024 ≈ 21 ms at 48 kHz.',
-            'enum', 1024, choices=QUANTA),
+            'risk. 1024 ≈ 21 ms at 48 kHz. Pick Custom… for a value off the '
+            'list.',
+            'enum', 1024, choices=QUANTA, custom=True),
     Setting('default.clock.min-quantum', 'Minimum quantum',
             'Smallest buffer a client may request. Pro-audio apps go to 32 or '
             'below; raise it if you hear crackles.',
-            'enum', 32, choices=QUANTA[:7]),
+            'enum', 32, choices=QUANTA[:7], custom=True),
     Setting('default.clock.max-quantum', 'Maximum quantum',
             'Largest buffer allowed. Higher saves power for music playback.',
-            'enum', 2048, choices=QUANTA[4:]),
+            'enum', 2048, choices=QUANTA[4:], custom=True),
     Setting('clock.power-of-two-quantum', 'Power-of-two quantum',
             'Round quantums down to a power of two — keeps DSP fast.',
             'bool', True),
@@ -58,9 +63,12 @@ PIPEWIRE_CLOCK = [
 
 PIPEWIRE_ADVANCED = [
     Setting('default.clock.quantum-limit', 'Quantum hard limit',
-            'Absolute ceiling for any quantum in the graph. Only raise for '
-            'special offline-processing setups.',
-            'enum', 8192, choices=QUANTA[6:], advanced=True),
+            'Absolute ceiling for any buffer size in the graph (PipeWire caps '
+            'this at 65536). Measured in frames, so its latency shrinks at high '
+            'rates — 8192 is ~171 ms at 48 kHz but only ~43 ms at 192 kHz. Raise '
+            'it for high-samplerate or offline-processing setups. Note: 8192 was '
+            "JACK's own limit, so some JACK clients dislike larger buffers.",
+            'enum', 8192, choices=QUANTUM_LIMITS, advanced=True),
     Setting('mem.allow-mlock', 'Lock realtime memory',
             'Pin audio buffers in RAM so they can never be swapped out. '
             'Disable only on very low-memory systems.',
@@ -74,8 +82,10 @@ PIPEWIRE_ADVANCED = [
             '0 disables realtime scheduling.',
             'int', -1, min=-1, max=99, advanced=True),
     Setting('link.max-buffers', 'Max buffers per link',
-            '16 works for pure PipeWire graphs; 64 is needed for old JACK apps.',
-            'enum', 64, choices=[16, 32, 64], advanced=True),
+            'Buffers a link may queue — this mostly matters for video streams. '
+            'Audio needs very few (JACK runs fine on 1); higher values just use '
+            'more memory. 16 is plenty.',
+            'enum', 16, choices=[1, 8, 16, 32, 64], advanced=True),
     Setting('settings.check-quantum', 'Strict quantum check',
             'Refuse metadata quantum changes outside min/max bounds.',
             'bool', False, advanced=True),
