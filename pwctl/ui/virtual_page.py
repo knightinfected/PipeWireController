@@ -13,12 +13,16 @@ from ..backend.surround import LAYOUTS
 from .widgets import async_call, confirm, group, icon_button, page_scroller, \
     pill, state_style
 
+POSITION_NAMES = virtual.POSITION_NAMES
+
 KIND_ICONS = {
     'null-sink': 'audio-speakers-symbolic',
     'null-source': 'audio-input-microphone-symbolic',
     'combine-sink': 'view-grid-symbolic',
     'combine-source': 'view-grid-symbolic',
     'bus': 'network-wired-symbolic',
+    'pro-map-sink': 'audio-card-symbolic',
+    'pro-map-source': 'audio-card-symbolic',
 }
 
 
@@ -34,7 +38,7 @@ class VirtualPage:
         new_row = Adw.ActionRow(
             title='Create a virtual device',
             subtitle='Null sink · virtual microphone · combined (aggregate) '
-                     'device · bus / sub-mix')
+                     'device · bus / sub-mix · Pro Audio channel map')
         new_btn = Gtk.Button(icon_name='list-add-symbolic',
                              valign=Gtk.Align.CENTER)
         new_btn.add_css_class('suggested-action')
@@ -178,6 +182,34 @@ class VirtualDialog(Adw.Dialog):
         self.target_row = Adw.ComboRow(title='Target device')
         self.target_group.add(self.target_row)
 
+        # pro-audio channel map
+        self.pro_targets = []
+        self._aux_names = []
+        self.map_entries = []
+        self._pro_updating = False
+        self.pro_banner = Adw.Banner(
+            title='Pro Audio channels don’t auto-route like normal sinks, so '
+                  'this links straight to the chosen device. If that device is '
+                  'unplugged or leaves Pro Audio mode, toggle this device off '
+                  'and on to rebuild the mapping.')
+        self.pro_banner.set_revealed(False)
+        self.pro_group = Adw.PreferencesGroup(
+            title='Pro Audio device',
+            description='Set a sound card to the "Pro Audio" profile to expose '
+                        'its raw AUX channels here.')
+        self.pro_target_row = Adw.ComboRow(title='Target device')
+        self.pro_target_row.connect('notify::selected', self._target_changed)
+        self.pro_group.add(self.pro_target_row)
+
+        self.map_group = Adw.PreferencesGroup(
+            title='Channel map',
+            description='Each virtual channel links to one hardware AUX '
+                        'channel (index passthrough, no remixing).')
+        add_btn = Gtk.Button(icon_name='list-add-symbolic',
+                             valign=Gtk.Align.CENTER, tooltip_text='Add channel')
+        add_btn.connect('clicked', lambda *_: self._add_map_row())
+        self.map_group.set_header_suffix(add_btn)
+
         create = Gtk.Button(label='Save' if dev else 'Create',
                             halign=Gtk.Align.END, margin_top=12)
         create.add_css_class('suggested-action')
@@ -189,6 +221,9 @@ class VirtualDialog(Adw.Dialog):
         box.append(g)
         box.append(self.members_group)
         box.append(self.target_group)
+        box.append(self.pro_banner)
+        box.append(self.pro_group)
+        box.append(self.map_group)
         box.append(create)
         sw = Gtk.ScrolledWindow(vexpand=True,
                                 hscrollbar_policy=Gtk.PolicyType.NEVER)
@@ -208,9 +243,17 @@ class VirtualDialog(Adw.Dialog):
 
     def _kind_changed(self, *_a):
         kind = self._current_kind()
+        is_pro = kind.startswith('pro-map')
         self.members_group.set_visible(kind.startswith('combine'))
         self.target_group.set_visible(kind == 'bus')
+        self.pro_group.set_visible(is_pro)
+        self.map_group.set_visible(is_pro)
+        self.pro_banner.set_revealed(is_pro)
+        self.layout_row.set_visible(not is_pro)  # pro-map positions come
+        #                                          from the channel map
         self._fill_members()
+        if is_pro:
+            self._load_pro_targets()
 
     def _nodes_loaded(self, nodes, error):
         if error or nodes is None:
@@ -244,6 +287,97 @@ class VirtualDialog(Adw.Dialog):
             self.members_group.add(row)
             self.member_rows[n.name] = row
 
+    # ---------------------------------------------------- pro-audio map --
+    def _load_pro_targets(self):
+        direction = 'sink' if self._current_kind() == 'pro-map-sink' \
+            else 'source'
+        async_call(lambda: virtual.list_pro_targets(direction),
+                   self._pro_targets_loaded)
+
+    def _pro_targets_loaded(self, targets, error):
+        if error or targets is None:
+            targets = []
+        self.pro_targets = targets
+        self._pro_updating = True
+        try:
+            if not targets:
+                self.pro_target_row.set_model(Gtk.StringList.new(
+                    ['No Pro Audio device found']))
+                self.pro_target_row.set_sensitive(False)
+                self._aux_names = []
+                self._clear_map()
+                return
+            self.pro_target_row.set_sensitive(True)
+            self.pro_target_row.set_model(
+                Gtk.StringList.new([t[1] for t in targets]))
+            sel = 0
+            if self.dev and self.dev.target:
+                sel = next((i for i, t in enumerate(targets)
+                            if t[0] == self.dev.target), 0)
+            self.pro_target_row.set_selected(sel)
+            self._aux_names = list(targets[sel][2])
+            # editing this device: restore its saved map; else default 1:1
+            if self.dev and self.dev.target == targets[sel][0] \
+                    and self.dev.target_positions:
+                self._build_map(self.dev.positions,
+                                self.dev.target_positions)
+            else:
+                self._default_map()
+        finally:
+            self._pro_updating = False
+
+    def _target_changed(self, *_a):
+        if self._pro_updating:
+            return
+        idx = self.pro_target_row.get_selected()
+        if 0 <= idx < len(self.pro_targets):
+            self._aux_names = list(self.pro_targets[idx][2])
+            self._default_map()          # aux set changed → reset the map
+
+    def _clear_map(self):
+        for e in self.map_entries:
+            self.map_group.remove(e['row'])
+        self.map_entries = []
+
+    def _build_map(self, positions, aux_positions):
+        self._clear_map()
+        for vpos, aux in zip(positions, aux_positions):
+            self._add_map_row(vpos, aux)
+
+    def _default_map(self):
+        # pair the first N AUX channels with FL/FR/… in order
+        n = min(2, len(self._aux_names)) or len(self._aux_names)
+        defaults = ['FL', 'FR', 'FC', 'LFE', 'RL', 'RR', 'SL', 'SR']
+        self._build_map(defaults[:n], self._aux_names[:n])
+
+    def _add_map_row(self, vpos=None, aux_name=None):
+        if not self._aux_names:
+            return
+        row = Adw.ActionRow(title='→')
+        vdd = Gtk.DropDown.new_from_strings(POSITION_NAMES)
+        vdd.set_valign(Gtk.Align.CENTER)
+        if vpos in POSITION_NAMES:
+            vdd.set_selected(POSITION_NAMES.index(vpos))
+        add = Gtk.DropDown.new_from_strings(self._aux_names)
+        add.set_valign(Gtk.Align.CENTER)
+        if aux_name in self._aux_names:
+            add.set_selected(self._aux_names.index(aux_name))
+        elif len(self.map_entries) < len(self._aux_names):
+            add.set_selected(len(self.map_entries))   # next unused AUX
+        entry = {'row': row, 'vdd': vdd, 'add': add}
+        rm = icon_button('list-remove-symbolic', 'Remove channel',
+                         lambda *_: self._remove_map_row(entry))
+        row.add_prefix(vdd)
+        row.add_suffix(add)
+        row.add_suffix(rm)
+        self.map_group.add(row)
+        self.map_entries.append(entry)
+
+    def _remove_map_row(self, entry):
+        self.map_group.remove(entry['row'])
+        if entry in self.map_entries:
+            self.map_entries.remove(entry)
+
     def _save(self, _b):
         name = self.name_row.get_text().strip()
         if not name:
@@ -253,27 +387,49 @@ class VirtualDialog(Adw.Dialog):
         positions = list(LAYOUTS[self.layout_row.get_selected()][2])
         members = [n for n, row in self.member_rows.items()
                    if row.get_active()]
+        target = ''
+        target_positions = []
         if kind.startswith('combine') and len(members) < 2:
             self.window.toast('Pick at least two member devices')
             return
-        target = ''
         if kind == 'bus' and self.target_row.get_selected() > 0:
             sinks = [n for n in self._nodes if n.is_sink]
             idx = self.target_row.get_selected() - 1
             if 0 <= idx < len(sinks):
                 target = sinks[idx].name
+        if kind.startswith('pro-map'):
+            tsel = self.pro_target_row.get_selected()
+            if not self.pro_targets or not (0 <= tsel < len(self.pro_targets)):
+                self.window.toast('Pick a target Pro Audio device')
+                return
+            target = self.pro_targets[tsel][0]
+            positions, target_positions = [], []
+            for e in self.map_entries:
+                ai = e['add'].get_selected()
+                if not (0 <= ai < len(self._aux_names)):
+                    continue
+                positions.append(POSITION_NAMES[e['vdd'].get_selected()])
+                target_positions.append(self._aux_names[ai])
+            if not positions:
+                self.window.toast('Add at least one channel mapping')
+                return
+            if len(set(target_positions)) != len(target_positions):
+                self.window.toast('Each AUX channel can be mapped only once')
+                return
 
         if self.dev:
             dev = self.dev
             dev.name = name
             dev.positions = positions
             dev.members = members
-            dev.target = target if kind == 'bus' else ''
+            dev.target = target
+            dev.target_positions = target_positions
             dev.persistent = self.persist_row.get_active()
         else:
-            dev = virtual.new_device(name, kind, positions=positions,
-                                     members=members, target=target,
-                                     persistent=self.persist_row.get_active())
+            dev = virtual.new_device(
+                name, kind, positions=positions, members=members,
+                target=target, target_positions=target_positions,
+                persistent=self.persist_row.get_active())
             dev.enabled = True
 
         def done(result, e):
