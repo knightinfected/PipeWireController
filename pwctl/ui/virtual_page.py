@@ -15,6 +15,21 @@ from .widgets import async_call, confirm, group, icon_button, page_scroller, \
 
 POSITION_NAMES = virtual.POSITION_NAMES
 
+
+def _wrap_list_factory():
+    """A ComboRow popup factory whose items wrap instead of ellipsizing —
+    so long type labels (with their parenthetical descriptions) stay legible."""
+    factory = Gtk.SignalListItemFactory()
+
+    def setup(_f, item):
+        item.set_child(Gtk.Label(xalign=0, wrap=True, max_width_chars=34))
+
+    def bind(_f, item):
+        item.get_child().set_label(item.get_item().get_string())
+    factory.connect('setup', setup)
+    factory.connect('bind', bind)
+    return factory
+
 KIND_ICONS = {
     'null-sink': 'audio-speakers-symbolic',
     'null-source': 'audio-input-microphone-symbolic',
@@ -145,6 +160,7 @@ class VirtualDialog(Adw.Dialog):
             title='Type',
             model=Gtk.StringList.new([virtual.KINDS[k]
                                       for k in self.KIND_KEYS]))
+        self.kind_row.set_list_factory(_wrap_list_factory())
         if dev:
             self.kind_row.set_selected(self.KIND_KEYS.index(dev.kind))
             self.kind_row.set_sensitive(False)
@@ -187,12 +203,20 @@ class VirtualDialog(Adw.Dialog):
         self._aux_names = []
         self.map_entries = []
         self._pro_updating = False
-        self.pro_banner = Adw.Banner(
-            title='Pro Audio channels don’t auto-route like normal sinks, so '
+        self.pro_banner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                                  spacing=10)
+        self.pro_banner.add_css_class('pwctl-note')
+        _note_icon = Gtk.Image.new_from_icon_name('dialog-information-symbolic')
+        _note_icon.set_valign(Gtk.Align.START)
+        _note_lbl = Gtk.Label(
+            label='Pro Audio channels don’t auto-route like normal sinks, so '
                   'this links straight to the chosen device. If that device is '
                   'unplugged or leaves Pro Audio mode, toggle this device off '
-                  'and on to rebuild the mapping.')
-        self.pro_banner.set_revealed(False)
+                  'and on to rebuild the mapping.',
+            wrap=True, xalign=0, hexpand=True)
+        self.pro_banner.append(_note_icon)
+        self.pro_banner.append(_note_lbl)
+        self.pro_banner.set_visible(False)
         self.pro_group = Adw.PreferencesGroup(
             title='Pro Audio device',
             description='Set a sound card to the "Pro Audio" profile to expose '
@@ -248,7 +272,7 @@ class VirtualDialog(Adw.Dialog):
         self.target_group.set_visible(kind == 'bus')
         self.pro_group.set_visible(is_pro)
         self.map_group.set_visible(is_pro)
-        self.pro_banner.set_revealed(is_pro)
+        self.pro_banner.set_visible(is_pro)
         self.layout_row.set_visible(not is_pro)  # pro-map positions come
         #                                          from the channel map
         self._fill_members()

@@ -102,3 +102,14 @@ menubutton.style-picker > button:hover {
     padding: 10px 12px;
     margin: 2px;
 }
+
+/* inline info note (wraps, unlike Adw.Banner) */
+.pwctl-note {
+    background: alpha(@accent_color, 0.12);
+    border-radius: 10px;
+    padding: 12px 14px;
+}
+
+.pwctl-note label {
+    color: alpha(currentColor, 0.85);
+}
