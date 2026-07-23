@@ -349,3 +349,9 @@ never modified.
 - Persistent changes surface a banner naming exactly which service needs a
   restart, with a one-click restart button; runtime changes apply instantly.
 - All subprocess work (`pw-dump`, `systemctl`, …) runs off the UI thread.
+
+## Acknowledgments
+
+- Thanks to **Wim Taymans**, creator of PipeWire, for reviewing the Server
+  page's quantum and buffer settings — his feedback corrected the
+  `link.max-buffers` description and the quantum hard-limit range in v0.3.1.
