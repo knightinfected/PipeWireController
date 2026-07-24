@@ -10,7 +10,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from ..backend import chains, prefs, pw, system
+from ..backend import chains, prefs, pw, surround, system
 from .volume import VOLUME_STYLES, make_volume
 from .widgets import async_call, group, page_scroller, pill, state_style
 
@@ -205,6 +205,9 @@ class _DeviceRow(_VolumeRowBase):
         self.node_id = node.id
         self._port_key = None
         self._ports = []
+        self._card = None
+        self._profiles = []
+        self._profile_key = None
 
         icon = ('application-x-addon-symbolic' if node.is_virtual
                 else 'audio-speakers-symbolic' if node.is_sink
@@ -213,6 +216,12 @@ class _DeviceRow(_VolumeRowBase):
         self.title = Gtk.Label(xalign=0, hexpand=True,
                                ellipsize=Pango.EllipsizeMode.END)
         self.title.add_css_class('heading')
+
+        self.config_dd = Gtk.DropDown(
+            tooltip_text='Configuration (card profile)')
+        self.config_dd.set_valign(Gtk.Align.CENTER)
+        self.config_dd.set_visible(False)
+        self.config_dd.connect('notify::selected', self._on_profile)
 
         self.port_dd = Gtk.DropDown(tooltip_text='Port')
         self.port_dd.set_valign(Gtk.Align.CENTER)
@@ -227,6 +236,7 @@ class _DeviceRow(_VolumeRowBase):
         self.header.append(self.title)
         if node.is_virtual:
             self.header.append(pill('virtual', 'dim'))
+        self.header.append(self.config_dd)
         self.header.append(self.port_dd)
         self.header.append(self.star)
 
@@ -249,7 +259,22 @@ class _DeviceRow(_VolumeRowBase):
                    lambda ok, e: (window.toast('Default device changed'),
                                   self.tab.dash.refresh_soon()))
 
-    def update(self, node):
+    def _on_profile(self, dd, _pspec):
+        if self.updating or self._card is None:
+            return
+        idx = dd.get_selected()
+        if idx == Gtk.INVALID_LIST_POSITION or idx >= len(self._profiles):
+            return
+        prof_index, label = self._profiles[idx]
+        card, dash = self._card, self.tab.dash
+        self.touch()
+        async_call(lambda: surround.set_profile(card.id, prof_index),
+                   lambda ok, e: (dash.window.toast(
+                       f'Configuration: {label}' if ok and not e
+                       else 'Configuration change failed'),
+                       dash.refresh_soon()))
+
+    def update(self, node, card=None):
         self.updating = True
         try:
             self.title.set_label(node.description)
@@ -269,6 +294,24 @@ class _DeviceRow(_VolumeRowBase):
                             if p[0] == node.active_port), None)
                 self.port_dd.set_selected(
                     idx if idx is not None else Gtk.INVALID_LIST_POSITION)
+
+            self._card = card
+            profiles = [(pidx, desc + (' (unavailable)' if avail == 'no'
+                                       else ''))
+                        for pidx, desc, avail in (card.profiles if card
+                                                  else [])]
+            self._profiles = profiles
+            self.config_dd.set_visible(len(profiles) > 1)
+            pkey = tuple(profiles)
+            if pkey != self._profile_key:
+                self._profile_key = pkey
+                self.config_dd.set_model(
+                    Gtk.StringList.new([p[1] for p in profiles]))
+            if profiles and not self.in_grace:
+                aidx = next((i for i, p in enumerate(profiles)
+                             if p[0] == card.active_profile), None)
+                self.config_dd.set_selected(
+                    aidx if aidx is not None else Gtk.INVALID_LIST_POSITION)
 
             self.star.set_icon_name('starred-symbolic' if node.is_default
                                     else 'non-starred-symbolic')
@@ -369,13 +412,24 @@ class DevicesTab(_ListTab):
                          else 'No input devices found.')
         self.sinks = sinks
 
-    def update(self, nodes):
+    def update(self, nodes, cards=()):
+        cardmap = {c.id: c for c in cards}
         nodes = sorted((n for n in nodes if n.is_sink == self.sinks),
                        key=lambda n: (n.is_virtual, n.description.lower()))
         pairs = self._sync_rows([(n.id, n) for n in nodes],
                                 lambda n: _DeviceRow(self, n))
+        seen = set()
         for row, node in pairs:
-            row.update(node)
+            try:
+                card = cardmap.get(int(node.props.get('device.id')))
+            except (TypeError, ValueError):
+                card = None
+            # show the profile switcher once per card (first device wins)
+            if card and card.id in seen:
+                card = None
+            elif card:
+                seen.add(card.id)
+            row.update(node, card)
 
 
 class Dashboard:
@@ -715,6 +769,7 @@ class Dashboard:
             data['driver'] = pw.driver_clock(dump)
             data['nodes'] = pw.list_audio_nodes(dump)
             data['streams'] = pw.list_streams(dump)
+            data['cards'] = surround.list_cards(dump, outputs_only=False)
             metas = chains.list_chains()
             data['chains_total'] = len(metas)
             data['chains_active'] = sum(
@@ -785,5 +840,5 @@ class Dashboard:
 
         self.playback.update(data['streams'], data['nodes'])
         self.recording.update(data['streams'], data['nodes'])
-        self.outputs.update(data['nodes'])
-        self.inputs.update(data['nodes'])
+        self.outputs.update(data['nodes'], data['cards'])
+        self.inputs.update(data['nodes'], data['cards'])

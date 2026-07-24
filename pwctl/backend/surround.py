@@ -56,8 +56,13 @@ class Card:
     active_profile: int | None = None
 
 
-def list_cards(dump=None) -> list[Card]:
-    """Audio devices with their output-capable profiles."""
+def list_cards(dump=None, outputs_only=True) -> list[Card]:
+    """Audio devices with their profiles.
+
+    outputs_only=True (surround setup) keeps only output-capable profiles;
+    False (dashboard configuration switcher) returns every profile the card
+    offers, exactly like pavucontrol's Configuration tab.
+    """
     dump = dump if dump is not None else pw_dump()
     cards = []
     for obj in dump:
@@ -71,7 +76,8 @@ def list_cards(dump=None) -> list[Card]:
         profiles = [(p.get('index'), p.get('description', p.get('name', '?')),
                      p.get('available', 'unknown'))
                     for p in (params.get('EnumProfile') or [])
-                    if not (p.get('name') or '').startswith('input:')]
+                    if not (outputs_only
+                            and (p.get('name') or '').startswith('input:'))]
         active = next((p.get('index') for p in (params.get('Profile') or [])),
                       None)
         cards.append(Card(id=obj['id'], name=props.get('device.name', ''),
