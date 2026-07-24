@@ -49,6 +49,10 @@ More screenshots:
 
 ## New in v0.3.0
 
+> 📋 For highlights of every release — including **v0.3.2** (Pro Audio channel
+> maps and a dashboard configuration switcher) and **v0.3.1** — see the
+> **[changelog](CHANGELOG.md)**.
+
 v0.3 grows the app from a config editor into a full graph tool: a live
 patchbay, performance monitoring, virtual devices, routing snapshots,
 per-application policies and plugin effect inserts — all built on the same
