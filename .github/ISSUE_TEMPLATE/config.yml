@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📌 Known issues & status
+    url: https://github.com/knightinfected/PipeWireController/issues/1
+    about: Check here first — your problem may already be tracked, with a status.

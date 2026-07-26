@@ -1,0 +1,99 @@
+name: Bug report
+description: Something in PipeWire Controller isn't working right
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! 🙏
+
+        **You don't need to be technical to file a good report.** Just tell us
+        what you were doing and what went wrong, and copy‑paste the output of a
+        couple of commands below — we'll walk you through it.
+
+        To run a command: open your **Terminal** app, paste the command, press
+        **Enter**, then copy everything it prints and paste it into the box.
+
+        Audio setups vary wildly from person to person, so the more detail you
+        give, the faster we can help.
+  - type: textarea
+    id: goal
+    attributes:
+      label: What were you trying to do?
+      description: In plain words — e.g. "make a virtual microphone from input 14 on my Focusrite".
+      placeholder: I was trying to…
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What actually happened?
+      description: What went wrong? If you saw an error message or something odd in the patchbay, describe it.
+      placeholder: Instead, it…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen instead?
+      placeholder: I expected…
+    validations:
+      required: false
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the clicks/steps so we can trigger it ourselves.
+      placeholder: |
+        1. Open the Virtual Devices page
+        2. Create a…
+        3. …
+    validations:
+      required: false
+  - type: textarea
+    id: system-info
+    attributes:
+      label: System info
+      description: |
+        Paste the output of this **one command** (it just prints versions — copy the whole result):
+        ```
+        { . /etc/os-release; echo "distro: $PRETTY_NAME"; echo "pipewire: $(pipewire --version | tail -1)"; echo "wireplumber: $(wireplumber --version | tail -1)"; }
+        ```
+        Also tell us the **PipeWire Controller version** (it's in the app under **Tools → About**).
+      render: text
+      placeholder: |
+        distro: …
+        pipewire: …
+        wireplumber: …
+        PipeWire Controller: …
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic output (optional, but hugely helpful)
+      description: |
+        If your issue is about **routing, devices, or the patchbay**, this is
+        the single most useful thing you can give us. Paste the output of:
+        ```
+        pw-link -l
+        ```
+        That shows every audio connection currently in your system. If it's
+        very long, that's fine — paste it all, or attach it as a file by
+        dragging a `.txt` into this box.
+
+        For deeper issues we may ask for `pw-dump` output later — no need to
+        include it now unless you already have it.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this hasn't been reported yet
+          required: true
+        - label: I'm on PipeWire (not PulseAudio/JACK standalone) with libadwaita ≥ 1.4
+          required: false
