@@ -175,7 +175,14 @@ def _null_conf(dev: VirtualDevice) -> dict:
                   auto-connect is off, so the audio is discarded while the
                   sink's monitor ports stay available for recording.
     null-source : patch audio into the Audio/Sink input; it comes back out of
-                  the Audio/Source/Virtual node that apps record from.
+                  the Audio/Source node that apps record from.
+
+    node.autoconnect=false on the playback sides is essential: a loopback
+    playback stream is directionally an OUTPUT even when it carries
+    media.class=Audio/Source, so with autoconnect left on WirePlumber links it
+    to the *default sink* — the virtual mic then shows phantom activity routed
+    to the speakers with nothing in the graph to explain it (same class of
+    gotcha as the pro-map nodes).
     """
     pos = list(dev.positions)
     if dev.kind == 'null-sink':
@@ -192,7 +199,8 @@ def _null_conf(dev: VirtualDevice) -> dict:
                    'audio.position': pos}
         playback = {'node.name': dev.node_name,
                     'media.class': 'Audio/Source',
-                    'node.description': dev.name, 'audio.position': pos}
+                    'node.description': dev.name, 'audio.position': pos,
+                    'node.autoconnect': False}
     args = {'node.description': dev.name,
             'capture.props': capture, 'playback.props': playback}
     return _base([{'name': 'libpipewire-module-loopback', 'args': args}])

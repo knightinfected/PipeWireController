@@ -9,11 +9,16 @@ gi.require_version('Adw', '1')
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from ..backend import pw, virtual
-from ..backend.surround import LAYOUTS
+from ..backend.surround import LAYOUTS as _SPEAKER_LAYOUTS
 from .widgets import async_call, confirm, group, icon_button, page_scroller, \
     pill, state_style
 
 POSITION_NAMES = virtual.POSITION_NAMES
+
+# Virtual devices can be mono (a single-channel mic/sink is a common ask); the
+# surround wizard's LAYOUTS deliberately start at stereo, so we prepend Mono
+# here rather than polluting the speaker-layout list.
+LAYOUTS = [('mono', 'Mono 1.0', ['MONO'])] + list(_SPEAKER_LAYOUTS)
 
 
 def _wrap_list_factory():
