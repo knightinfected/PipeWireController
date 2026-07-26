@@ -23,6 +23,19 @@ and commit log.
 
 ---
 
+## [v0.3.3](https://github.com/knightinfected/PipeWireController/releases/tag/v0.3.3) — 2026-07-25
+**Virtual-device fixes — Mono layout and no more stray mic routing**
+
+- **Mono 1.0 layout** for virtual devices — null sinks, virtual mics,
+  aggregates, and buses can now be created as mono. Editing an existing mono
+  device selects the right layout too.
+- **Fixed virtual mics auto-routing to the default sink** — the null-source
+  playback stream now sets `node.autoconnect=false` (matching the null-sink and
+  Pro Audio map nodes), so WirePlumber no longer links a virtual mic onto your
+  speakers.
+
+---
+
 ## [v0.3.2](https://github.com/knightinfected/PipeWireController/releases/tag/v0.3.2) — 2026-07-23
 **Pro Audio channel maps and a dashboard configuration switcher**
 
