@@ -11,7 +11,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from ..backend import pw, virtual
 from ..backend.surround import LAYOUTS as _SPEAKER_LAYOUTS
 from .widgets import async_call, confirm, group, icon_button, page_scroller, \
-    pill, state_style
+    pick_file, pill, state_style
 
 POSITION_NAMES = virtual.POSITION_NAMES
 
@@ -66,6 +66,17 @@ class VirtualPage:
         new_row.add_suffix(new_btn)
         new_row.set_activatable_widget(new_btn)
         head.add(new_row)
+
+        imp_row = Adw.ActionRow(
+            title='Import existing devices',
+            subtitle='Adopt loopback / null-sink / combine drop-ins you '
+                     'hand-wrote in pipewire.conf.d')
+        imp_btn = Gtk.Button(icon_name='document-open-symbolic',
+                             valign=Gtk.Align.CENTER)
+        imp_btn.connect('clicked', self._import_clicked)
+        imp_row.add_suffix(imp_btn)
+        imp_row.set_activatable_widget(imp_btn)
+        head.add(imp_row)
 
         self.listing = group('Configured devices')
         self.widget = page_scroller(head, self.listing)
@@ -142,6 +153,72 @@ class VirtualPage:
 
     def _open_dialog(self, dev):
         VirtualDialog(self.window, self, dev).present()
+
+    # -------------------------------------------------------------- import --
+    def _import_clicked(self, _b):
+        def done(found, error):
+            if error or not found:
+                self._import_from_file()
+                return
+            self._show_import_dialog(found)
+        async_call(virtual.scan_importable, done)
+
+    def _show_import_dialog(self, found):
+        dlg = Adw.Dialog(title='Import virtual devices',
+                         content_width=560, content_height=480)
+        g = group('Found in your PipeWire config',
+                  'Importing adopts the device here and moves the original '
+                  'drop-in into an inactive/ folder, so it loads only once. '
+                  'Restart PipeWire afterwards, then enable it from the list.')
+        for path in found:
+            info = virtual.sniff_conf(path)
+            kinds = ' · '.join(dict.fromkeys(
+                virtual.KINDS.get(d['kind'], d['kind']).split(' (')[0]
+                for d in info['devices']))
+            row = Adw.ActionRow(title=', '.join(d['name']
+                                                for d in info['devices'])
+                                or info['name'],
+                                subtitle=f'{kinds}\n{path}',
+                                subtitle_lines=2, sensitive=info['valid'])
+            btn = Gtk.Button(label='Import', valign=Gtk.Align.CENTER)
+
+            def do_import(_b, p=path, r=row):
+                self._do_import(p)
+                r.set_sensitive(False)
+            btn.connect('clicked', do_import)
+            row.add_suffix(btn)
+            g.add(row)
+        other = group('')
+        pick_row = Adw.ActionRow(title='Choose another file…')
+        pb = Gtk.Button(icon_name='document-open-symbolic',
+                        valign=Gtk.Align.CENTER)
+        pb.connect('clicked',
+                   lambda *_: (dlg.close(), self._import_from_file()))
+        pick_row.add_suffix(pb)
+        pick_row.set_activatable_widget(pb)
+        other.add(pick_row)
+        view = Adw.ToolbarView()
+        view.add_top_bar(Adw.HeaderBar())
+        view.set_content(page_scroller(g, other))
+        dlg.set_child(view)
+        dlg.present(self.window)
+
+    def _import_from_file(self):
+        pick_file(self.window, 'Import a PipeWire .conf', self._do_import,
+                  filters=[('PipeWire config', ['*.conf'])],
+                  initial_folder=str(virtual.IMPORT_DIRS[0]))
+
+    def _do_import(self, path):
+        def done(devs, error):
+            if error or not devs:
+                self.window.toast('No virtual device found in that config')
+                return
+            names = ', '.join(d.name for d in devs)
+            self.window.toast(f'Imported {names} (disabled) — restart '
+                              'PipeWire, then enable it')
+            self.window.flag_restart('pipewire')
+            self.refresh()
+        async_call(lambda: virtual.import_conf(path), done)
 
 
 class VirtualDialog(Adw.Window):

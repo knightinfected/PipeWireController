@@ -413,3 +413,166 @@ def delete(dev: VirtualDevice):
         if p.is_file():
             p.unlink()
     system.daemon_reload()
+
+
+# ----------------------------------------------------------------- import --
+# Users hand-write loopback / null-sink / combine drop-ins in
+# pipewire.conf.d that the MAIN daemon loads at startup.  Importing adopts them
+# into our per-process-unit model so they gain the page's edit/enable controls.
+# We scan only the user dir (system files aren't ours to move) and skip our own
+# generated confs (they live in GEN_DIR, never here).
+
+IMPORT_DIRS = [XDG_CONFIG / 'pipewire' / 'pipewire.conf.d']
+INACTIVE_DIR = 'inactive'
+
+
+def _positions(*props) -> list:
+    for p in props:
+        ap = p.get('audio.position') if isinstance(p, dict) else None
+        if isinstance(ap, list) and ap:
+            return [str(x) for x in ap]
+    return list(DEFAULT_POSITIONS)
+
+
+def _is_ours(*props) -> bool:
+    for p in props:
+        nn = p.get('node.name', '') if isinstance(p, dict) else ''
+        if isinstance(nn, str) and nn.startswith('pwctl.'):
+            return True
+    return False
+
+
+def _classify_module(mod: dict) -> dict | None:
+    """Map one context.modules entry to a VirtualDevice spec, or None."""
+    name = mod.get('name')
+    args = mod.get('args') if isinstance(mod.get('args'), dict) else {}
+    if name == 'libpipewire-module-loopback':
+        cap = args.get('capture.props') if isinstance(
+            args.get('capture.props'), dict) else {}
+        play = args.get('playback.props') if isinstance(
+            args.get('playback.props'), dict) else {}
+        if _is_ours(cap, play):
+            return None                       # already one of ours
+        desc = (args.get('node.description') or cap.get('node.description')
+                or play.get('node.description') or 'Imported device')
+        positions = _positions(cap, play)
+        if play.get('media.class') == 'Audio/Source':
+            return {'name': str(desc), 'kind': 'null-source',
+                    'positions': positions}
+        target = play.get('target.object')
+        if isinstance(target, str) and target:
+            return {'name': str(desc), 'kind': 'bus',
+                    'positions': positions, 'target': target}
+        return {'name': str(desc), 'kind': 'null-sink', 'positions': positions}
+    if name == 'libpipewire-module-combine-stream':
+        if _is_ours(args):
+            return None
+        kind = 'combine-source' if args.get('combine.mode') == 'source' \
+            else 'combine-sink'
+        desc = args.get('node.description') or 'Imported combined device'
+        combine_props = args.get('combine.props') if isinstance(
+            args.get('combine.props'), dict) else {}
+        members = []
+        for rule in args.get('stream.rules') or []:
+            for m in (rule.get('matches') or []):
+                nn = m.get('node.name') if isinstance(m, dict) else None
+                if isinstance(nn, str) and nn not in members:
+                    members.append(nn)
+        return {'name': str(desc), 'kind': kind,
+                'positions': _positions(combine_props), 'members': members}
+    return None
+
+
+def _classify_object(obj: dict) -> dict | None:
+    """Map a context.objects null-audio-sink adapter to a spec, or None."""
+    if obj.get('factory') != 'adapter':
+        return None
+    args = obj.get('args') if isinstance(obj.get('args'), dict) else {}
+    if args.get('factory.name') != 'support.null-audio-sink':
+        return None
+    if _is_ours(args):
+        return None
+    desc = args.get('node.description') or args.get('node.name') or 'Null sink'
+    kind = 'null-source' if 'Source' in str(args.get('media.class', '')) \
+        else 'null-sink'
+    return {'name': str(desc), 'kind': kind, 'positions': _positions(args)}
+
+
+def sniff_conf(path) -> dict:
+    """Inspect a drop-in for importable virtual devices.
+
+    Recognises loopback null sink / virtual mic / bus, combine sink/source,
+    and null-audio-sink adapters.  Returns {'name', 'devices': [spec, …],
+    'valid'} — `valid` is True when at least one device was recognised.
+    """
+    info = {'name': Path(path).stem, 'devices': [], 'valid': False}
+    try:
+        text = Path(path).read_text(encoding='utf-8', errors='replace')
+        data = spa_json.loads(text)
+    except (OSError, spa_json.SpaJsonError):
+        return info
+    if not isinstance(data, dict):
+        return info
+    for mod in data.get('context.modules') or []:
+        if isinstance(mod, dict):
+            spec = _classify_module(mod)
+            if spec:
+                info['devices'].append(spec)
+    for obj in data.get('context.objects') or []:
+        if isinstance(obj, dict):
+            spec = _classify_object(obj)
+            if spec:
+                info['devices'].append(spec)
+    info['valid'] = bool(info['devices'])
+    return info
+
+
+def _archive_source(path) -> Path:
+    """Move an imported drop-in into a sibling inactive/ folder so the main
+    daemon stops loading it (subdirs aren't scanned).  Reversible."""
+    p = Path(path)
+    dest_dir = p.parent / INACTIVE_DIR
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / p.name
+    if dest.exists():
+        dest = dest_dir / f'{p.stem}-{uuid.uuid4().hex[:4]}{p.suffix}'
+    p.rename(dest)
+    return dest
+
+
+def import_conf(path) -> list[VirtualDevice]:
+    """Adopt a drop-in's virtual devices under app management.
+
+    Creates a disabled VirtualDevice per recognised device (config + meta
+    written, unit not started), then moves the original drop-in into an
+    inactive/ folder so the main daemon won't also load it after the next
+    PipeWire restart.  Returns the created devices ([] if none recognised).
+    """
+    info = sniff_conf(path)
+    if not info['valid']:
+        return []
+    out = []
+    for spec in info['devices']:
+        dev = new_device(
+            spec['name'], spec['kind'],
+            positions=spec.get('positions', list(DEFAULT_POSITIONS)),
+            members=spec.get('members', []),
+            target=spec.get('target', ''))
+        dev.enabled = False
+        generate(dev)                 # writes conf + meta, no unit start
+        out.append(dev)
+    if out:
+        _archive_source(path)
+    return out
+
+
+def scan_importable() -> list[Path]:
+    """User pipewire.conf.d drop-ins that declare an importable device."""
+    found = []
+    for d in IMPORT_DIRS:
+        if not d.is_dir():
+            continue
+        for p in sorted(d.glob('*.conf')):
+            if p.is_file() and sniff_conf(p)['valid']:
+                found.append(p)
+    return found
