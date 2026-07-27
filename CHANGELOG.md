@@ -23,6 +23,20 @@ and commit log.
 
 ---
 
+## [v0.3.4](https://github.com/knightinfected/PipeWireController/releases/tag/v0.3.4) — 2026-07-27
+**Import your existing virtual devices**
+
+- **Import existing devices** (Virtual Devices page) — adopt loopback,
+  combine, and null-sink drop-ins you hand-wrote in
+  `~/.config/pipewire/pipewire.conf.d`. They're classified into the right kind
+  (null sink · virtual mic · bus · combined), imported disabled, and the
+  original file is moved into an `inactive/` folder so it loads only once (no
+  duplicate). A file picker covers configs kept elsewhere.
+- The header-bar bookmark button is now labelled **Device Presets** so it reads
+  clearly next to the star.
+
+---
+
 ## [v0.3.3](https://github.com/knightinfected/PipeWireController/releases/tag/v0.3.3) — 2026-07-25
 **Virtual-device fixes — Mono layout and no more stray mic routing**
 
