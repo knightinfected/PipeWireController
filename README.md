@@ -49,9 +49,9 @@ More screenshots:
 
 ## New in v0.3.0
 
-> 📋 For highlights of every release — including **v0.3.2** (Pro Audio channel
-> maps and a dashboard configuration switcher) and **v0.3.1** — see the
-> **[changelog](CHANGELOG.md)**.
+> 📋 For highlights of every release — including **v0.3.4** (import your
+> existing virtual devices), **v0.3.2** (Pro Audio channel maps and a dashboard
+> configuration switcher) and **v0.3.1** — see the **[changelog](CHANGELOG.md)**.
 
 v0.3 grows the app from a config editor into a full graph tool: a live
 patchbay, performance monitoring, virtual devices, routing snapshots,
@@ -239,7 +239,10 @@ quantum, suspend timeout, plus rename/hide — written as WirePlumber rules.
 
 **Virtual Devices** — null sinks, virtual microphones, combined/aggregate
 outputs (play on several cards at once) and buses/sub-mixes, each as its own
-lightweight process; temporary or persistent across reboots.
+lightweight process; temporary or persistent across reboots. Already
+hand-wrote some loopback/combine/null-sink drop-ins in `pipewire.conf.d`?
+**Import** adopts them into the page — classified into the right kind and
+brought under the same enable/edit/delete controls.
 
 **App Policies** — per-application rules (fixed target device, disable
 auto-connect, pin in place), per-device default-selection priority, and a
