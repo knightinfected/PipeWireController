@@ -175,8 +175,9 @@ class Window(Adw.ApplicationWindow):
 
     # ------------------------------------------------------ device presets --
     def _build_presets_button(self):
-        btn = Gtk.MenuButton(icon_name='user-bookmarks-symbolic',
-                             tooltip_text='Device presets')
+        btn = Gtk.MenuButton(tooltip_text='Device presets')
+        btn.set_child(Adw.ButtonContent(icon_name='user-bookmarks-symbolic',
+                                        label='Device Presets'))
         self._presets_popover = Gtk.Popover()
         self._presets_popover.connect('show', self._fill_presets_popover)
         btn.set_popover(self._presets_popover)
