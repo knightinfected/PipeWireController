@@ -24,7 +24,7 @@ and commit log.
 ---
 
 ## [v0.3.5](https://github.com/knightinfected/PipeWireController/releases/tag/v0.3.5) — 2026-07-29
-**Bug fixes related Card Config and additions- Card configuration is its own control — with a way out of a broken profile**
+**Bug fixes related to Card Config and additions- Card configuration is its own control — with a way out of a broken profile**
 
 - **Configuration switcher is now a dedicated row**, one per card, on the
   Output/Input Devices tabs — instead of riding on one arbitrary device row.
