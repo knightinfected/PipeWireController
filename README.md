@@ -178,10 +178,7 @@ please [open an issue](https://github.com/knightinfected/PipeWireController/issu
 [![Donate via PayPal](https://img.shields.io/badge/PayPal-support%20this%20project-00457C?logo=paypal&logoColor=white)](https://paypal.me/hmzknight)
 
 Completely optional — the app is GPL-3.0 and always will be, and nothing is
-ever locked behind a donation. But if it saved you an afternoon of hand-editing
-config files and you feel like chipping in, it goes toward the Claude
-subscription I use to help build this. Feedback and bug reports are worth just
-as much, if not more.
+ever locked behind a donation.
 
 ## If you like tinkering like me…
 
