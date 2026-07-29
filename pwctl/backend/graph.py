@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import levels
 from .pw import pw_dump
 from .system import run
 
@@ -148,6 +149,11 @@ def snapshot(dump=None, include_hidden=False) -> Graph:
             continue
         info = obj.get('info') or {}
         props = info.get('props') or {}
+        # Our own level meters are capture streams like any other, so without
+        # this the patchbay fills with one phantom node per metered device the
+        # moment a page with meters is open.
+        if props.get(levels.MARKER):
+            continue
         name = props.get('node.name', str(obj['id']))
         plist = ports_by_node.get(obj['id'], [])
         if not plist and not include_hidden:

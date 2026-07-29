@@ -105,13 +105,16 @@ menubutton.style-picker > button:hover {
 
 /* ------------------------------- managed device list: running vs stopped -- */
 
-/* A running device gets an accent edge.  On an expander that edge runs the
-   full height, so the device and its mini-mixer read as one block instead of
-   dissolving into the rows below it. */
-/* The edge is repeated on the nested rows: each row paints its own
-   background, so a shadow on the expander alone survives only in the gaps
-   between them.  Repeating it at the same offset makes one unbroken line. */
+/* A running device gets an accent edge.  On an expander it runs the full
+   height, so the device and its mini-mixer read as one block instead of
+   dissolving into the rows below it.
+
+   Every row here paints its own background, so a shadow set only on the
+   expander survives just in the gaps between its children.  It has to be
+   repeated at the same offset on the nested rows *and* on the expander's own
+   header row — miss the header and the edge starts one row late. */
 row.enh-active,
+row.enh-active row.header,
 row.enh-inner {
     box-shadow: inset 3px 0 0 0 @accent_color;
 }

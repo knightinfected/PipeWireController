@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
+from . import levels
 from .system import run
 
 # ------------------------------------------------------------- pw-metadata --
@@ -197,7 +198,8 @@ def list_streams(dump=None) -> list[Stream]:
         mclass = props.get('media.class', '')
         if mclass not in STREAM_CLASSES:
             continue
-        if props.get('media.name') == 'Peak detect':   # pavucontrol probes
+        # Level-meter taps, ours and other mixers', are not app streams.
+        if props.get(levels.MARKER) or props.get('media.name') == 'Peak detect':
             continue
         name = (props.get('application.name') or props.get('media.name')
                 or props.get('node.name', ''))
