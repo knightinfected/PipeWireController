@@ -23,6 +23,63 @@ and commit log.
 
 ---
 
+## [v0.3.6](https://github.com/knightinfected/PipeWireController/releases/tag/v0.3.6) — 2026-07-29
+**Everything shows its level — plus the new Equalizer and Microphone cleanup pages**
+
+- **Live level meters everywhere.** Every volume control in the app now shows
+  the audio actually flowing through it — the Dashboard mixer, both device
+  tabs, the Devices page and the equalizers. You can see at a glance which app
+  is making noise, whether a device is really passing audio, and how loud it
+  is. Meters are dB-mapped, so normal listening fills the bar instead of
+  sitting near zero, and they carry a peak-hold marker.
+- Metering costs effectively nothing: PipeWire's own resampler reports the
+  peaks, so each meter reads about **100 bytes per second** rather than
+  streaming audio. Meters run only while their row is on screen, they can't
+  keep a device awake, and they never appear as nodes in the Patchbay.
+
+![Playback tab — a live meter on every stream](screenshots/playback-live-meters.png)
+
+![Dashboard — Overview](screenshots/dashboard-0.3.6.png)
+
+- **Equalizer page** — parametric-equalizer outputs you route audio through.
+  Import an AutoEQ / APO `ParametricEq.txt` (browse or just drag the file onto
+  the row), or dial the bands in by hand: each band has its own type, frequency,
+  gain and Q, and its own switch so you can hear one filter in isolation without
+  deleting it. One click makes an equalizer the default output.
+- **Live A/B compare** (beta) — switch an equalizer in and out *while it keeps
+  running*, so playback never pauses. Bypassed audio goes straight to the
+  output device.
+
+<p align="center">
+  <img src="screenshots/equalizer-create.png" alt="Creating an equalizer — preamp, output device and a starting set of bands" width="46%">
+  <img src="screenshots/equalizer-edit-bands.png" alt="Editing bands — type, frequency, gain and Q, each with its own switch" width="43.5%">
+</p>
+
+![The Equalizer page — an equalizer running, with its inline mixer](screenshots/equalizer.png)
+
+- **Microphone cleanup** — a clean copy of your microphone with echo and
+  background noise removed (WebRTC). Noise suppression, automatic gain, a
+  high-pass filter and voice-activity detection are individual switches, with
+  extended-filter, delay-agnostic and transient suppression under Advanced. By
+  default it uses whatever is playing on your speakers as the echo reference,
+  so there is nothing to route.
+
+<p align="center">
+  <img src="screenshots/microphone-cleanup.png" alt="Microphone cleanup — configured clean microphones" width="52%">
+  <img src="screenshots/microphone-create.png" alt="Creating a clean microphone — processing switches and advanced options" width="41%">
+</p>
+
+- **Clearer running devices.** A running equalizer or microphone is marked with
+  an accent edge that runs the whole height of its block, stopped ones step
+  back, and the inline mixer is laid out as the signal path — level, compare,
+  what is playing through it, where it goes.
+- **Fixed:** text containing `&` or `<` made a row's title or subtitle vanish
+  entirely. This hit stream names reported by apps, device descriptions and
+  anything you had typed yourself — equalizer, filter-chain and virtual-device
+  names, app policies and HRIR filenames.
+
+---
+
 ## [v0.3.5](https://github.com/knightinfected/PipeWireController/releases/tag/v0.3.5) — 2026-07-29
 **Bug fixes related to Card Config and additions- Card configuration is its own control — with a way out of a broken profile**
 

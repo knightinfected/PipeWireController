@@ -8,24 +8,27 @@ running PipeWire (packaged on the AUR, install instructions for Fedora,
 Ubuntu/Debian and others below).
 Everything under PipeWire's *Configuration* documentation — clock/quantum
 tuning, stream processing, session policy, filter chains, HRIR virtual
-surround — exposed as toggles and dropdowns, plus a live **patchbay**,
-performance **monitoring**, **virtual devices**, routing snapshots,
-per-application **policies** and LADSPA/LV2 **effect inserts**
-([new in v0.3.0](#new-in-v030)).
+surround — exposed as toggles and dropdowns, plus **live level meters** on
+every volume control, a parametric **equalizer** and **microphone cleanup**
+([new in v0.3.6](#new-in-v036)), a live **patchbay**, performance
+**monitoring**, **virtual devices**, routing snapshots, per-application
+**policies** and LADSPA/LV2 **effect inserts** ([new in v0.3.0](#new-in-v030)).
 
-![Dashboard — Overview](screenshots/dashboard-overview.png)
+![Dashboard — Overview, with live level meters on the default endpoints](screenshots/dashboard-0.3.6.png)
+
+![Patchbay — the live graph of your whole session, drag a port onto another to connect](screenshots/patchbay-0.3.6.png)
 
 <p align="center">
-  <img src="screenshots/output-devices-led-meter.png" alt="Output Devices with LED-meter volume style — hardware and virtual sinks side by side" width="45%">
-  <img src="screenshots/output-devices-stepped.png" alt="Output Devices with stepped volume style and port selector" width="53%">
+  <img src="screenshots/equalizer.png" alt="Equalizer — parametric EQ outputs with an inline mixer and live A/B compare" width="53.5%">
+  <img src="screenshots/devices-per-device-settings.png" alt="Devices — per-device sample rate, bit depth, period size, headroom and more" width="44%">
 </p>
 <p align="center">
-  <img src="screenshots/dashboard-playback.png" alt="Playback tab — move any stream between devices live" width="44%">
-  <img src="screenshots/session-bluetooth.png" alt="Session and Bluetooth — device power and Bluetooth codec policy" width="52.5%">
+  <img src="screenshots/playback-live-meters.png" alt="Playback tab — a live level meter on every application stream" width="55%">
+  <img src="screenshots/microphone-cleanup.png" alt="Microphone cleanup — echo and noise removal as a clean second microphone" width="43%">
 </p>
 <p align="center">
-  <img src="screenshots/hrir-library.png" alt="HRIR Library — import, analyze and classify impulse responses" width="45%">
-  <img src="screenshots/filter-chains.png" alt="Filter Chains — per-chain processes with independent toggles" width="52%">
+  <img src="screenshots/virtual-devices.png" alt="Virtual Devices — null sinks, virtual mics, aggregates and buses" width="59.5%">
+  <img src="screenshots/app-policies.png" alt="App Policies — per-app routing, default priority, clock master" width="38%">
 </p>
 <p align="center">
   <img src="screenshots/streams.png" alt="Stream processing defaults — upmix, LFE, resampler and advanced knobs" width="46%">
@@ -34,24 +37,64 @@ per-application **policies** and LADSPA/LV2 **effect inserts**
 <p align="center">
   <img src="screenshots/server.png" alt="Server settings" width="70%">
 </p>
-<p align="center">
-  <img src="screenshots/device-presets.png" alt="Device presets menu with auto-load on device switch" width="53%">
-  <img src="screenshots/volume-style-picker.png" alt="Volume slider style picker" width="25%">
-</p>
 
 More screenshots:
-[Playback tab, LED meters](screenshots/dashboard-led-meter.png) ·
+[Output Devices](screenshots/output-devices-led-meter.png) ·
 [Output Devices with ports](screenshots/output-devices.png) ·
+[Output Devices, stepped volume](screenshots/output-devices-stepped.png) ·
+[Playback tab](screenshots/dashboard-playback.png) ·
 [Recording tab](screenshots/dashboard-recording.png) ·
+[Session and Bluetooth](screenshots/session-bluetooth.png) ·
+[HRIR Library](screenshots/hrir-library.png) ·
+[Filter Chains](screenshots/filter-chains.png) ·
+[Filter Chains + HRIR close-up](screenshots/filter-chains-hrir.png) ·
+[New filter chain](screenshots/new%20filterchain.png) ·
 [Surround Setup wizard](screenshots/surround-setup.png) ·
 [Surround Setup, advanced mode](screenshots/surround-advanced.png) ·
-[Filter Chains + HRIR close-up](screenshots/filter-chains-hrir.png)
+[Device presets](screenshots/device-presets.png) ·
+[Volume style picker](screenshots/volume-style-picker.png)
+
+## New in v0.3.6
+
+> 📋 For highlights of every release — including **v0.3.5** (card configuration
+> as its own control) and **v0.3.4** (import your existing virtual devices) —
+> see the **[changelog](CHANGELOG.md)**.
+
+**Live level meters** — every volume control in the app now shows the audio
+actually flowing through it: the Dashboard mixer, both device tabs, the
+Devices page and the equalizers. You can see at a glance which app is making
+noise and how loud it is. Meters are dB-mapped, so normal listening fills the
+bar rather than sitting near zero, and each carries a peak-hold marker.
+They cost effectively nothing — PipeWire's own resampler reports the peaks, so
+a meter reads about **100 bytes per second** instead of streaming audio. They
+run only while their row is on screen, can't keep a device awake, and never
+show up as nodes in the Patchbay.
+
+**Equalizer** — parametric-equalizer outputs you route audio through. Import
+an AutoEQ / APO `ParametricEq.txt` (browse, or drag the file onto the row), or
+dial the bands in by hand: each band has its own type, frequency, gain and Q,
+plus its own switch so you can hear one filter in isolation without deleting
+it. One click makes an equalizer the default output. **Live A/B compare**
+(beta) switches an equalizer in and out *while it keeps running*, so playback
+never pauses.
+
+<p align="center">
+  <img src="screenshots/equalizer-create.png" alt="Creating an equalizer — preamp, output device and a starting set of bands" width="46%">
+  <img src="screenshots/equalizer-edit-bands.png" alt="Editing bands — type, frequency, gain and Q, each with its own switch" width="43.5%">
+</p>
+
+**Microphone cleanup** — a clean copy of your microphone with echo and
+background noise removed (WebRTC). Noise suppression, automatic gain, a
+high-pass filter and voice-activity detection are individual switches, with
+extended-filter, delay-agnostic and transient suppression under Advanced. By
+default it uses whatever is playing on your speakers as the echo reference, so
+there is nothing to route — just pick the clean microphone as your input.
+
+<p align="center">
+  <img src="screenshots/microphone-create.png" alt="Creating a clean microphone — processing switches and advanced options" width="42%">
+</p>
 
 ## New in v0.3.0
-
-> 📋 For highlights of every release — including **v0.3.4** (import your
-> existing virtual devices), **v0.3.2** (Pro Audio channel maps and a dashboard
-> configuration switcher) and **v0.3.1** — see the **[changelog](CHANGELOG.md)**.
 
 v0.3 grows the app from a config editor into a full graph tool: a live
 patchbay, performance monitoring, virtual devices, routing snapshots,
