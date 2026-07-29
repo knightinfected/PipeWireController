@@ -149,6 +149,30 @@ patch by name), **per-device settings** on the Devices page (sample rate,
 bit depth, period size, headroom, rename, hide), **per-device Bluetooth
 profile & codec**, and **solo** toggles in the Dashboard mixer.
 
+## Currently working on / upcoming
+
+Rough list, no particular order, no promises on timing:
+
+- **Network audio manager** — PipeWire's network side in the GUI: RAOP/AirPlay
+  sinks, streaming between machines, discovery.
+- **UI improvements** — the app is currently extremely boring to look at. The
+  live meters in v0.3.6 were a first step, there's a lot more to do.
+- **Quality of life** — scaling, where buttons actually live, gaps and
+  spacing. Small stuff, but it adds up.
+- **Individual channel volume** (I know, I know.)
+- **Hide the complicated sections behind Advanced**, so opening the app isn't
+  a wall of knobs unless you want it to be.
+- **Microphone cleanup button in the Input/Recording section**, done cleanly —
+  so you can clean up a mic without going hunting for it.
+
+### What I'm failing at
+
+Getting feedback. I use this thing daily on my own setup, which means I mostly
+find the bugs *I* happen to walk into — and every PipeWire setup is wildly
+different. If you try it and something is broken, confusing, or just annoying,
+please [open an issue](https://github.com/knightinfected/PipeWireController/issues)
+— even a one-liner helps more than you'd think.
+
 ## If you like tinkering like me…
 
 …here are some cool GitHubs to visit for sound tools:
