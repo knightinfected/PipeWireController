@@ -15,6 +15,7 @@ from .ui.chains_page import ChainsPage
 from .ui.dashboard import Dashboard
 from .ui.devices import DevicesPage
 from .ui.effects_page import EffectsPage
+from .ui.enhance_page import EnhancePage
 from .ui.graph_page import GraphPage
 from .ui.hrir_page import HrirPage
 from .ui.monitor_page import MonitorPage
@@ -27,6 +28,7 @@ from .ui.widgets import async_call
 
 PAGES = [
     ('dashboard', 'Dashboard', 'utilities-system-monitor-symbolic'),
+    ('enhance', 'Equalizer', 'audio-x-generic-symbolic'),
     ('graph', 'Patchbay', 'network-workgroup-symbolic'),
     ('devices', 'Devices', 'audio-speakers-symbolic'),
     ('virtual', 'Virtual Devices', 'insert-object-symbolic'),
@@ -137,6 +139,7 @@ class Window(Adw.ApplicationWindow):
             'wireplumber': WirePlumberPage(self),
             'chains': ChainsPage(self),
             'effects': EffectsPage(self),
+            'enhance': EnhancePage(self),
             'hrir': HrirPage(self),
             'monitor': MonitorPage(self),
             'tools': ToolsPage(self),
