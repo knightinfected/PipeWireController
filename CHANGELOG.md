@@ -64,9 +64,10 @@ and commit log.
   default it uses whatever is playing on your speakers as the echo reference,
   so there is nothing to route.
 
+![Microphone cleanup — configured clean microphones](screenshots/microphone-cleanup.png)
+
 <p align="center">
-  <img src="screenshots/microphone-cleanup.png" alt="Microphone cleanup — configured clean microphones" width="52%">
-  <img src="screenshots/microphone-create.png" alt="Creating a clean microphone — processing switches and advanced options" width="41%">
+  <img src="screenshots/microphone-create.png" alt="Creating a clean microphone — processing switches and advanced options" width="42%">
 </p>
 
 - **Clearer running devices.** A running equalizer or microphone is marked with

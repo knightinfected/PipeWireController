@@ -31,8 +31,8 @@ every volume control, a parametric **equalizer** and **microphone cleanup**
   <img src="screenshots/app-policies.png" alt="App Policies — per-app routing, default priority, clock master" width="38%">
 </p>
 <p align="center">
-  <img src="screenshots/streams.png" alt="Stream processing defaults — upmix, LFE, resampler and advanced knobs" width="46%">
-  <img src="screenshots/tools.png" alt="Tools — service control, latency calculator and maintenance" width="46%">
+  <img src="screenshots/streams.png" alt="Stream processing defaults — upmix, LFE, resampler and advanced knobs" width="44.5%">
+  <img src="screenshots/tools.png" alt="Tools — service control, latency calculator and maintenance" width="47.5%">
 </p>
 <p align="center">
   <img src="screenshots/server.png" alt="Server settings" width="70%">
