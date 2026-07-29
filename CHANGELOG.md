@@ -23,6 +23,29 @@ and commit log.
 
 ---
 
+## [v0.3.5](https://github.com/knightinfected/PipeWireController/releases/tag/v0.3.5) — 2026-07-29
+**Card configuration is its own control — with a way out of a broken profile**
+
+- **Configuration switcher is now a dedicated row**, one per card, on the
+  Output/Input Devices tabs — instead of riding on one arbitrary device row.
+  It no longer jumps between rows or disappears when a profile exposes several
+  sinks at once (Pro Audio) or none at all (Off), so the switcher — and the way
+  back — is always reachable.
+- **One-click Reset to a working profile** when a card gets stuck. WirePlumber
+  can save a profile that later can't work (e.g. an HDMI-surround profile saved
+  while nothing is plugged into HDMI), leaving you with no audio and, before,
+  no obvious way out.
+- **Smarter "unavailable" warning** — the ⚠ now flags only profiles that are
+  genuinely unavailable, so a playable-but-unprobeable profile like *Pro Audio*
+  is no longer falsely marked.
+
+<!-- Screenshot pending: capture the Output Devices tab showing the separate
+"Configuration" row, and the ⚠ + Reset on a stuck/Off card. Save as a
+kebab-case PNG in screenshots/ and add an ![Caption](screenshots/name.png)
+line here. -->
+
+---
+
 ## [v0.3.4](https://github.com/knightinfected/PipeWireController/releases/tag/v0.3.4) — 2026-07-27
 **Import your existing virtual devices**
 

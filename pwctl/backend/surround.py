@@ -54,6 +54,25 @@ class Card:
     description: str
     profiles: list = field(default_factory=list)   # [(idx, desc, available)]
     active_profile: int | None = None
+    # per-profile direction/priority (index -> …), derived from EnumProfile
+    # `classes`, so it's locale-independent (no parsing of descriptions):
+    dirs: dict = field(default_factory=dict)        # idx -> (has_sink, has_src)
+    prio: dict = field(default_factory=dict)        # idx -> priority
+
+    @property
+    def has_sink(self) -> bool:
+        return any(s for s, _ in self.dirs.values())
+
+    @property
+    def has_source(self) -> bool:
+        return any(src for _, src in self.dirs.values())
+
+
+def _profile_dirs(p) -> tuple[bool, bool]:
+    """(provides_sink, provides_source) for one EnumProfile entry."""
+    names = {c[0] for c in (p.get('classes') or [])
+             if isinstance(c, list) and c and isinstance(c[0], str)}
+    return 'Audio/Sink' in names, 'Audio/Source' in names
 
 
 def list_cards(dump=None, outputs_only=True) -> list[Card]:
@@ -73,18 +92,39 @@ def list_cards(dump=None, outputs_only=True) -> list[Card]:
         if props.get('media.class') != 'Audio/Device':
             continue
         params = info.get('params') or {}
-        profiles = [(p.get('index'), p.get('description', p.get('name', '?')),
-                     p.get('available', 'unknown'))
-                    for p in (params.get('EnumProfile') or [])
-                    if not (outputs_only
-                            and (p.get('name') or '').startswith('input:'))]
+        profiles, dirs, prio = [], {}, {}
+        for p in (params.get('EnumProfile') or []):
+            if outputs_only and (p.get('name') or '').startswith('input:'):
+                continue
+            idx = p.get('index')
+            profiles.append((idx, p.get('description', p.get('name', '?')),
+                             p.get('available', 'unknown')))
+            dirs[idx] = _profile_dirs(p)
+            prio[idx] = p.get('priority', 0)
         active = next((p.get('index') for p in (params.get('Profile') or [])),
                       None)
         cards.append(Card(id=obj['id'], name=props.get('device.name', ''),
                           description=props.get('device.description',
                                                 props.get('device.name', '')),
-                          profiles=profiles, active_profile=active))
+                          profiles=profiles, active_profile=active,
+                          dirs=dirs, prio=prio))
     return cards
+
+
+def working_profile(card: Card, sink=True) -> int | None:
+    """Highest-priority *available* profile that provides the wanted
+    direction — what to fall back to when a card is stuck on an unavailable
+    or Off profile (the WirePlumber saved-profile trap)."""
+    best, best_prio = None, None
+    for idx, _desc, avail in card.profiles:
+        if avail != 'yes':
+            continue
+        has_sink, has_src = card.dirs.get(idx, (False, False))
+        if (has_sink if sink else has_src):
+            p = card.prio.get(idx, 0)
+            if best is None or p > best_prio:
+                best, best_prio = idx, p
+    return best
 
 
 def suggest_profile(card: Card, layout_key: str) -> int | None:

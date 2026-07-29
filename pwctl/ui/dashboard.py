@@ -205,9 +205,6 @@ class _DeviceRow(_VolumeRowBase):
         self.node_id = node.id
         self._port_key = None
         self._ports = []
-        self._card = None
-        self._profiles = []
-        self._profile_key = None
 
         icon = ('application-x-addon-symbolic' if node.is_virtual
                 else 'audio-speakers-symbolic' if node.is_sink
@@ -216,12 +213,6 @@ class _DeviceRow(_VolumeRowBase):
         self.title = Gtk.Label(xalign=0, hexpand=True,
                                ellipsize=Pango.EllipsizeMode.END)
         self.title.add_css_class('heading')
-
-        self.config_dd = Gtk.DropDown(
-            tooltip_text='Configuration (card profile)')
-        self.config_dd.set_valign(Gtk.Align.CENTER)
-        self.config_dd.set_visible(False)
-        self.config_dd.connect('notify::selected', self._on_profile)
 
         self.port_dd = Gtk.DropDown(tooltip_text='Port')
         self.port_dd.set_valign(Gtk.Align.CENTER)
@@ -236,7 +227,6 @@ class _DeviceRow(_VolumeRowBase):
         self.header.append(self.title)
         if node.is_virtual:
             self.header.append(pill('virtual', 'dim'))
-        self.header.append(self.config_dd)
         self.header.append(self.port_dd)
         self.header.append(self.star)
 
@@ -259,22 +249,7 @@ class _DeviceRow(_VolumeRowBase):
                    lambda ok, e: (window.toast('Default device changed'),
                                   self.tab.dash.refresh_soon()))
 
-    def _on_profile(self, dd, _pspec):
-        if self.updating or self._card is None:
-            return
-        idx = dd.get_selected()
-        if idx == Gtk.INVALID_LIST_POSITION or idx >= len(self._profiles):
-            return
-        prof_index, label = self._profiles[idx]
-        card, dash = self._card, self.tab.dash
-        self.touch()
-        async_call(lambda: surround.set_profile(card.id, prof_index),
-                   lambda ok, e: (dash.window.toast(
-                       f'Configuration: {label}' if ok and not e
-                       else 'Configuration change failed'),
-                       dash.refresh_soon()))
-
-    def update(self, node, card=None):
+    def update(self, node):
         self.updating = True
         try:
             self.title.set_label(node.description)
@@ -295,13 +270,120 @@ class _DeviceRow(_VolumeRowBase):
                 self.port_dd.set_selected(
                     idx if idx is not None else Gtk.INVALID_LIST_POSITION)
 
+            self.star.set_icon_name('starred-symbolic' if node.is_default
+                                    else 'non-starred-symbolic')
+            self.star.set_tooltip_text('Default device' if node.is_default
+                                       else 'Make default')
+            if node.is_default:
+                self.star.add_css_class('star-active')
+            else:
+                self.star.remove_css_class('star-active')
+            self.set_levels(node.volume, node.muted)
+        finally:
+            self.updating = False
+
+
+class _CardConfigRow(Gtk.ListBoxRow):
+    """Per-card configuration (ALSA/Bluetooth card profile), shown once per
+    card independent of how many sink/source nodes the profile exposes.
+
+    Kept separate from the node rows so it never moves or disappears when a
+    profile change swaps the card's nodes (e.g. Pro Audio exposes several
+    sinks at once) — the switcher, and the way back, are always reachable.
+    """
+
+    node_id = None      # not an audio node: skipped by solo/volume logic
+
+    def __init__(self, tab, card):
+        super().__init__(activatable=False)
+        self.tab = tab
+        self.updating = False
+        self._local_ts = 0.0
+        self.card_id = card.id
+        self._card = card
+        self._profiles = []
+        self._profile_key = None
+
+        icon = Gtk.Image.new_from_icon_name('audio-card-symbolic')
+        self.title = Gtk.Label(xalign=0, hexpand=True,
+                               ellipsize=Pango.EllipsizeMode.END)
+        self.title.add_css_class('heading')
+        caption = Gtk.Label(xalign=0, label='Configuration')
+        caption.add_css_class('caption')
+        caption.add_css_class('dim-label')
+        titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        titles.append(self.title)
+        titles.append(caption)
+
+        self.warn = Gtk.Image.new_from_icon_name('dialog-warning-symbolic')
+        self.warn.add_css_class('warning')
+        self.warn.set_valign(Gtk.Align.CENTER)
+        self.warn.set_visible(False)
+
+        # Escape hatch for the WirePlumber saved-profile trap: one click back
+        # to the best available working profile. Only shown when stuck.
+        self.reset = Gtk.Button(label='Reset',
+                                tooltip_text='Switch to a working profile')
+        self.reset.add_css_class('flat')
+        self.reset.set_valign(Gtk.Align.CENTER)
+        self.reset.set_visible(False)
+        self.reset.connect('clicked', self._on_reset)
+
+        self.config_dd = Gtk.DropDown(tooltip_text='Card profile')
+        self.config_dd.set_valign(Gtk.Align.CENTER)
+        self.config_dd.connect('notify::selected', self._on_profile)
+
+        header = Gtk.Box(spacing=10, margin_top=14, margin_bottom=14,
+                         margin_start=16, margin_end=16)
+        header.append(icon)
+        header.append(titles)
+        header.append(self.warn)
+        header.append(self.reset)
+        header.append(self.config_dd)
+        self.set_child(header)
+
+    def touch(self):
+        self._local_ts = time.monotonic()
+
+    @property
+    def in_grace(self):
+        return time.monotonic() - self._local_ts < LOCAL_GRACE
+
+    def _on_profile(self, dd, _pspec):
+        if self.updating:
+            return
+        idx = dd.get_selected()
+        if idx == Gtk.INVALID_LIST_POSITION or idx >= len(self._profiles):
+            return
+        prof_index, label = self._profiles[idx]
+        self._apply(prof_index, label)
+
+    def _on_reset(self, _btn):
+        idx = surround.working_profile(self._card, sink=self.tab.sinks)
+        if idx is None:
+            self.tab.dash.window.toast('No working profile available')
+            return
+        label = next((d for i, d, _a in self._card.profiles if i == idx), '')
+        self._apply(idx, label)
+
+    def _apply(self, prof_index, label):
+        cid, dash = self.card_id, self.tab.dash
+        self.touch()
+        async_call(lambda: surround.set_profile(cid, prof_index),
+                   lambda ok, e: (dash.window.toast(
+                       f'Configuration: {label}' if ok and not e
+                       else 'Configuration change failed'),
+                       dash.refresh_soon()))
+
+    def update(self, card):
+        self.updating = True
+        try:
             self._card = card
+            self.title.set_label(card.description)
             profiles = [(pidx, desc + (' (unavailable)' if avail == 'no'
                                        else ''))
-                        for pidx, desc, avail in (card.profiles if card
-                                                  else [])]
+                        for pidx, desc, avail in card.profiles]
             self._profiles = profiles
-            self.config_dd.set_visible(len(profiles) > 1)
             pkey = tuple(profiles)
             if pkey != self._profile_key:
                 self._profile_key = pkey
@@ -312,16 +394,27 @@ class _DeviceRow(_VolumeRowBase):
                              if p[0] == card.active_profile), None)
                 self.config_dd.set_selected(
                     aidx if aidx is not None else Gtk.INVALID_LIST_POSITION)
-
-            self.star.set_icon_name('starred-symbolic' if node.is_default
-                                    else 'non-starred-symbolic')
-            self.star.set_tooltip_text('Default device' if node.is_default
-                                       else 'Make default')
-            if node.is_default:
-                self.star.add_css_class('star-active')
-            else:
-                self.star.remove_css_class('star-active')
-            self.set_levels(node.volume, node.muted)
+            # Two independent signals. The ⚠ means the active profile is
+            # *explicitly unavailable* (avail == 'no', e.g. HDMI with nothing
+            # plugged in) — a real problem worth flagging. 'unknown' (e.g. Pro
+            # Audio, which ALSA can't probe) is playable, so it gets no alarm.
+            # Reset appears whenever the card produces no usable output/input
+            # in this tab's direction (unavailable OR Off/wrong-direction) and
+            # a working profile exists to fall back to.
+            want_sink = self.tab.sinks
+            avail = next((a for pidx, _d, a in card.profiles
+                          if pidx == card.active_profile), 'unknown')
+            has_sink, has_src = card.dirs.get(card.active_profile,
+                                              (False, False))
+            unavailable = avail == 'no'
+            no_output = not (has_sink if want_sink else has_src)
+            can_fix = surround.working_profile(card, sink=want_sink) is not None
+            self.warn.set_visible(unavailable)
+            self.warn.set_tooltip_text(
+                'This profile is unavailable — no output until you switch.'
+                if want_sink else
+                'This profile is unavailable — no input until you switch.')
+            self.reset.set_visible((unavailable or no_output) and can_fix)
         finally:
             self.updating = False
 
@@ -352,10 +445,11 @@ class _ListTab:
             self.soloed.add(row.node_id)
         else:
             self.soloed.discard(row.node_id)
-        live = {r.node_id for r in self.rows.values()}
+        audio_rows = [r for r in self.rows.values() if r.node_id is not None]
+        live = {r.node_id for r in audio_rows}
         self.soloed &= live
         soloing = bool(self.soloed)
-        for r in self.rows.values():
+        for r in audio_rows:
             want_mute = soloing and r.node_id not in self.soloed
             r.touch()
             r.updating = True
@@ -414,22 +508,48 @@ class DevicesTab(_ListTab):
 
     def update(self, nodes, cards=()):
         cardmap = {c.id: c for c in cards}
-        nodes = sorted((n for n in nodes if n.is_sink == self.sinks),
-                       key=lambda n: (n.is_virtual, n.description.lower()))
-        pairs = self._sync_rows([(n.id, n) for n in nodes],
-                                lambda n: _DeviceRow(self, n))
-        seen = set()
-        for row, node in pairs:
+
+        def card_of(n):
             try:
-                card = cardmap.get(int(node.props.get('device.id')))
+                return cardmap.get(int(n.props.get('device.id')))
             except (TypeError, ValueError):
-                card = None
-            # show the profile switcher once per card (first device wins)
-            if card and card.id in seen:
-                card = None
-            elif card:
-                seen.add(card.id)
-            row.update(node, card)
+                return None
+
+        # A card gets a Configuration row in this tab if it offers more than
+        # one profile AND can produce this tab's direction (sink/source). The
+        # row is driven by the CARD list, not the nodes, so it stays put even
+        # when the active profile exposes zero nodes (e.g. Off) — otherwise
+        # the switcher would vanish with no way back.
+        cfg_cards = {c.id: c for c in cards if len(c.profiles) > 1
+                     and (c.has_sink if self.sinks else c.has_source)}
+
+        grouped: dict[int, list] = {cid: [] for cid in cfg_cards}
+        loose = []
+        for n in (n for n in nodes if n.is_sink == self.sinks):
+            card = card_of(n)
+            if card and card.id in cfg_cards:
+                grouped[card.id].append(n)
+            else:
+                loose.append(n)
+
+        items = []
+        for card in sorted(cfg_cards.values(),
+                           key=lambda c: c.description.lower()):
+            items.append((('cfg', card.id), card))
+            for n in sorted(grouped[card.id],
+                            key=lambda n: n.description.lower()):
+                items.append((n.id, n))
+        # Virtual devices (no card) and single-profile-card nodes trail after.
+        for n in sorted(loose, key=lambda n: (n.is_virtual,
+                                              n.description.lower())):
+            items.append((n.id, n))
+
+        pairs = self._sync_rows(
+            items,
+            lambda o: (_CardConfigRow(self, o)
+                       if isinstance(o, surround.Card) else _DeviceRow(self, o)))
+        for row, obj in pairs:
+            row.update(obj)
 
 
 class Dashboard:
