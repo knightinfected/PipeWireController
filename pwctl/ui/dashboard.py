@@ -136,6 +136,7 @@ class _StreamRow(_VolumeRowBase):
         self.node_id = stream.id
         self._dev_key = None
         self._devices = []
+        self.vol.set_meter(stream.serial)
 
         self.icon = Gtk.Image.new_from_icon_name(_app_icon(stream.icon))
         self.title = Gtk.Label(xalign=0, hexpand=True,
@@ -205,6 +206,7 @@ class _DeviceRow(_VolumeRowBase):
         self.node_id = node.id
         self._port_key = None
         self._ports = []
+        self.vol.set_meter(node.serial)
 
         icon = ('application-x-addon-symbolic' if node.is_virtual
                 else 'audio-speakers-symbolic' if node.is_sink

@@ -176,7 +176,10 @@ class EnhancePage:
         row = (Adw.ExpanderRow if rich else Adw.ActionRow)(
             title=esc(enh.name), subtitle=subtitle,
             title_lines=1, subtitle_lines=1)
-        row.add_prefix(Gtk.Image.new_from_icon_name(icon))
+        row.add_css_class('enh-active' if enh.enabled else 'enh-idle')
+        prefix_icon = Gtk.Image.new_from_icon_name(icon)
+        prefix_icon.add_css_class('enh-icon')
+        row.add_prefix(prefix_icon)
         sw = Gtk.Switch(valign=Gtk.Align.CENTER, active=enh.enabled,
                         tooltip_text='Running (visible to apps)')
         sw.connect('notify::active', self._toggled, enh)
@@ -206,14 +209,32 @@ class EnhancePage:
             row.add_suffix(w)
         if rich:
             row.set_expanded(True)
-            row.add_row(self._volume_row(enh, node))
+            # Laid out as the signal path — what this equalizer does, what is
+            # coming into it, where it goes — so the block reads top to bottom
+            # instead of as five unrelated settings.
+            inner = [self._volume_row(enh, node)]
             if self.ab_enabled:
-                row.add_row(self._ab_row(enh))
-            for r in self._routed_rows(enh, node):
+                inner.append(self._ab_row(enh))
+            inner.append(self._send_row(enh, node))
+            inner.append(self._section('Playing through'))
+            inner.extend(self._routed_rows(enh, node))
+            inner.append(self._output_row(enh))
+            for r in inner:
+                r.add_css_class('enh-inner')
                 row.add_row(r)
-            row.add_row(self._send_row(enh, node))
-            row.add_row(self._output_row(enh))
         return row
+
+    def _section(self, text):
+        """Small heading that splits the mini-mixer into its flow stages.
+
+        A real ListBoxRow, not a bare box: the accent edge is styled on the
+        `row` CSS node, so anything else here leaves a gap in that line.
+        """
+        label = Gtk.Label(label=text, xalign=0, margin_top=10,
+                          margin_bottom=3, margin_start=16, margin_end=16)
+        label.add_css_class('enh-section')
+        return Gtk.ListBoxRow(child=label, activatable=False,
+                              selectable=False)
 
     # ----------------------------------------------- inline EQ mini-mixer --
     def _volume_row(self, enh, node):
@@ -225,6 +246,7 @@ class EnhancePage:
                           lambda v: self._on_eq_volume(node.id, v, pct),
                           compact=True)
         ctl.set_value(node.volume if node.volume is not None else 1.0)
+        ctl.set_meter(node.serial)
         mute = Gtk.ToggleButton(
             icon_name='audio-volume-muted-symbolic', valign=Gtk.Align.CENTER,
             active=node.muted, tooltip_text='Mute this equalizer')
@@ -288,7 +310,7 @@ class EnhancePage:
             rows.append(row)
         if not routed:
             row = Adw.ActionRow(
-                title='Nothing is playing through this equalizer',
+                title='Nothing yet',
                 subtitle='Send an app here, or make it the default output.',
                 title_lines=1, subtitle_lines=1)
             row.add_prefix(Gtk.Image.new_from_icon_name(
@@ -301,10 +323,9 @@ class EnhancePage:
         """Picker for apps that aren't already going through this equalizer."""
         routed = {s.id for s in self._routed_here(enh, node)}
         candidates = [s for s in self._streams if s.id not in routed]
-        row = Adw.ActionRow(
-            title='Send an app here',
-            subtitle='Route a running app’s audio into this equalizer.')
-        row.add_prefix(Gtk.Image.new_from_icon_name('go-next-symbolic'))
+        # No prefix icon: this is a label plus a dropdown, so it lines up with
+        # the Output Device row rather than sitting indented against it.
+        row = Adw.ActionRow(title='Select an app for playback')
         if not candidates:
             row.set_subtitle('No other app is playing right now.')
             row.set_sensitive(False)
@@ -366,11 +387,13 @@ class EnhancePage:
 
     def _ab_row(self, enh):
         bypassed = enh.id in self._bypass
+        # The toggle already states which side is live, so this only carries a
+        # subtitle while bypassed, where "it didn't stop" is the non-obvious
+        # part worth saying.
         row = Adw.ActionRow(
             title='Compare', title_lines=1, subtitle_lines=1,
-            subtitle=('Audio is going straight to the output — the equalizer '
-                      'is still running.' if bypassed
-                      else 'Audio is going through the equalizer.'))
+            subtitle=('Going straight to the output — the equalizer is still '
+                      'running.' if bypassed else ''))
         row.add_prefix(Gtk.Image.new_from_icon_name(
             'media-playlist-repeat-symbolic'))
         box = Gtk.Box(valign=Gtk.Align.CENTER)
@@ -420,9 +443,7 @@ class EnhancePage:
             async_call(lambda: enhance.unbypass(enh, state), done)
 
     def _output_row(self, enh):
-        row = Adw.ComboRow(
-            title='Output device',
-            subtitle='Where the equalized audio is sent.')
+        row = Adw.ComboRow(title='Output Device')
         labels = ['Follow default'] + [n.description for n in self._sinks]
         row.set_model(Gtk.StringList.new(labels))
         target = enh.params.get('target', '')

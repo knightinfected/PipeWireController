@@ -14,13 +14,15 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gtk  # noqa: E402
 
-from ..backend import pw, rules
+from ..backend import prefs, pw, rules
+from .volume import make_volume
 from .widgets import async_call, esc, group, page_scroller, pill
 
 
 class DevicesPage:
     def __init__(self, window):
         self.window = window
+        self.volume_style = prefs.get('volume_style')
         self.sinks = group('Outputs (sinks)',
                            'Star a device to make it the default output. '
                            'Expand a hardware device for per-device settings.')
@@ -97,21 +99,15 @@ class DevicesPage:
                            else 'Could not set default'), self.refresh()))
         star.connect('clicked', make_default)
 
-        scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1.5, 0.01)
-        scale.set_size_request(150, -1)
-        scale.set_valign(Gtk.Align.CENTER)
-        scale.add_mark(1.0, Gtk.PositionType.BOTTOM, None)
+        # Goes through make_volume like every other volume control, so this
+        # page follows the chosen volume style and shows the live level too.
         updating = {'v': False}
-        if node.volume is not None:
-            updating['v'] = True
-            scale.set_value(node.volume)
-            updating['v'] = False
-
-        def vol_changed(s):
-            if not updating['v']:
-                value = s.get_value()
-                async_call(lambda: pw.set_volume(node.id, value))
-        scale.connect('value-changed', vol_changed)
+        vol = make_volume(
+            self.volume_style,
+            lambda value: async_call(lambda: pw.set_volume(node.id, value)),
+            compact=True)
+        vol.set_value(node.volume if node.volume is not None else 1.0)
+        vol.set_meter(node.serial)
 
         mute = Gtk.ToggleButton(icon_name='audio-volume-muted-symbolic',
                                 tooltip_text='Mute')
@@ -125,7 +121,7 @@ class DevicesPage:
                 async_call(lambda: pw.set_mute(node.id, active))
         mute.connect('toggled', mute_toggled)
 
-        row.add_suffix(scale)
+        row.add_suffix(vol.widget)
         row.add_suffix(mute)
         row.add_suffix(star)
 

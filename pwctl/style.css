@@ -103,6 +103,59 @@ menubutton.style-picker > button:hover {
     margin: 2px;
 }
 
+/* ------------------------------- managed device list: running vs stopped -- */
+
+/* A running device gets an accent edge.  On an expander that edge runs the
+   full height, so the device and its mini-mixer read as one block instead of
+   dissolving into the rows below it. */
+/* The edge is repeated on the nested rows: each row paints its own
+   background, so a shadow on the expander alone survives only in the gaps
+   between them.  Repeating it at the same offset makes one unbroken line. */
+row.enh-active,
+row.enh-inner {
+    box-shadow: inset 3px 0 0 0 @accent_color;
+}
+
+row.enh-active {
+    background: alpha(@accent_color, 0.07);
+    /* a little air underneath so a running device doesn't run straight into
+       the stopped ones listed below it */
+    margin-bottom: 10px;
+}
+
+/* Flow-stage headings inside a running device's mini-mixer. */
+.enh-section {
+    font-size: 0.8em;
+    font-weight: 700;
+    opacity: 0.55;
+}
+
+/* Nested rows keep a real surface — dropping it entirely would let the
+   window's translucency show straight through and break the list.  Sitting
+   on the block's tint, this reads as slightly lifted: nested, not sibling. */
+row.enh-inner {
+    background: @card_bg_color;
+}
+
+/* Stopped devices keep their layout but spend less ink, so the eye lands on
+   whatever is actually running. */
+/* Only the device's own icon and text fade — never the suffix buttons, which
+   stay just as clickable and must not read as disabled. */
+row.enh-idle .enh-icon,
+row.enh-idle label.subtitle {
+    opacity: 0.45;
+}
+
+/* stopped devices are separated too, just less than a running one */
+row.enh-idle {
+    margin-bottom: 6px;
+}
+
+row.enh-idle label.title {
+    opacity: 0.62;
+    font-weight: 400;
+}
+
 /* inline info note (wraps, unlike Adw.Banner) */
 .pwctl-note {
     background: alpha(@accent_color, 0.12);
