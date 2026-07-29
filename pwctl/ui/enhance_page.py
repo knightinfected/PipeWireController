@@ -58,6 +58,27 @@ class EnhancePage:
         drop.connect('drop', self._on_drop)
         imp_row.add_controller(drop)
         eq_head.add(imp_row)
+
+        # Experimental: live A/B.  Off by default — with it off the page
+        # behaves exactly as before.
+        self.ab_enabled = bool(prefs.get('eq_ab_compare'))
+        self._bypass = {}               # enh.id -> state dict from enhance.bypass
+        beta = group('Experimental',
+                     'Features still being tried out. They can be turned off '
+                     'again at any time and change nothing when off.')
+        ab_row = Adw.SwitchRow(
+            title='Live A/B compare',
+            subtitle='Switch an equalizer in and out while it keeps running, '
+                     'so playback never pauses. Bypassed audio goes straight '
+                     'to the output device.')
+        ab_row.add_prefix(Gtk.Image.new_from_icon_name(
+            'applications-science-symbolic'))
+        ab_row.set_active(self.ab_enabled)
+        ab_row.connect('notify::active', self._toggle_ab)
+        beta.set_header_suffix(pill('beta', 'warning'))
+        beta.add(ab_row)
+        self.beta_group = beta
+
         self.eq_listing = group('Configured equalizers')
 
         mic_head = group(
@@ -71,7 +92,7 @@ class EnhancePage:
             lambda: self._open_mic(None)))
         self.mic_listing = group('Configured microphones')
 
-        self.widget = page_scroller(eq_head, self.eq_listing,
+        self.widget = page_scroller(eq_head, self.beta_group, self.eq_listing,
                                     mic_head, self.mic_listing)
         self._eq_rows = []
         self._mic_rows = []
@@ -163,7 +184,9 @@ class EnhancePage:
         # so add them reversed there to match the plain rows and the rest of
         # the app (enable switch always on the far right).
         suffixes = []
-        if enh.enabled:
+        if enh.id in self._bypass:
+            suffixes.append(pill('bypassed', 'warning'))
+        elif enh.enabled:
             suffixes.append(pill(state, state_style(state)))
         if enh.kind == 'eq' and enh.enabled:
             suffixes.append(icon_button(
@@ -184,7 +207,11 @@ class EnhancePage:
         if rich:
             row.set_expanded(True)
             row.add_row(self._volume_row(enh, node))
-            row.add_row(self._app_row(enh, node))
+            if self.ab_enabled:
+                row.add_row(self._ab_row(enh))
+            for r in self._routed_rows(enh, node):
+                row.add_row(r)
+            row.add_row(self._send_row(enh, node))
             row.add_row(self._output_row(enh))
         return row
 
@@ -214,27 +241,181 @@ class EnhancePage:
         pct.set_text(f'{round(value * 100)}%')
         async_call(lambda: pw.set_volume(node_id, value))
 
-    def _app_row(self, enh, node):
-        row = Adw.ComboRow(
+    # -- app routing ------------------------------------------------------
+    # Two Firefox windows are two streams with the same application.name, so
+    # the app name alone can't identify one.  Everything here is labelled
+    # "app — what it is playing" (media.name), which is what the user sees in
+    # the app itself.
+
+    def _stream_label(self, s):
+        detail = s.media or s.binary or ''
+        if detail and detail.strip().lower() == s.name.strip().lower():
+            detail = ''
+        return s.name, detail or 'Playing'
+
+    def _stream_icon(self, s):
+        return Gtk.Image.new_from_icon_name(s.icon or 'multimedia-player-symbolic')
+
+    def _routed_here(self, enh, node):
+        """Streams currently playing into this equalizer.
+
+        While bypassed the streams have been moved to the output device on
+        purpose, so keep listing the ones we moved — they still belong to this
+        equalizer as far as the user is concerned.
+        """
+        state = self._bypass.get(enh.id)
+        if state:
+            ids = set(state.get('streams') or [])
+            return [s for s in self._streams if s.id in ids]
+        return [s for s in self._streams if s.target_id == node.id]
+
+    def _routed_rows(self, enh, node):
+        rows = []
+        routed = self._routed_here(enh, node)
+        bypassed = enh.id in self._bypass
+        for s in routed:
+            title, detail = self._stream_label(s)
+            row = Adw.ActionRow(title=title, subtitle=detail,
+                                title_lines=1, subtitle_lines=1)
+            row.add_prefix(self._stream_icon(s))
+            if bypassed:
+                row.add_suffix(pill('bypassed', 'dim'))
+            row.add_suffix(icon_button(
+                'window-close-symbolic', 'Stop sending this app here',
+                lambda *_, st=s: self._unroute(enh, st)))
+            rows.append(row)
+        if not routed:
+            row = Adw.ActionRow(
+                title='Nothing is playing through this equalizer',
+                subtitle='Send an app here, or make it the default output.',
+                title_lines=1, subtitle_lines=1)
+            row.add_prefix(Gtk.Image.new_from_icon_name(
+                'audio-volume-muted-symbolic'))
+            row.set_sensitive(False)
+            rows.append(row)
+        return rows
+
+    def _send_row(self, enh, node):
+        """Picker for apps that aren't already going through this equalizer."""
+        routed = {s.id for s in self._routed_here(enh, node)}
+        candidates = [s for s in self._streams if s.id not in routed]
+        row = Adw.ActionRow(
             title='Send an app here',
             subtitle='Route a running app’s audio into this equalizer.')
-        labels = ['Choose an app…'] + [s.name for s in self._streams]
-        row.set_model(Gtk.StringList.new(labels))
-        # connect AFTER the model is set so the initial selection doesn't fire
+        row.add_prefix(Gtk.Image.new_from_icon_name('go-next-symbolic'))
+        if not candidates:
+            row.set_subtitle('No other app is playing right now.')
+            row.set_sensitive(False)
+            return row
 
-        def on_sel(*_):
-            i = row.get_selected()
-            if i <= 0 or i - 1 >= len(self._streams):
-                return
-            s = self._streams[i - 1]
-
-            def done(ok, e):
-                self.window.toast(f'{s.name} → {enh.name}' if ok
-                                  else 'Could not route that app')
-                GLib.timeout_add(500, lambda: (self.refresh(), False)[1])
-            async_call(lambda: pw.move_stream(s.id, node.serial), done)
-        row.connect('notify::selected', on_sel)
+        btn = Gtk.MenuButton(label='Choose an app…', valign=Gtk.Align.CENTER)
+        box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        box.add_css_class('boxed-list')
+        pop = Gtk.Popover(child=box, width_request=320)
+        for s in candidates:
+            title, detail = self._stream_label(s)
+            item = Adw.ActionRow(title=title, subtitle=detail, activatable=True,
+                                 title_lines=1, subtitle_lines=1)
+            item.add_prefix(self._stream_icon(s))
+            item.connect('activated',
+                         lambda *_, st=s: (pop.popdown(),
+                                           self._route(enh, node, st)))
+            box.append(item)
+        btn.set_popover(pop)
+        row.add_suffix(btn)
+        row.set_activatable_widget(btn)
         return row
+
+    def _route(self, enh, node, s):
+        def done(ok, e):
+            self.window.toast(f'{s.name} → {enh.name}' if ok
+                              else 'Could not route that app')
+            GLib.timeout_add(500, lambda: (self.refresh(), False)[1])
+        async_call(lambda: pw.move_stream(s.id, node.serial), done)
+
+    def _unroute(self, enh, s):
+        """Send one app back to the equalizer's output device."""
+        def work():
+            dest = enhance.eq_output_node(enh)
+            if dest is None:
+                return None
+            return dest.description if pw.move_stream(s.id, dest.serial) else None
+
+        def done(where, e):
+            self.window.toast(f'{s.name} → {where}' if where
+                              else 'Could not move that app')
+            if self._bypass.get(enh.id):
+                ids = self._bypass[enh.id].get('streams') or []
+                self._bypass[enh.id]['streams'] = [i for i in ids if i != s.id]
+            GLib.timeout_add(500, lambda: (self.refresh(), False)[1])
+        async_call(work, done)
+
+    # -- experimental live A/B --------------------------------------------
+    def _toggle_ab(self, row, _p):
+        self.ab_enabled = row.get_active()
+        prefs.save(eq_ab_compare=self.ab_enabled)
+        if not self.ab_enabled:
+            # leaving the experiment must not strand anything in bypass
+            for enh in enhance.list_enhancements():
+                state = self._bypass.pop(enh.id, None)
+                if state:
+                    async_call(lambda e=enh, s=state: enhance.unbypass(e, s))
+        self.refresh()
+
+    def _ab_row(self, enh):
+        bypassed = enh.id in self._bypass
+        row = Adw.ActionRow(
+            title='Compare', title_lines=1, subtitle_lines=1,
+            subtitle=('Audio is going straight to the output — the equalizer '
+                      'is still running.' if bypassed
+                      else 'Audio is going through the equalizer.'))
+        row.add_prefix(Gtk.Image.new_from_icon_name(
+            'media-playlist-repeat-symbolic'))
+        box = Gtk.Box(valign=Gtk.Align.CENTER)
+        box.add_css_class('linked')
+        on_btn = Gtk.ToggleButton(label='Equalized', active=not bypassed)
+        off_btn = Gtk.ToggleButton(label='Bypassed', active=bypassed,
+                                   group=on_btn)
+        on_btn.set_tooltip_text('Play through the equalizer')
+        off_btn.set_tooltip_text('Play around the equalizer, without stopping '
+                                 'it — the streams move, so nothing pauses')
+        def clicked(btn, want_bypass):
+            # grouped toggles: the button being switched *off* also emits,
+            # so only act on the one that just became active
+            if not btn.get_active():
+                return
+            self._set_bypass(enh, want_bypass)
+        on_btn.connect('toggled', clicked, False)
+        off_btn.connect('toggled', clicked, True)
+        box.append(on_btn)
+        box.append(off_btn)
+        row.add_suffix(box)
+        return row
+
+    def _set_bypass(self, enh, want_bypass):
+        if want_bypass == (enh.id in self._bypass):
+            return
+
+        def done(result, e):
+            if want_bypass:
+                ok, msg, state = result if result else (False, str(e or ''), {})
+                if ok:
+                    self._bypass[enh.id] = state
+                    self.window.toast(f'Bypassed — playing straight to {msg}'
+                                      if msg else 'Bypassed')
+                else:
+                    self.window.toast(msg or 'Could not bypass')
+            else:
+                ok, msg = result if result else (False, str(e or ''))
+                self.window.toast('Back through the equalizer' if ok
+                                  else (msg or 'Could not restore'))
+            GLib.timeout_add(400, lambda: (self.refresh(), False)[1])
+
+        if want_bypass:
+            async_call(lambda: enhance.bypass(enh), done)
+        else:
+            state = self._bypass.pop(enh.id, {})
+            async_call(lambda: enhance.unbypass(enh, state), done)
 
     def _output_row(self, enh):
         row = Adw.ComboRow(
@@ -269,6 +450,9 @@ class EnhancePage:
         enabled = sw.get_active()
         if enabled == enh.enabled:
             return
+        # stopping the unit removes the sink, so any bypass bookkeeping for it
+        # is meaningless from here on
+        self._bypass.pop(enh.id, None)
 
         def done(result, e):
             ok, err = result if result else (False, str(e or ''))
@@ -279,6 +463,7 @@ class EnhancePage:
         async_call(lambda: enhance.set_enabled(enh, enabled), done)
 
     def _delete(self, enh):
+        self._bypass.pop(enh.id, None)
         async_call(lambda: enhance.delete(enh),
                    lambda r, e: (self.window.toast('Deleted'), self.refresh()))
 

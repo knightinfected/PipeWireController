@@ -328,6 +328,90 @@ def _find_node(name: str):
     return next((n for n in pw.list_audio_nodes() if n.name == name), None)
 
 
+# ------------------------------------------------------------ live A/B --
+# Comparing "with EQ" against "without EQ" must never stop the unit: stopping
+# it removes the sink, and every stream playing into it is torn down (apps
+# pause, some stop outright).  Instead we leave the equalizer running and move
+# the streams around it — a target.object metadata change, which PipeWire
+# relinks without interrupting the stream.
+
+def eq_output_node(enh: Enhancement, dump=None):
+    """The sink the equalizer is actually feeding right now.
+
+    Ground truth is the live link from our `.out` playback stream, so this is
+    right even when the target is "Follow default".  Falls back to the
+    configured target, then to the default sink.
+    """
+    from . import pw
+    dump = dump if dump is not None else pw.pw_dump()
+    nodes = pw.list_audio_nodes(dump)
+    out = next((s for s in pw.list_streams(dump)
+                if s.props.get('node.name') == f'{enh.node_name}.out'), None)
+    if out is not None and out.target_id is not None:
+        node = next((n for n in nodes if n.id == out.target_id), None)
+        if node is not None:
+            return node
+    target = enh.params.get('target')
+    if target:
+        node = next((n for n in nodes if n.name == target), None)
+        if node is not None:
+            return node
+    return next((n for n in nodes if n.is_sink and n.is_default
+                 and n.name != enh.node_name), None)
+
+
+def _eq_streams(enh: Enhancement, dump):
+    """Real app streams currently playing into this equalizer."""
+    from . import pw
+    nodes = pw.list_audio_nodes(dump)
+    eq = next((n for n in nodes if n.name == enh.node_name), None)
+    if eq is None:
+        return None, []
+    streams = [s for s in pw.list_streams(dump)
+               if s.is_playback and s.target_id == eq.id
+               and not s.props.get('node.name', '').startswith('pwctl.')]
+    return eq, streams
+
+
+def bypass(enh: Enhancement) -> tuple[bool, str, dict]:
+    """Route everything playing into the equalizer straight to its output.
+
+    Returns (ok, message, state); pass `state` back to `unbypass()` to put the
+    streams (and the default sink, if we changed it) back.
+    """
+    from . import pw
+    dump = pw.pw_dump()
+    eq, streams = _eq_streams(enh, dump)
+    if eq is None:
+        return False, 'The equalizer is not running.', {}
+    dest = eq_output_node(enh, dump)
+    if dest is None or dest.name == enh.node_name:
+        return False, 'No output device to compare against.', {}
+    moved = [s.id for s in streams if pw.move_stream(s.id, dest.serial)]
+    # If the EQ is the system output, new streams would keep landing in it —
+    # move the default too, and remember to put it back.
+    was_default = eq.is_default
+    if was_default:
+        pw.set_default(dest.id)
+    return True, dest.description, {'streams': moved, 'was_default': was_default,
+                                    'dest': dest.name}
+
+
+def unbypass(enh: Enhancement, state: dict) -> tuple[bool, str]:
+    """Send the streams `bypass()` moved back into the equalizer."""
+    from . import pw
+    dump = pw.pw_dump()
+    nodes = pw.list_audio_nodes(dump)
+    eq = next((n for n in nodes if n.name == enh.node_name), None)
+    if eq is None:
+        return False, 'The equalizer is not running.'
+    for sid in state.get('streams') or []:
+        pw.move_stream(sid, eq.serial)
+    if state.get('was_default'):
+        pw.set_default(eq.id)
+    return True, ''
+
+
 def make_default_output(enh: Enhancement) -> tuple[bool, str]:
     """Insert an equalizer into the active path by making it the default sink.
 
