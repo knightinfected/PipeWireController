@@ -14,7 +14,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Adw, Gtk  # noqa: E402
 
 from ..backend import pw, rules
-from .widgets import async_call, group, icon_button, page_scroller
+from .widgets import async_call, esc, group, icon_button, page_scroller
 
 MATCH_KEYS = [
     ('application.name', 'Application name'),
@@ -125,8 +125,8 @@ class PolicyPage:
             bits.append('no auto-connect')
         if props.get('node.dont-reconnect'):
             bits.append('never moved automatically')
-        row = Adw.ActionRow(title=f'{value}',
-                            subtitle=f'{key} · ' + (' · '.join(bits) or
+        row = Adw.ActionRow(title=esc(value),
+                            subtitle=esc(key) + ' · ' + (' · '.join(bits) or
                                                     'no actions'),
                             title_lines=1, subtitle_lines=1)
         row.add_prefix(Gtk.Image.new_from_icon_name(
@@ -157,9 +157,9 @@ class PolicyPage:
         current = stored if stored is not None else \
             node.props.get('priority.session', 0)
         row = Adw.SpinRow.new_with_range(0, 5000, 50)
-        row.set_title(node.description)
+        row.set_title(esc(node.description))
         row.set_subtitle(('Output · ' if node.is_sink else 'Input · ')
-                         + node.name
+                         + esc(node.name)
                          + ('' if stored is None else ' · overridden'))
         try:
             row.set_value(float(current))

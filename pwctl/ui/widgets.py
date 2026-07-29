@@ -24,6 +24,17 @@ def async_call(fn, callback=None):
     threading.Thread(target=worker, daemon=True).start()
 
 
+def esc(text) -> str:
+    """Make arbitrary text safe for an Adw row title or subtitle.
+
+    Those labels are Pango markup, so a bare '&' or '<' in a song title, a
+    device description or a name the user typed makes the whole label fail to
+    render.  Setting use-markup=False doesn't help: the parse happens as the
+    property is set, before we could turn it off.
+    """
+    return GLib.markup_escape_text(str(text)) if text else ''
+
+
 def pill(text: str, style: str) -> Gtk.Label:
     """Small colored status label. style: success | warning | error | dim"""
     lbl = Gtk.Label(label=text)

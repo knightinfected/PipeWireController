@@ -11,7 +11,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Adw, Gtk  # noqa: E402
 
 from ..backend import hrir
-from .widgets import (async_call, confirm, group, icon_button, page_scroller,
+from .widgets import (async_call, confirm, esc, group, icon_button, page_scroller,
                       pick_files, pick_folder, pill)
 
 KIND_STYLE = {'hesuvi': 'success', 'true-stereo': 'warning',
@@ -89,7 +89,7 @@ class HrirPage:
                    f'{info.duration:.2f} s  ·  {info.fmt} {info.subtype}')
         else:
             sub = f'unreadable: {info.error}'
-        row = Adw.ActionRow(title=info.path.name, subtitle=sub)
+        row = Adw.ActionRow(title=esc(info.path.name), subtitle=sub)
         row.add_prefix(Gtk.Image.new_from_icon_name('folder-music-symbolic'))
         row.add_suffix(pill(info.kind_label.split(' (')[0],
                             KIND_STYLE.get(info.kind, 'dim')))

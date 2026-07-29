@@ -12,7 +12,7 @@ from gi.repository import Adw, Gtk  # noqa: E402
 
 from ..backend import chains, hrir, pw, system
 from ..backend.templates import TEMPLATES
-from .widgets import (async_call, confirm, group, icon_button, page_scroller,
+from .widgets import (async_call, confirm, esc, group, icon_button, page_scroller,
                       pick_file, pill, state_style, text_viewer_dialog)
 
 AUDIO_FILTER = [('Impulse responses', ['*.wav', '*.flac', '*.ogg', '*.w64',
@@ -87,7 +87,7 @@ class ChainsPage:
         sub = tpl['title'] if tpl else 'Imported config'
         if meta.hrir:
             sub += f'  ·  {Path(meta.hrir).name}'
-        row = Adw.ActionRow(title=meta.name, subtitle=sub)
+        row = Adw.ActionRow(title=esc(meta.name), subtitle=sub)
         row.add_prefix(Gtk.Image.new_from_icon_name(
             'audio-input-microphone-symbolic'
             if meta.template == 'rnnoise-source'

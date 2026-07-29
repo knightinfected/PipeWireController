@@ -15,7 +15,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from ..backend import enhance, prefs, pw
 from .volume import make_volume
-from .widgets import async_call, confirm, group, icon_button, page_scroller, \
+from .widgets import async_call, confirm, esc, group, icon_button, page_scroller, \
     pick_file, pill, state_style
 
 
@@ -174,7 +174,7 @@ class EnhancePage:
         # and a live output picker) revealed under its row.
         rich = enh.kind == 'eq' and enh.enabled and node is not None
         row = (Adw.ExpanderRow if rich else Adw.ActionRow)(
-            title=enh.name, subtitle=subtitle,
+            title=esc(enh.name), subtitle=subtitle,
             title_lines=1, subtitle_lines=1)
         row.add_prefix(Gtk.Image.new_from_icon_name(icon))
         sw = Gtk.Switch(valign=Gtk.Align.CENTER, active=enh.enabled,
@@ -248,10 +248,12 @@ class EnhancePage:
     # the app itself.
 
     def _stream_label(self, s):
+        # Both halves land in Adw row titles, which are Pango markup — and a
+        # media.name is whatever an app decided to call what it is playing.
         detail = s.media or s.binary or ''
         if detail and detail.strip().lower() == s.name.strip().lower():
             detail = ''
-        return s.name, detail or 'Playing'
+        return esc(s.name), esc(detail) or 'Playing'
 
     def _stream_icon(self, s):
         return Gtk.Image.new_from_icon_name(s.icon or 'multimedia-player-symbolic')

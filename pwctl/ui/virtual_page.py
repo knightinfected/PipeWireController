@@ -10,7 +10,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from ..backend import pw, virtual
 from ..backend.surround import LAYOUTS as _SPEAKER_LAYOUTS
-from .widgets import async_call, confirm, group, icon_button, page_scroller, \
+from .widgets import async_call, confirm, esc, group, icon_button, page_scroller, \
     pick_file, pill, state_style
 
 POSITION_NAMES = virtual.POSITION_NAMES
@@ -109,7 +109,7 @@ class VirtualPage:
             self._rows.append(row)
 
     def _device_row(self, dev: virtual.VirtualDevice, state: str):
-        row = Adw.ActionRow(title=dev.name,
+        row = Adw.ActionRow(title=esc(dev.name),
                             subtitle=virtual.KINDS.get(dev.kind, dev.kind)
                             + ('' if dev.persistent else ' · temporary'),
                             title_lines=1, subtitle_lines=1)
@@ -389,7 +389,7 @@ class VirtualDialog(Adw.Window):
                 continue
             if n.name.startswith('pwctl.'):
                 continue          # avoid self-referencing loops
-            row = Adw.SwitchRow(title=n.description, subtitle=n.name)
+            row = Adw.SwitchRow(title=esc(n.description), subtitle=esc(n.name))
             row.set_active(n.name in selected)
             self.members_group.add(row)
             self.member_rows[n.name] = row

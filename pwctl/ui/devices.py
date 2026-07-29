@@ -15,7 +15,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Adw, Gtk  # noqa: E402
 
 from ..backend import pw, rules
-from .widgets import async_call, group, page_scroller, pill
+from .widgets import async_call, esc, group, page_scroller, pill
 
 
 class DevicesPage:
@@ -65,11 +65,13 @@ class DevicesPage:
         rule = rule_data['nodes'].get(node.name, {})
 
         if is_hw:
-            row = Adw.ExpanderRow(title=node.description, subtitle=node.name)
+            row = Adw.ExpanderRow(title=esc(node.description),
+                                  subtitle=esc(node.name))
             if rule:
                 row.add_suffix(pill('customized', 'warning'))
         else:
-            row = Adw.ActionRow(title=node.description, subtitle=node.name,
+            row = Adw.ActionRow(title=esc(node.description),
+                                subtitle=esc(node.name),
                                 title_lines=1, subtitle_lines=1)
         icon = ('application-x-addon-symbolic' if node.is_virtual
                 else 'audio-speakers-symbolic' if node.is_sink
