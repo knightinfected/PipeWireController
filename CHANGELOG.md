@@ -39,10 +39,8 @@ and commit log.
   genuinely unavailable, so a playable-but-unprobeable profile like *Pro Audio*
   is no longer falsely marked.
 
-<!-- Screenshot pending: capture the Output Devices tab showing the separate
-"Configuration" row, and the ⚠ + Reset on a stuck/Off card. Save as a
-kebab-case PNG in screenshots/ and add an ![Caption](screenshots/name.png)
-line here. -->
+![The card Configuration row, separate from the device rows](screenshots/dashboard-configuration-row.png)
+![A stuck profile flagged, with one-click Reset to a working one](screenshots/dashboard-configuration-reset.png)
 
 ---
 
