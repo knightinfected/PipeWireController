@@ -79,6 +79,10 @@ thank you.
 - **The per-endpoint switch now says what it does** — "Hide this output" /
   "Hide this input", with a subtitle that spells out that the sound card itself
   stays listed. Both switches sit together on the device's own row.
+- **Both switches are in the Patchbay too.** Double-clicking a node opens its
+  dialog, which offered only the old endpoint hide; it now has the card-level
+  one as well, and points at the Devices page for un-hiding — a hidden node
+  can't be double-clicked to get it back.
 - **New "Hidden devices" list, with Unhide.** A hidden device is gone from the
   audio graph, so it used to disappear from PipeWire Controller too and the
   only way back was deleting the generated WirePlumber file by hand. Hidden
