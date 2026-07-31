@@ -25,6 +25,50 @@ and commit log.
 
 ## Unreleased
 
+**Hiding a device now really hides it, honest graph numbers, and chained
+equalizers**
+
+Reported by [u/yhcheng888](https://www.reddit.com/user/yhcheng888/) on
+r/linuxaudio, who ran the app next to Carla with a twenty-plugin signal chain —
+thank you.
+
+- **DSP load now means what it means everywhere else.** The Monitor page was
+  reporting the busiest *single* node's processing time, so a long chain of
+  plugin sinks read ~6% while Carla showed 43% for the same graph. It now
+  reports the driver's cycle time against the quantum — the figure JACK-based
+  tools report — averaged the way they average it.
+- **Xruns are counted as dropouts, not as error counters.** PipeWire raises an
+  error count on the driver *and* on the node that overran, so adding up every
+  node turned one dropout into several; the counter also ran from each node's
+  creation rather than from when you started watching. The Monitor page now
+  counts missed graph cycles since the page opened, with a reset button.
+- **Level meters no longer go missing on big setups.** The cap on simultaneous
+  meters was below the number of outputs a plugin-heavy system has, and rows
+  past it showed an empty meter — indistinguishable from a silent device. The
+  cap is higher, a row that can't get a meter shows none at all instead of a
+  false one, and it picks one up as soon as another row lets go.
+- **A restarted device gets its meter back.** A filter chain that restarts
+  comes back with a new internal serial, and rows kept metering the old one —
+  one device would sit silent while its neighbours worked.
+- **Meters no longer outlive the app.** They are separate capture processes: if
+  the app was killed or crashed they kept running, kept a link open on the
+  device and kept appearing in `pw-top`. They are now stopped on exit however
+  it happens, and any left over by an earlier run are cleared out at startup.
+  They no longer appear in the Monitor page's node list either.
+- **Patchbay: nodes that share a name no longer stack.** Two windows of the
+  same app are two nodes with the same name, and they were drawn at exactly the
+  same spot — one hidden under the other, its links apparently going nowhere.
+  New nodes are also placed in the first free gap instead of blindly at the top
+  of their column.
+- **Patchbay: a connected monitor port is always shown.** Monitor ports are
+  hidden by default as clutter, but chaining sinks through them is a normal way
+  to build a signal path, and hiding those links made a node that was being fed
+  audio look completely unconnected.
+- **Equalizers can be chained.** An equalizer's Output device may now be
+  another equalizer, so you can stack curves (room correction into a taste
+  curve, say) instead of squeezing everything into one. Routings that would
+  loop back on themselves are the only ones excluded.
+
 **Hiding a device now really hides it — and there's a way back**
 
 - **New "Hide the whole sound card" switch.** Hiding a single output or input
