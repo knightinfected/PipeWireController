@@ -925,9 +925,10 @@ class NodeDialog(Adw.Dialog):
         rename = self.rename_row.get_text().strip()
         hide = self.hide_row.get_active()
         name = self.node.name
+        label = self.node.label
 
         def work():
-            rules.set_node_rule(name, rename=rename, hide=hide)
+            rules.set_node_rule(name, rename=rename, hide=hide, desc=label)
             return True
         async_call(work, lambda r, e: (
             self.window.toast('Rules saved' if not e else f'Failed: {e}'),

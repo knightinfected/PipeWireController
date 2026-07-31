@@ -51,13 +51,15 @@ DEVICE_PROP_SCHEMA = [
 
 
 def load() -> dict:
-    data = {'nodes': {}, 'apps': []}
+    data = {'nodes': {}, 'apps': [], 'devices': {}}
     try:
         stored = json.loads(RULES_PATH.read_text())
         if isinstance(stored.get('nodes'), dict):
             data['nodes'] = stored['nodes']
         if isinstance(stored.get('apps'), list):
             data['apps'] = stored['apps']
+        if isinstance(stored.get('devices'), dict):
+            data['devices'] = stored['devices']
     except (OSError, ValueError):
         pass
     return data
@@ -74,10 +76,18 @@ def node_rule(node_name: str) -> dict:
     return load()['nodes'].get(node_name, {})
 
 
-def set_node_rule(node_name: str, rename=None, hide=None, props=None):
-    """Update one node's rule; empty rules are removed entirely."""
+def set_node_rule(node_name: str, rename=None, hide=None, props=None,
+                  desc=None):
+    """Update one node's rule; empty rules are removed entirely.
+
+    desc is the node's description at the time of writing, remembered only so
+    the un-hide list can show a readable name: a hidden node is refused by
+    WirePlumber, so it never appears in the graph again to be looked up.
+    """
     data = load()
     rule = data['nodes'].get(node_name, {})
+    if desc:
+        rule['desc'] = desc
     if rename is not None:
         if rename:
             rule['rename'] = rename
@@ -101,7 +111,9 @@ def set_node_rule(node_name: str, rename=None, hide=None, props=None):
             rule['props'] = cur
         else:
             rule.pop('props', None)
-    if rule:
+    # 'desc' alone is bookkeeping, not a customization — a rule holding
+    # nothing else is dropped, so the row stops showing as customized.
+    if any(k in rule for k in ('rename', 'hide', 'props')):
         data['nodes'][node_name] = rule
     else:
         data['nodes'].pop(node_name, None)
@@ -113,6 +125,60 @@ def clear_node_rule(node_name: str):
     if node_name in data['nodes']:
         del data['nodes'][node_name]
         save(data)
+
+
+# --------------------------------------------------------------- card rules --
+
+def device_rule(device_name: str) -> dict:
+    return load()['devices'].get(device_name, {})
+
+
+def set_device_rule(device_name: str, hide=None, desc=None):
+    """Hide a whole sound card.
+
+    Node rules disable one endpoint (WirePlumber refuses to create that node),
+    which is why a hidden output leaves its card behind in the desktop's sound
+    settings, profile switcher and all.  Disabling the *device* removes the
+    card itself, and with it every input and output it would have published.
+    """
+    data = load()
+    rule = data['devices'].get(device_name, {})
+    if desc:
+        rule['desc'] = desc
+    if hide is not None:
+        if hide:
+            rule['hide'] = True
+        else:
+            rule.pop('hide', None)
+    if rule.get('hide'):
+        data['devices'][device_name] = rule
+    else:
+        data['devices'].pop(device_name, None)
+    save(data)
+
+
+def clear_device_rule(device_name: str):
+    data = load()
+    if device_name in data['devices']:
+        del data['devices'][device_name]
+        save(data)
+
+
+def hidden_entries() -> list[dict]:
+    """Everything currently hidden, for the un-hide list on the Devices page.
+
+    Hidden objects are absent from the graph by definition, so this is the
+    only place they can be listed — and their label has to come from what we
+    stored when hiding them.
+    """
+    data = load()
+    out = [{'kind': 'device', 'key': name, 'label': rule.get('desc') or name}
+           for name, rule in sorted(data['devices'].items())
+           if rule.get('hide')]
+    out += [{'kind': 'node', 'key': name, 'label': rule.get('desc') or name}
+            for name, rule in sorted(data['nodes'].items())
+            if rule.get('hide')]
+    return out
 
 
 # ---------------------------------------------------------------- app rules --
@@ -171,12 +237,24 @@ def wireplumber_data() -> dict:
             'actions': {'update-props': {'api.alsa.headroom': 1024}},
         })
 
-    for name, rule in sorted(load()['nodes'].items()):
+    stored = load()
+    for name, rule in sorted(stored['nodes'].items()):
         props = _update_props_for(rule)
         if not props:
             continue
         entry = {'matches': [{'node.name': name}],
                  'actions': {'update-props': props}}
+        if name.startswith('bluez_'):
+            bluez_rules.append(entry)
+        else:
+            alsa_rules.append(entry)
+
+    # Whole-card hides match the device, not its nodes — see set_device_rule.
+    for name, rule in sorted(stored['devices'].items()):
+        if not rule.get('hide'):
+            continue
+        entry = {'matches': [{'device.name': name}],
+                 'actions': {'update-props': {'device.disabled': True}}}
         if name.startswith('bluez_'):
             bluez_rules.append(entry)
         else:

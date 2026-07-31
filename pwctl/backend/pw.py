@@ -149,6 +149,27 @@ def list_audio_nodes(dump=None) -> list[AudioNode]:
     return nodes
 
 
+def card_map(dump=None) -> dict[int, tuple[str, str]]:
+    """device.id -> (device.name, description) for every audio card.
+
+    Lets a node row name the card it belongs to (node props carry device.id,
+    not the card's name).
+    """
+    dump = dump if dump is not None else pw_dump()
+    cards = {}
+    for obj in dump:
+        if obj.get('type') != 'PipeWire:Interface:Device':
+            continue
+        props = (obj.get('info') or {}).get('props') or {}
+        if props.get('media.class') != 'Audio/Device':
+            continue
+        name = props.get('device.name')
+        if name:
+            cards[obj['id']] = (name, props.get('device.description')
+                                or props.get('device.nick') or name)
+    return cards
+
+
 # ----------------------------------------------------------------- streams --
 
 STREAM_CLASSES = ('Stream/Output/Audio', 'Stream/Input/Audio')

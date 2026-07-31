@@ -23,6 +23,31 @@ and commit log.
 
 ---
 
+## Unreleased
+
+**Hiding a device now really hides it — and there's a way back**
+
+- **New "Hide the whole sound card" switch.** Hiding a single output or input
+  only refuses that endpoint — the card itself stayed registered, so your
+  desktop's sound settings kept offering it, profile switcher and all. The new
+  switch disables the card and every input and output it provides, everywhere.
+  ([#3](https://github.com/knightinfected/PipeWireController/issues/3))
+- **The per-endpoint switch now says what it does** — "Hide this output" /
+  "Hide this input", with a subtitle that spells out that the sound card itself
+  stays listed. Both switches sit together on the device's own row.
+- **New "Hidden devices" list, with Unhide.** A hidden device is gone from the
+  audio graph, so it used to disappear from PipeWire Controller too and the
+  only way back was deleting the generated WirePlumber file by hand. Hidden
+  endpoints and cards are now listed at the bottom of the Devices page and can
+  be brought back with one click.
+- **A hide that isn't actually in effect is flagged.** If the generated
+  WirePlumber file was removed or edited by hand, the app no longer insists the
+  device is hidden — the entry is marked *not in effect*, and Unhide clears it.
+
+_Screenshots: to be added before release._
+
+---
+
 ## [v0.3.6](https://github.com/knightinfected/PipeWireController/releases/tag/v0.3.6) — 2026-07-29
 **Everything shows its level — plus the new Equalizer and Microphone cleanup pages**
 

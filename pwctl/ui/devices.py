@@ -39,30 +39,41 @@ class DevicesPage:
         btn.connect('clicked', lambda *_: self.refresh())
         refresh_row.add_suffix(btn)
         head.add(refresh_row)
-        self.widget = page_scroller(head, self.sinks, self.sources)
+        self.hidden = group(
+            'Hidden devices',
+            'A hidden endpoint or card is gone from the audio graph, so this '
+            'is the only place it can still be listed. Unhiding takes effect '
+            'after the WirePlumber restart.')
+        self.hidden.set_visible(False)
+        self.widget = page_scroller(head, self.sinks, self.sources,
+                                    self.hidden)
         self._rows = []
+        self._hidden_rows = []
         self.widget.connect('map', lambda *_: self.refresh())
 
     def refresh(self):
         def collect():
-            return pw.list_audio_nodes(), rules.load()
+            dump = pw.pw_dump()
+            return pw.list_audio_nodes(dump), pw.card_map(dump), rules.load()
         async_call(collect, self._apply)
 
     def _apply(self, result, error):
         if error or result is None:
             return
-        nodes, rule_data = result
+        nodes, cards, rule_data = result
         for row, parent in self._rows:
             parent.remove(row)
         self._rows = []
         for node in nodes:
             parent = self.sinks if node.is_sink else self.sources
-            row = self._device_row(node, rule_data)
+            row = self._device_row(node, rule_data, cards)
             parent.add(row)
             self._rows.append((row, parent))
+        self._fill_hidden({n.name for n in nodes},
+                          {name for name, _desc in cards.values()})
 
     # ------------------------------------------------------------- row -----
-    def _device_row(self, node, rule_data):
+    def _device_row(self, node, rule_data, cards):
         is_hw = node.name.startswith(('alsa_', 'bluez_'))
         rule = rule_data['nodes'].get(node.name, {})
 
@@ -126,11 +137,15 @@ class DevicesPage:
         row.add_suffix(star)
 
         if is_hw:
-            self._add_settings_rows(row, node, rule)
+            try:
+                card = cards.get(int(node.props.get('device.id')))
+            except (TypeError, ValueError):
+                card = None
+            self._add_settings_rows(row, node, rule, rule_data, card)
         return row
 
     # ------------------------------------------------- per-device settings --
-    def _add_settings_rows(self, row, node, rule):
+    def _add_settings_rows(self, row, node, rule, rule_data, card):
         props = rule.get('props', {})
         updating = {'v': True}
 
@@ -142,13 +157,28 @@ class DevicesPage:
         row.add_row(rename)
 
         hide = Adw.SwitchRow(
-            title='Hide device',
-            subtitle='Disables the node — it disappears from all apps.')
+            title='Hide this output' if node.is_sink else 'Hide this input',
+            subtitle='Disables this endpoint — it disappears from every app. '
+                     'The sound card itself stays listed in your desktop’s '
+                     'sound settings.')
         hide.set_active(bool(rule.get('hide')))
         hide.connect('notify::active', lambda r, _p: (
             None if updating['v'] else self._save(node,
                                                   hide=r.get_active())))
         row.add_row(hide)
+
+        if card:
+            card_name, card_desc = card
+            card_hide = Adw.SwitchRow(
+                title='Hide the whole sound card',
+                subtitle=f'Disables {esc(card_desc)} and every input and '
+                         'output it provides, everywhere.')
+            card_hide.set_active(
+                bool(rule_data['devices'].get(card_name, {}).get('hide')))
+            card_hide.connect('notify::active', lambda r, _p: (
+                None if updating['v'] else self._save_card(
+                    card_name, card_desc, r.get_active())))
+            row.add_row(card_hide)
 
         for key, title, subtitle, kind, extra in rules.DEVICE_PROP_SCHEMA:
             if key in ('priority.session', 'priority.driver'):
@@ -194,11 +224,66 @@ class DevicesPage:
             row.add_row(sub_row)
         updating['v'] = False
 
-    def _save(self, node, rename=None, hide=None, props=None):
+    # -------------------------------------------------------- hidden list --
+    def _fill_hidden(self, live_nodes, live_cards):
+        for row in self._hidden_rows:
+            self.hidden.remove(row)
+        self._hidden_rows = []
+        entries = rules.hidden_entries()
+        self.hidden.set_visible(bool(entries))
+        for entry in entries:
+            live = entry['key'] in (live_cards if entry['kind'] == 'device'
+                                    else live_nodes)
+            row = Adw.ActionRow(title=esc(entry['label']),
+                                subtitle=esc(entry['key']),
+                                title_lines=1, subtitle_lines=1)
+            row.add_prefix(Gtk.Image.new_from_icon_name(
+                'view-conceal-symbolic'))
+            if entry['kind'] == 'device':
+                row.add_suffix(pill('whole card', 'dim'))
+            if live:
+                # Still in the graph while marked hidden: the generated
+                # WirePlumber drop-in was removed or edited by hand.
+                row.add_suffix(pill('not in effect', 'warning'))
+            btn = Gtk.Button(label='Unhide')
+            btn.set_valign(Gtk.Align.CENTER)
+            btn.connect('clicked', lambda _b, e=entry: self._unhide(e))
+            row.add_suffix(btn)
+            self.hidden.add(row)
+            self._hidden_rows.append(row)
+
+    def _unhide(self, entry):
         def work():
-            rules.set_node_rule(node.name, rename=rename, hide=hide,
-                                props=props)
+            if entry['kind'] == 'device':
+                rules.set_device_rule(entry['key'], hide=False)
+            else:
+                rules.set_node_rule(entry['key'], hide=False)
             return True
         async_call(work, lambda r, e: (
             self.window.toast(f'Failed: {e}') if e
-            else self.window.flag_restart('wireplumber')))
+            else (self.window.flag_restart('wireplumber'), self.refresh())))
+
+    def _save(self, node, rename=None, hide=None, props=None):
+        def work():
+            rules.set_node_rule(node.name, rename=rename, hide=hide,
+                                props=props, desc=node.description)
+            return True
+
+        def done(_r, error):
+            if error:
+                self.window.toast(f'Failed: {error}')
+                return
+            self.window.flag_restart('wireplumber')
+            if hide is not None:
+                self.refresh()      # only a hide changes the hidden list;
+                                    # rebuilding on every tweak would collapse
+                                    # the expander the user is working in
+        async_call(work, done)
+
+    def _save_card(self, card_name, card_desc, hide):
+        def work():
+            rules.set_device_rule(card_name, hide=hide, desc=card_desc)
+            return True
+        async_call(work, lambda r, e: (
+            self.window.toast(f'Failed: {e}') if e
+            else (self.window.flag_restart('wireplumber'), self.refresh())))
