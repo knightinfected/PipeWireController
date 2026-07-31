@@ -59,6 +59,8 @@ class GraphArea(Gtk.DrawingArea):
         self.page = page
         self.g = graph.Graph()
         self.pos: dict[str, list] = dict(prefs.get('graph_positions') or {})
+        self._keys: dict[int, str] = {}      # node id -> position key
+        self._linked_ports: set[int] = set()  # port ids carrying a link
         self.view = _View()
         self.show_midi = True
         self.show_monitors = False
@@ -99,6 +101,10 @@ class GraphArea(Gtk.DrawingArea):
     # ------------------------------------------------------------- data ----
     def set_graph(self, g: graph.Graph):
         self.g = g
+        self._build_keys()
+        # cached once per snapshot: _visible_ports() runs per port per frame
+        self._linked_ports = {l.out_port for l in g.links}
+        self._linked_ports |= {l.in_port for l in g.links}
         if self.selected_link and not any(
                 l.id == self.selected_link.id for l in g.links):
             self.selected_link = None
@@ -106,6 +112,32 @@ class GraphArea(Gtk.DrawingArea):
             self.selected_node = None
         self._ensure_positions()
         self.queue_draw()
+
+    def _build_keys(self):
+        """Assign each node the key its saved position is stored under.
+
+        node.name is the only identity that survives a restart (ids are
+        assigned per session and recycled), but it is *not* unique: two
+        windows of the same app are two nodes both called e.g. "Firefox", and
+        so are several instances of one module.  Keyed by name alone they
+        would share a position, i.e. sit exactly on top of each other with
+        their links running to whichever box happened to be drawn last.
+
+        So: nodes that share a name are numbered in id order.  The first keeps
+        the bare name, which keeps every position saved by earlier versions
+        valid, and the rest get "name#1", "name#2"...
+        """
+        self._keys = {}
+        seen: dict[str, int] = {}
+        for nid in sorted(self.g.nodes):
+            name = self.g.nodes[nid].name
+            n = seen.get(name, 0)
+            seen[name] = n + 1
+            self._keys[nid] = name if n == 0 else f'{name}#{n}'
+
+    def key(self, node) -> str:
+        """Position key for a node (falls back to its name if unknown)."""
+        return self._keys.get(node.id, node.name)
 
     def visible_nodes(self):
         for n in self.g.nodes.values():
@@ -119,50 +151,89 @@ class GraphArea(Gtk.DrawingArea):
         for p in plist:
             if p.is_midi and not self.show_midi:
                 continue
-            if p.is_monitor and not self.show_monitors:
+            # Monitor ports are hidden by default because most of them are
+            # unused clutter — but a *connected* one carries real audio, and
+            # chaining sinks through monitors is a normal way to build a
+            # signal path.  Hiding those made a node that is fed audio look
+            # completely unconnected, so connected monitors always show.
+            if (p.is_monitor and not self.show_monitors
+                    and p.id not in self._linked_ports):
                 continue
             out.append(p)
         return out
 
     def _ensure_positions(self):
-        col_y = {}
+        """Give every node a position, without ever covering an existing one.
+
+        Nodes the user has already arranged keep their saved spot; anything
+        new is dropped into the first gap in its column that nothing occupies.
+        Placing blind (the old behaviour) meant a node appearing mid-session —
+        or the second node of a same-named pair — could land exactly on top of
+        an arranged one and look like it was missing.
+        """
         order = sorted(self.visible_nodes(),
                        key=lambda n: (graph.KIND_COLUMN.get(n.kind, 1),
                                       n.label.lower()))
+
+        # Rectangles already claimed.  Two saved positions that are *exactly*
+        # equal are debris from the version that placed every node blind at
+        # the top of its column — dragging can't produce pixel-identical
+        # coordinates — so the later one is dropped and placed again.  Any
+        # other saved position is left alone: it may be arranged deliberately.
+        placed: list[tuple[float, float, float, float]] = []
+        claimed: set[tuple[float, float]] = set()
         for n in order:
-            if n.name in self.pos:
+            key = self.key(n)
+            if key not in self.pos:
+                continue
+            x, y = self.pos[key]
+            if (x, y) in claimed:
+                del self.pos[key]
+                continue
+            claimed.add((x, y))
+            placed.append((x, y, x + NODE_W, y + _node_height(n)))
+
+        for n in order:
+            key = self.key(n)
+            if key in self.pos:
                 continue
             col = graph.KIND_COLUMN.get(n.kind, 1)
-            y = col_y.get(col, 40.0)
-            self.pos[n.name] = [COL_X[col], y]
-            col_y[col] = y + _node_height(n) + 26
+            x, h = COL_X[col], _node_height(n)
+            y = 40.0
+            while True:
+                bottoms = [y1 for x0, y0, x1, y1 in placed
+                           if x0 < x + NODE_W and x < x1
+                           and y0 < y + h and y < y1]
+                if not bottoms:
+                    break
+                y = max(bottoms) + 26       # strictly increasing: terminates
+            self.pos[key] = [x, y]
+            placed.append((x, y, x + NODE_W, y + h))
 
     def auto_layout(self):
         for n in self.visible_nodes():
-            self.pos.pop(n.name, None)
+            self.pos.pop(self.key(n), None)
         self._ensure_positions()
         self._save_positions()
         self.queue_draw()
 
     def _save_positions(self):
         # only keep positions for nodes that still exist to avoid growth
-        live = {n.name for n in self.g.nodes.values()}
+        live = {self.key(n) for n in self.g.nodes.values()}
         prefs.save(graph_positions={k: v for k, v in self.pos.items()
                                     if k in live})
 
     def fit(self):
-        nodes = list(self.visible_nodes())
+        nodes = [n for n in self.visible_nodes() if self.key(n) in self.pos]
         if not nodes:
             return
-        xs = [self.pos[n.name][0] for n in nodes if n.name in self.pos]
-        ys = [self.pos[n.name][1] for n in nodes if n.name in self.pos]
+        xs = [self.pos[self.key(n)][0] for n in nodes]
+        ys = [self.pos[self.key(n)][1] for n in nodes]
         if not xs:
             return
         x0, y0 = min(xs) - 40, min(ys) - 40
-        x1 = max(self.pos[n.name][0] + NODE_W for n in nodes
-                 if n.name in self.pos) + 40
-        y1 = max(self.pos[n.name][1] + _node_height(n) for n in nodes
-                 if n.name in self.pos) + 40
+        x1 = max(self.pos[self.key(n)][0] + NODE_W for n in nodes) + 40
+        y1 = max(self.pos[self.key(n)][1] + _node_height(n) for n in nodes) + 40
         w, h = self.get_width(), self.get_height()
         if w < 10 or h < 10 or x1 <= x0 or y1 <= y0:
             return
@@ -175,9 +246,9 @@ class GraphArea(Gtk.DrawingArea):
     def _port_pos(self, port):
         """World coordinates of a port's connection point."""
         node = self.g.nodes.get(port.node_id)
-        if not node or node.name not in self.pos:
+        if not node or self.key(node) not in self.pos:
             return None
-        x, y = self.pos[node.name]
+        x, y = self.pos[self.key(node)]
         plist = self._visible_ports(node, port.direction)
         try:
             idx = [p.id for p in plist].index(port.id)
@@ -200,9 +271,9 @@ class GraphArea(Gtk.DrawingArea):
     def _hit_node(self, wx, wy):
         for node in sorted(self.visible_nodes(),
                            key=lambda n: 0, reverse=True):
-            if node.name not in self.pos:
+            if self.key(node) not in self.pos:
                 continue
-            x, y = self.pos[node.name]
+            x, y = self.pos[self.key(node)]
             if x <= wx <= x + NODE_W and y <= wy <= y + _node_height(node):
                 return node
         return None
@@ -265,7 +336,7 @@ class GraphArea(Gtk.DrawingArea):
             return
         node = self._hit_node(wx, wy)
         if node:
-            px, py = self.pos[node.name]
+            px, py = self.pos[self.key(node)]
             self.drag_node = (node, wx - px, wy - py)
             return
         self.drag_node = None
@@ -279,7 +350,7 @@ class GraphArea(Gtk.DrawingArea):
         elif self.drag_node:
             node, gx, gy = self.drag_node
             wx, wy = self.view.to_world(sx + dx, sy + dy)
-            self.pos[node.name] = [wx - gx, wy - gy]
+            self.pos[self.key(node)] = [wx - gx, wy - gy]
         else:
             self.view.ox = self._pan_start[0] + dx
             self.view.oy = self._pan_start[1] + dy
@@ -395,8 +466,9 @@ class GraphArea(Gtk.DrawingArea):
         op = next((p for p in (out_node.outputs if out_node else [])
                    if p.id == link.out_port), None)
         is_midi = bool(op and op.is_midi)
-        if op and op.is_monitor and not self.show_monitors:
-            return
+        # No separate visibility rule here: _link_points() already returns
+        # nothing when either end is a hidden port, so what is drawn always
+        # matches what has a visible port to attach to.
         running = bool(out_node and in_node and out_node.is_running
                        and in_node.is_running)
         selected = self.selected_link and link.id == self.selected_link.id
@@ -419,9 +491,9 @@ class GraphArea(Gtk.DrawingArea):
         cr.set_dash([])
 
     def _draw_node(self, cr, node, fg, dark):
-        if node.name not in self.pos:
+        if self.key(node) not in self.pos:
             return
-        x, y = self.pos[node.name]
+        x, y = self.pos[self.key(node)]
         hgt = _node_height(node)
         tint = KIND_TINT.get(node.kind, KIND_TINT['other'])
         selected = self.selected_node == node.id
@@ -539,8 +611,10 @@ class GraphPage:
         self.midi_btn.add_css_class('flat')
         self.midi_btn.connect('toggled', self._toggle_midi)
         bar.append(self.midi_btn)
-        self.mon_btn = Gtk.ToggleButton(label='Monitors', active=False,
-                                        tooltip_text='Show monitor ports')
+        self.mon_btn = Gtk.ToggleButton(
+            label='Monitors', active=False,
+            tooltip_text='Show every monitor port, including unused ones '
+                         '(connected monitors are always shown)')
         self.mon_btn.add_css_class('flat')
         self.mon_btn.connect('toggled', self._toggle_monitors)
         bar.append(self.mon_btn)
