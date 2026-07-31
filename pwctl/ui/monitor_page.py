@@ -17,12 +17,26 @@ UNIT_LABELS = {'pipewire.service': 'PipeWire',
                'wireplumber.service': 'WirePlumber',
                'pipewire-pulse.service': 'PipeWire-Pulse'}
 
-HISTORY = 60          # samples kept for the sparklines (~3 min at 3 s)
+POLL_CHOICES = (1, 2, 3, 5)   # seconds between samples; 1 s matches pw-top's
+POLL_DEFAULT = 1              # own batch cadence, which is the useful floor
+HISTORY_SEC = 180             # sparklines span ~3 min whatever the poll rate
 
-# Weight of a fresh sample in the DSP-load average.  pw-top gives one cycle's
-# worth of timing per sample, which on its own jitters wildly; JACK-style DSP
-# load is a running average, so we smooth to match what people compare against.
-LOAD_SMOOTHING = 0.35
+# Time constant of the DSP-load average, in seconds.
+#
+# `pw-top -b -n 2` returns one cycle's timing, not an average over the poll
+# interval: the first block is the initial state, the second is a single
+# measurement, and the whole call takes ~30 ms.  At a 2048/48000 quantum that
+# is one cycle in ~23 per second — so the running average JACK tools report
+# (they average in the engine, over every cycle) is something we can only
+# approximate here, and this average is the whole of that approximation.
+# Showing raw samples instead would put one arbitrary cycle on screen per
+# tick, which jitters far more than Carla's figure, not less.
+#
+# The weight is derived from the poll interval (LOAD_TAU below) rather than
+# fixed, so changing the rate changes how often the number updates without
+# changing how smoothed it is.  Sampling slower than the time constant can't
+# be smoothed at all, hence the clamp in _load_alpha().
+LOAD_TAU = 3.0
 
 XRUN_SUBTITLE = ('Graph cycles the driver could not complete, '
                  'counted while this page is open')
@@ -31,11 +45,17 @@ XRUN_SUBTITLE = ('Graph cycles the driver could not complete, '
 class Sparkline(Gtk.DrawingArea):
     """Tiny inline history graph for one metric."""
 
-    def __init__(self, width=120, height=26):
+    def __init__(self, width=120, height=26, history=HISTORY_SEC):
         super().__init__(content_width=width, content_height=height)
-        self.values = collections.deque(maxlen=HISTORY)
+        self.values = collections.deque(maxlen=history)
         self.max_hint = 1.0
         self.set_draw_func(self._draw)
+
+    def set_history(self, n):
+        """Re-window to n samples, keeping the most recent ones."""
+        if n != self.values.maxlen:
+            self.values = collections.deque(self.values, maxlen=n)
+            self.queue_draw()
 
     def push(self, value):
         self.values.append(max(0.0, value))
@@ -50,7 +70,7 @@ class Sparkline(Gtk.DrawingArea):
             return
         fg = self.get_style_context().get_color()
         top = max(self.max_hint, max(self.values)) or 1.0
-        step = w / (HISTORY - 1)
+        step = w / max(1, (self.values.maxlen or len(self.values)) - 1)
         n = len(self.values)
         cr.move_to(w - (n - 1) * step, h - self.values[0] / top * (h - 3) - 1)
         for i, v in enumerate(self.values):
@@ -81,6 +101,9 @@ class MonitorPage:
         self._load_avg = None       # smoothed DSP load, see _apply()
         self._log_cursor = None
         self._log_paused = False
+        poll = prefs.get('monitor_poll')
+        self._poll = poll if poll in POLL_CHOICES else POLL_DEFAULT
+        self._sparks = []           # every sparkline, re-windowed on rate change
 
         # ---- services ----
         svc = group('Services')
@@ -94,6 +117,7 @@ class MonitorPage:
             ram.add_css_class('dim-label')
             spark = Sparkline()
             spark.max_hint = 10.0
+            self._sparks.append(spark)
             restart = Gtk.Button(icon_name='view-refresh-symbolic',
                                  tooltip_text=f'Restart {label}',
                                  valign=Gtk.Align.CENTER)
@@ -112,6 +136,7 @@ class MonitorPage:
         self.xrun_label = Gtk.Label()
         self.xrun_label.add_css_class('numeric-value')
         self.xrun_spark = Sparkline()
+        self._sparks.append(self.xrun_spark)
         xrun_reset = Gtk.Button(icon_name='edit-clear-symbolic',
                                 tooltip_text='Reset the xrun counter',
                                 valign=Gtk.Align.CENTER)
@@ -130,9 +155,22 @@ class MonitorPage:
         self.load_label.add_css_class('numeric-value')
         self.load_spark = Sparkline()
         self.load_spark.max_hint = 1.0
+        self._sparks.append(self.load_spark)
         self.load_row.add_suffix(self.load_spark)
         self.load_row.add_suffix(self.load_label)
         health.add(self.load_row)
+
+        self.rate_row = Adw.ComboRow(
+            title='Sample rate',
+            subtitle='How often this page reads the graph. Faster reacts '
+                     'sooner and averages more cycles into the DSP load; '
+                     'slower is lighter on the system.',
+            model=Gtk.StringList.new([f'Every {s} s' for s in POLL_CHOICES]))
+        self.rate_row.set_selected(POLL_CHOICES.index(self._poll))
+        # connected after set_selected, so restoring the pref can't re-enter
+        self.rate_row.connect('notify::selected', self._on_rate)
+        health.add(self.rate_row)
+        self._apply_history()
 
         # ---- notifications ----
         notif = group('System notifications',
@@ -204,10 +242,35 @@ class MonitorPage:
         self.widget.connect('unmap', self._on_unmap)
 
     # ---------------------------------------------------------------- poll --
+    def _load_alpha(self) -> float:
+        """EMA weight giving a LOAD_TAU-second average at the current rate.
+
+        Clamped at 1.0: polling slower than the time constant leaves nothing
+        to average, so the raw sample is the honest answer.
+        """
+        return min(1.0, self._poll / LOAD_TAU)
+
+    def _apply_history(self):
+        """Keep the sparklines spanning HISTORY_SEC at whatever the rate is."""
+        samples = max(30, int(HISTORY_SEC / self._poll))
+        for spark in self._sparks:
+            spark.set_history(samples)
+
+    def _on_rate(self, row, _p):
+        poll = POLL_CHOICES[row.get_selected()]
+        if poll == self._poll:
+            return
+        self._poll = poll
+        prefs.save(monitor_poll=poll)
+        self._apply_history()
+        if self._timer:                     # resume on the new interval
+            GLib.source_remove(self._timer)
+            self._timer = GLib.timeout_add_seconds(poll, self._tick)
+
     def _on_map(self, *_a):
         self.refresh()
         if not self._timer:
-            self._timer = GLib.timeout_add_seconds(3, self._tick)
+            self._timer = GLib.timeout_add_seconds(self._poll, self._tick)
 
     def _on_unmap(self, *_a):
         if self._timer:
@@ -293,7 +356,7 @@ class MonitorPage:
             self.xrun_row.set_subtitle(XRUN_SUBTITLE)
 
         self._load_avg = snap.load if self._load_avg is None else (
-            self._load_avg + LOAD_SMOOTHING * (snap.load - self._load_avg))
+            self._load_avg + self._load_alpha() * (snap.load - self._load_avg))
         self.load_label.set_label(f'{self._load_avg * 100:.0f}%')
         self.load_spark.push(snap.load)
 
