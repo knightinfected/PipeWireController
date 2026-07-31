@@ -10,10 +10,15 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from .levels import METER_NODE
 from .system import run, sysctl_user
 
 MONITOR_UNITS = ['pipewire.service', 'wireplumber.service',
                  'pipewire-pulse.service']
+
+# pw-top marks follower nodes in the NAME column: '+' for synchronous
+# followers, '=' for async ones.  Anything else is a driver.
+FOLLOWER_MARKS = ('+', '=')
 
 
 # ------------------------------------------------------------------ pw-top --
@@ -39,8 +44,14 @@ _TOP_RE = re.compile(
     r'\s+(\d+)')
 
 
-def top_sample() -> list[TopRow]:
-    """One pw-top batch sample. Uses two iterations so timings are real."""
+def top_sample(include_meters: bool = False) -> list[TopRow]:
+    """One pw-top batch sample. Uses two iterations so timings are real.
+
+    Our own level-meter taps are capture clients like any other and show up as
+    one `pwctl.meter` row each.  They are hidden from the patchbay and the
+    stream lists already, so they are dropped here too unless explicitly
+    asked for — otherwise a page with meters open buries the real nodes.
+    """
     rc, out, _ = run(['pw-top', '-b', '-n', '2'], timeout=10)
     if rc != 0:
         return []
@@ -57,28 +68,68 @@ def top_sample() -> list[TopRow]:
         raw_name = line[name_col:] if len(line) > name_col else ''
         fmt = line[m.end():name_col].strip() if len(line) > name_col \
             else line[m.end():].strip()
-        # follower rows are shown indented with "+ " under their driver
-        is_driver = not raw_name.startswith(('+', ' +'))
+        # follower rows are shown under their driver, marked '+' (sync) or
+        # '=' (async); everything else drives its own graph
+        marked = raw_name.lstrip()
+        is_driver = not marked.startswith(FOLLOWER_MARKS)
+        name = marked.lstrip('+= ').strip()
+        if not include_meters and (name == METER_NODE
+                                   or name.endswith(' ' + METER_NODE)):
+            continue
         rows.append(TopRow(
             state=m.group(1), id=int(m.group(2)), quantum=int(m.group(3)),
             rate=int(m.group(4)), wait=m.group(5), busy=m.group(6),
             w_q=m.group(7), b_q=m.group(8), errors=int(m.group(9)),
-            fmt=fmt, name=raw_name.strip().lstrip('+ '), is_driver=is_driver))
+            fmt=fmt, name=name, is_driver=is_driver))
     return rows
 
 
 def xrun_total(rows: list[TopRow]) -> int:
-    return sum(r.errors for r in rows)
+    """Graph dropouts, counted the way JACK-based tools count them.
+
+    pw-top's ERR column is per node and counts from when that node was
+    created.  For a driver it means "the graph did not complete a cycle"; for
+    a follower it means "this node overran its deadline" — so a single
+    dropout increments the driver *and* the node that caused it, and summing
+    every row multiplies one event into several.  Carla and friends report
+    the graph figure, so only drivers are counted here.
+
+    Still cumulative since each driver appeared: callers that want a session
+    figure should accumulate the positive deltas (see the Monitor page), which
+    also survives a driver disappearing and taking its counter with it.
+    """
+    return sum(r.errors for r in rows if r.is_driver)
+
+
+def node_errors(rows: list[TopRow]) -> int:
+    """Per-node error counters (followers only) — the detail behind an xrun."""
+    return sum(r.errors for r in rows if not r.is_driver)
 
 
 def dsp_load(rows: list[TopRow]) -> float:
-    """Highest busy/quantum fraction among running nodes (0..1+)."""
+    """Graph load 0..1+, defined as every other audio tool defines it.
+
+    From man pw-top: "The W/Q time of the driver node is a good measure of the
+    graph load.  The running averages of the driver W/Q ratios are used as the
+    DSP load in other (JACK) tools."  A driver's WAIT is the time from waking
+    up to the graph completing the cycle, so W/Q is the share of the period
+    the whole graph needed.
+
+    B/Q, which this used to report, is one node's own processing time.  For a
+    long chain of filters — twenty plugin sinks in series, say — every
+    individual node looks idle while the graph as a whole is nearly out of
+    time, which is exactly the case where the number matters.
+
+    Instantaneous by nature; smoothing over samples is the caller's job.
+    """
     load = 0.0
     for r in rows:
-        try:
-            load = max(load, float(r.b_q))
-        except ValueError:
+        if not r.is_driver:
             continue
+        try:
+            load = max(load, float(r.w_q))
+        except ValueError:
+            continue            # '---' / '???': driver idle or not signalled
     return load
 
 
@@ -145,8 +196,9 @@ class HealthSnapshot:
     states: dict = field(default_factory=dict)      # unit -> active/failed/...
     procs: dict = field(default_factory=dict)       # unit -> ProcSample
     top: list = field(default_factory=list)         # TopRow list
-    xruns: int = 0
-    load: float = 0.0
+    xruns: int = 0          # graph dropouts (driver rows), since node start
+    node_errors: int = 0    # per-node error counters behind them
+    load: float = 0.0       # driver W/Q, instantaneous
 
 
 def health_snapshot() -> HealthSnapshot:
@@ -157,6 +209,7 @@ def health_snapshot() -> HealthSnapshot:
         snap.procs[unit] = proc_sample(service_pid(unit))
     snap.top = top_sample()
     snap.xruns = xrun_total(snap.top)
+    snap.node_errors = node_errors(snap.top)
     snap.load = dsp_load(snap.top)
     return snap
 

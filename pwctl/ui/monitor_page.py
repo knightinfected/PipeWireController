@@ -19,6 +19,14 @@ UNIT_LABELS = {'pipewire.service': 'PipeWire',
 
 HISTORY = 60          # samples kept for the sparklines (~3 min at 3 s)
 
+# Weight of a fresh sample in the DSP-load average.  pw-top gives one cycle's
+# worth of timing per sample, which on its own jitters wildly; JACK-style DSP
+# load is a running average, so we smooth to match what people compare against.
+LOAD_SMOOTHING = 0.35
+
+XRUN_SUBTITLE = ('Graph cycles the driver could not complete, '
+                 'counted while this page is open')
+
 
 class Sparkline(Gtk.DrawingArea):
     """Tiny inline history graph for one metric."""
@@ -31,6 +39,10 @@ class Sparkline(Gtk.DrawingArea):
 
     def push(self, value):
         self.values.append(max(0.0, value))
+        self.queue_draw()
+
+    def clear(self):
+        self.values.clear()
         self.queue_draw()
 
     def _draw(self, _a, cr, w, h):
@@ -59,7 +71,14 @@ class MonitorPage:
         self._timer = None
         self._busy = False
         self._prev_procs = {}
-        self._last_xruns = None
+        # Xruns are counted as a session figure: pw-top's ERR counters run
+        # from each node's creation, so only the positive deltas between our
+        # own samples are accumulated.  That also survives a driver going away
+        # and taking its counter with it (the raw total drops; the delta is
+        # clamped at 0 rather than counting backwards).
+        self._xrun_prev = None
+        self._xrun_session = 0
+        self._load_avg = None       # smoothed DSP load, see _apply()
         self._log_cursor = None
         self._log_paused = False
 
@@ -89,18 +108,24 @@ class MonitorPage:
         # ---- graph health ----
         health = group('Graph health')
         self.xrun_row = Adw.ActionRow(
-            title='Xruns (dropouts)',
-            subtitle='Total processing errors reported by all nodes')
+            title='Xruns (dropouts)', subtitle=XRUN_SUBTITLE)
         self.xrun_label = Gtk.Label()
         self.xrun_label.add_css_class('numeric-value')
         self.xrun_spark = Sparkline()
+        xrun_reset = Gtk.Button(icon_name='edit-clear-symbolic',
+                                tooltip_text='Reset the xrun counter',
+                                valign=Gtk.Align.CENTER)
+        xrun_reset.add_css_class('flat')
+        xrun_reset.connect('clicked', self._reset_xruns)
         self.xrun_row.add_suffix(self.xrun_spark)
         self.xrun_row.add_suffix(self.xrun_label)
+        self.xrun_row.add_suffix(xrun_reset)
         health.add(self.xrun_row)
 
         self.load_row = Adw.ActionRow(
             title='DSP load',
-            subtitle='Busiest node: share of the quantum spent processing')
+            subtitle='Time to process one graph cycle against the quantum, '
+                     'averaged — the same figure JACK tools report')
         self.load_label = Gtk.Label()
         self.load_label.add_css_class('numeric-value')
         self.load_spark = Sparkline()
@@ -188,6 +213,15 @@ class MonitorPage:
         if self._timer:
             GLib.source_remove(self._timer)
             self._timer = None
+        # Sampling stops here, so the counters must not attribute whatever
+        # happened while the page was away to the next single sample.
+        self._xrun_prev = None
+
+    def _reset_xruns(self, *_a):
+        self._xrun_session = 0
+        self.xrun_spark.clear()
+        self.xrun_label.set_label('0')
+        self.xrun_row.set_subtitle(XRUN_SUBTITLE)
 
     def _tick(self):
         self.refresh()
@@ -237,31 +271,38 @@ class MonitorPage:
                 widgets['ram'].set_label('—')
             self._prev_procs[unit] = cur
 
-        self.xrun_label.set_label(str(snap.xruns))
-        if self._last_xruns is not None:
-            delta = snap.xruns - self._last_xruns
-            self.xrun_spark.push(max(0, delta))
-            if delta > 0:
-                self.xrun_row.set_subtitle(
-                    f'+{delta} new since last sample')
-                if prefs.get('notify_xruns'):
-                    self.window.notify_user(
-                        'Audio dropouts detected',
-                        f'{delta} new xrun(s) in the PipeWire graph')
-            else:
-                self.xrun_row.set_subtitle(
-                    'Total processing errors reported by all nodes')
-        self._last_xruns = snap.xruns
+        delta = 0
+        if self._xrun_prev is not None:
+            # clamped: a driver that disappeared takes its counter with it
+            delta = max(0, snap.xruns - self._xrun_prev)
+            self._xrun_session += delta
+        self._xrun_prev = snap.xruns
+        self.xrun_spark.push(delta)
+        self.xrun_label.set_label(str(self._xrun_session))
+        if delta > 0:
+            self.xrun_row.set_subtitle(f'+{delta} new since the last sample')
+            if prefs.get('notify_xruns'):
+                self.window.notify_user(
+                    'Audio dropouts detected',
+                    f'{delta} new xrun(s) in the PipeWire graph')
+        elif snap.node_errors:
+            self.xrun_row.set_subtitle(
+                f'{XRUN_SUBTITLE} · {snap.node_errors} node-level error(s) '
+                'reported since those nodes started')
+        else:
+            self.xrun_row.set_subtitle(XRUN_SUBTITLE)
 
-        self.load_label.set_label(f'{snap.load * 100:.0f}%')
+        self._load_avg = snap.load if self._load_avg is None else (
+            self._load_avg + LOAD_SMOOTHING * (snap.load - self._load_avg))
+        self.load_label.set_label(f'{self._load_avg * 100:.0f}%')
         self.load_spark.push(snap.load)
 
         lines = [f'{"":1} {"ID":>4} {"QUANT":>6} {"RATE":>6} {"WAIT":>8} '
-                 f'{"BUSY":>8} {"B/Q":>5} {"ERR":>4}  NAME']
+                 f'{"BUSY":>8} {"W/Q":>5} {"B/Q":>5} {"ERR":>4}  NAME']
         for r in snap.top:
             name = r.name if r.is_driver else f'  + {r.name}'
             lines.append(f'{r.state:1} {r.id:>4} {r.quantum:>6} {r.rate:>6} '
-                         f'{r.wait:>8} {r.busy:>8} {r.b_q:>5} '
+                         f'{r.wait:>8} {r.busy:>8} {r.w_q:>5} {r.b_q:>5} '
                          f'{r.errors:>4}  {name}')
         self.top_view.get_buffer().set_text('\n'.join(lines))
 
