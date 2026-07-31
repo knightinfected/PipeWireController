@@ -38,6 +38,7 @@ AMBER_MAX = (-3.0 - levels.FLOOR_DB) / -levels.FLOOR_DB
 
 STRIP_HEIGHT = 5        # thickness of the level bar under a slider
 REDRAW_EPSILON = 0.004  # don't repaint for changes nobody can see
+RETRY_SEC = 3           # how often a row without a meter slot tries again
 
 
 def level_color(pos: float):
@@ -78,7 +79,9 @@ class _VolBase:
         # live level state, all zero unless a meter is attached
         self._serial = None
         self._subscribed = False
+        self._metering = False      # a meter is attached AND being drawn
         self._tick_id = None
+        self._retry_id = None
         self._level = 0.0
         self._hold = 0.0
         self._live = False
@@ -103,26 +106,76 @@ class _VolBase:
         self.widget.connect('destroy', lambda *_: self._detach())
 
     def set_meter(self, serial):
-        """Show the live level of this node serial (None turns it off)."""
+        """Show the live level of this node serial (None turns it off).
+
+        Safe (and cheap) to call on every refresh: a node that is destroyed
+        and recreated — a filter chain restarting, say — comes back with a new
+        object.serial while PipeWire may well recycle its object id, so a row
+        that only ever set this once would keep metering a serial that no
+        longer exists.
+        """
         serial = int(serial) if serial else None
         if serial == self._serial:
             return
         self._detach()
         self._serial = serial
-        self._meter_shown(serial is not None)
+        self._set_metering(serial is not None)
         if serial is not None and self.widget.get_mapped():
             self._attach()
+
+    def _set_metering(self, shown: bool):
+        """Single switch for 'this control is showing a live level'.
+
+        Styles must not infer it from the serial: a row can be asked to meter
+        a node and still not get a capture slot, and then the control has to
+        go back to being a plain volume control.
+        """
+        self._metering = bool(shown)
+        self._meter_shown(self._metering)
 
     def _attach(self):
         if self._subscribed or self._serial is None:
             return
         if not levels.subscribe(self._serial):
+            # No slot free.  Hide the strip instead of leaving an empty one:
+            # an empty meter is exactly what a silent device looks like, so
+            # showing one here would be a lie rather than a missing feature.
+            self._set_metering(False)
+            if levels.at_capacity():
+                self._start_retry()
             return
+        self._stop_retry()
         self._subscribed = True
+        self._set_metering(True)
         if self._tick_id is None:
             self._tick_id = self.widget.add_tick_callback(self._tick)
 
+    def _start_retry(self):
+        if self._retry_id is None:
+            self._retry_id = GLib.timeout_add_seconds(RETRY_SEC, self._retry)
+
+    def _stop_retry(self):
+        if self._retry_id is not None:
+            GLib.source_remove(self._retry_id)
+            self._retry_id = None
+
+    def _retry(self):
+        """Take a meter slot as soon as another row gives one up."""
+        if self._serial is None or self._subscribed \
+                or not self.widget.get_mapped():
+            self._retry_id = None
+            return GLib.SOURCE_REMOVE
+        if not levels.subscribe(self._serial):
+            return GLib.SOURCE_CONTINUE
+        self._subscribed = True
+        self._set_metering(True)
+        if self._tick_id is None:
+            self._tick_id = self.widget.add_tick_callback(self._tick)
+        self._retry_id = None
+        return GLib.SOURCE_REMOVE
+
     def _detach(self):
+        self._stop_retry()
         if self._tick_id is not None:
             self.widget.remove_tick_callback(self._tick_id)
             self._tick_id = None
@@ -386,7 +439,7 @@ class _MeterVol(_VolBase):
         # Without a meter this is a volume readout, exactly as before.  With
         # one, the segments show the audio — which is what a segment bar
         # looks like it is showing — and the volume setting becomes a marker.
-        metering = self._serial is not None
+        metering = self._metering
         vol_pos = self._value / MAX_VOL if MAX_VOL else 0.0
 
         for i in range(n):
@@ -417,6 +470,9 @@ class _MeterVol(_VolBase):
 
     def _level_widget(self):
         return self.area
+
+    def _meter_shown(self, shown):
+        self.area.queue_draw()      # segments swap between volume and audio
 
     def set_value(self, v):
         self._value = v

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 from pathlib import Path
 
 import gi
@@ -10,7 +11,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from .backend import graph, prefs, presets, pw, system
+from .backend import graph, levels, prefs, presets, pw, system
 from .ui.chains_page import ChainsPage
 from .ui.dashboard import Dashboard
 from .ui.devices import DevicesPage
@@ -429,6 +430,13 @@ class App(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+        # Meters are child processes and outlive a crash or a kill, so clear
+        # out anything an earlier run left behind before starting new ones.
+        levels.reap_orphans()
+        # ...and make sure this run leaves nothing behind either: a plain
+        # `kill` (or Ctrl-C) would otherwise skip every Gtk shutdown path.
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, self._on_signal)
         css = Gtk.CssProvider()
         css_file = Path(__file__).parent / 'style.css'
         if css_file.is_file():
@@ -440,6 +448,14 @@ class App(Adw.Application):
     def do_activate(self):
         win = self.get_active_window() or Window(self)
         win.present()
+
+    def _on_signal(self):
+        self.quit()                 # runs do_shutdown, which stops the meters
+        return GLib.SOURCE_REMOVE
+
+    def do_shutdown(self):
+        levels.stop_all()
+        Adw.Application.do_shutdown(self)
 
 
 def main():

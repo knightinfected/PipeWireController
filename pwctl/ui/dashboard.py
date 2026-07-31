@@ -176,6 +176,10 @@ class _StreamRow(_VolumeRowBase):
         """devices: list of (serial, label, device-node-id)."""
         self.updating = True
         try:
+            # Rows are reused while the membership (node ids) holds, but ids
+            # get recycled and serials do not — so re-point the meter every
+            # time or a restarted node keeps a meter aimed at a dead serial.
+            self.vol.set_meter(stream.serial)
             self.title.set_label(stream.name)
             sub = stream.media if stream.media != stream.name else ''
             self.subtitle.set_label(sub)
@@ -254,6 +258,7 @@ class _DeviceRow(_VolumeRowBase):
     def update(self, node):
         self.updating = True
         try:
+            self.vol.set_meter(node.serial)      # see _StreamRow.update
             self.title.set_label(node.description)
             self.set_tooltip_text(node.name)
 

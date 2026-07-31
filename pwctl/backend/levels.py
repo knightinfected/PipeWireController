@@ -32,7 +32,15 @@ from . import system
 # -- capture ----------------------------------------------------------------
 
 PEAK_RATE = 25          # peak updates per second (PipeWire resampler side)
-MAX_METERS = 24         # safety cap: don't spawn unbounded capture processes
+
+# Safety cap so a huge graph can't spawn unbounded capture processes.  Each
+# pw-record costs ~0.6 MB proportional (its ~9 MB RSS is nearly all shared
+# libraries) plus one passive node in the graph, so 40 is roughly 25 MB — and
+# 24, the original value, was below the endpoint count of the machines that
+# actually asked for meters: a mixer full of plugin sinks has 30-40 of them.
+# Rows that don't get a slot show no meter at all rather than an empty one
+# (see ui/volume.py), and pick one up as soon as another row lets go.
+MAX_METERS = 40
 
 # A meter is a real capture stream, and some desktop shells raise an "app is
 # recording" indicator for those.  `stream.monitor=true` is the property that
@@ -42,6 +50,9 @@ MAX_METERS = 24         # safety cap: don't spawn unbounded capture processes
 MARKER = 'pwctl.meter'      # stamped on every meter stream so our own graph
                             # and monitor views can hide them by flag rather
                             # than by matching node names
+METER_NODE = 'pwctl.meter'  # node.name of the capture taps.  pw-top only
+                            # prints node.name, so the Monitor page has to
+                            # recognise our own taps by name there.
 
 # -- ballistics -------------------------------------------------------------
 
@@ -111,7 +122,7 @@ class _Meter:
             'node.passive': 'true',     # never drive the graph
             'stream.monitor': 'true',   # a monitor tap, not a recording
             'media.name': 'Peak detect',
-            'node.name': 'pwctl.meter',
+            'node.name': METER_NODE,
             'application.name': 'PipeWire Controller',
             MARKER: 'true',
         }
@@ -297,13 +308,59 @@ def active_serials() -> list[int]:
         return sorted(_meters)
 
 
+def at_capacity() -> bool:
+    """True when every meter slot is taken.
+
+    Lets the UI tell "no slot free right now, try again later" apart from
+    "this system can't meter at all", so it only retries in the first case.
+    """
+    with _registry_lock:
+        return len(_meters) >= MAX_METERS
+
+
 def stop_all():
-    """Tear down every meter — call on window close."""
+    """Tear down every meter — call on shutdown, however it was triggered."""
     with _registry_lock:
         meters = list(_meters.values())
         _meters.clear()
     for meter in meters:
         meter.stop()
+
+
+def reap_orphans() -> int:
+    """Kill meter captures left behind by an earlier run.
+
+    A pw-record is a child process, not a thread: if the app is killed or
+    crashes it keeps running, keeps a monitor link open on its device and
+    keeps showing up in pw-top forever.  The app is single-instance, so at
+    startup any capture carrying our marker belongs to a run that is gone.
+
+    Startup only — it deliberately skips our own children, but nothing else
+    distinguishes a live meter from an abandoned one.
+    """
+    import os
+    import signal
+    from pathlib import Path
+
+    me = os.getpid()
+    marker = MARKER.encode()
+    killed = 0
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            cmdline = (entry / 'cmdline').read_bytes()
+            if b'pw-record' not in cmdline or marker not in cmdline:
+                continue
+            # never touch a capture this process started
+            stat = (entry / 'stat').read_text().rsplit(')', 1)[1].split()
+            if int(stat[1]) == me:
+                continue
+            os.kill(int(entry.name), signal.SIGTERM)
+            killed += 1
+        except (OSError, ValueError, IndexError):
+            continue        # vanished, or not ours to read
+    return killed
 
 
 if __name__ == '__main__':      # manual check: python3 -m pwctl.backend.levels <serial>
