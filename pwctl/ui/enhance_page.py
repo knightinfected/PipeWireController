@@ -31,6 +31,7 @@ class EnhancePage:
         self._nodes = []
         self._streams = []
         self._sinks = []
+        self._items = []        # the Enhancements themselves, for chaining
 
         eq_head = group(
             'Equalizer',
@@ -127,8 +128,11 @@ class EnhancePage:
         items, nodes, streams = payload
         self._nodes = nodes
         self._streams = streams
-        self._sinks = [n for n in nodes if n.is_sink
-                       and not n.name.startswith('pwctl.eq.')]
+        self._items = [e for e, _ in items]
+        # Equalizer sinks stay in the list: one equalizer may feed another.
+        # Which of them a given row may pick is decided per row, in
+        # _output_row(), because that depends on where each one already sends.
+        self._sinks = [n for n in nodes if n.is_sink]
         for row in self._eq_rows:
             self.eq_listing.remove(row)
         for row in self._mic_rows:
@@ -444,18 +448,19 @@ class EnhancePage:
 
     def _output_row(self, enh):
         row = Adw.ComboRow(title='Output Device')
-        labels = ['Follow default'] + [n.description for n in self._sinks]
+        sinks = enhance.eq_targets(enh, self._sinks, self._items)
+        labels = ['Follow default'] + [n.description for n in sinks]
         row.set_model(Gtk.StringList.new(labels))
         target = enh.params.get('target', '')
         sel = 0
         if target:
-            sel = next((i + 1 for i, n in enumerate(self._sinks)
+            sel = next((i + 1 for i, n in enumerate(sinks)
                         if n.name == target), 0)
         row.set_selected(sel)               # set BEFORE connecting
 
         def on_sel(*_):
             i = row.get_selected()
-            new = '' if i == 0 else self._sinks[i - 1].name
+            new = '' if i == 0 else sinks[i - 1].name
             if new == enh.params.get('target', ''):
                 return
             enh.params['target'] = new
@@ -570,7 +575,8 @@ class EqDialog(Adw.Window):
         self.target_row = Adw.ComboRow(
             title='Output device',
             subtitle='Where the equalized audio goes. “Follow default” lets '
-                     'you route it like any output.')
+                     'you route it like any output, and picking another '
+                     'equalizer chains the two so both curves apply.')
         g.add(self.target_row)
 
         self.bands_group = group(
@@ -609,8 +615,11 @@ class EqDialog(Adw.Window):
     def _nodes_loaded(self, nodes, error):
         if error or nodes is None:
             nodes = []
-        self._sinks = [n for n in nodes
-                       if n.is_sink and not n.name.startswith('pwctl.eq.')]
+        # Another equalizer is a perfectly good output: chaining two of them
+        # stacks their curves.  eq_targets() keeps out only this equalizer and
+        # anything that already leads back to it.
+        self._sinks = enhance.eq_targets(
+            self.enh, [n for n in nodes if n.is_sink], self.page._items)
         names = ['Follow default'] + [n.description for n in self._sinks]
         self.target_row.set_model(Gtk.StringList.new(names))
         if self._target:

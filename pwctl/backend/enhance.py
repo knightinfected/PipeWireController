@@ -328,6 +328,47 @@ def _find_node(name: str):
     return next((n for n in pw.list_audio_nodes() if n.name == name), None)
 
 
+# ------------------------------------------------------------- chaining --
+# An equalizer's output is just a stream, so it can be pointed at another
+# equalizer's sink: EQ -> EQ -> ... -> device, which is how people stack
+# filters (a room-correction curve in front of a taste curve, say).  The only
+# thing that must not be allowed is a ring, where audio would be fed back into
+# a sink further up its own path and never reach a device.
+
+def would_loop(enh: Enhancement, target: str,
+               all_enh: list[Enhancement]) -> bool:
+    """True if sending `enh` to `target` closes a ring of enhancements."""
+    if not target:
+        return False                        # "follow default" ends outside
+    by_node = {e.node_name: e for e in all_enh}
+    by_node[enh.node_name] = enh            # in case it isn't saved yet
+    seen = {enh.id}
+    node = target
+    while node:
+        nxt = by_node.get(node)
+        if nxt is None:
+            return False                    # ends at a device: no ring
+        if nxt.id in seen:
+            return True
+        seen.add(nxt.id)
+        node = nxt.params.get('target')
+    return False
+
+
+def eq_targets(enh: Enhancement | None, sinks: list,
+               all_enh: list[Enhancement]) -> list:
+    """The sinks `enh` may send its output to, in the given order.
+
+    Other equalizers stay in the list (that is the whole point of chaining);
+    what is dropped is this equalizer itself and any chain that would come
+    back round to it.
+    """
+    if enh is None:
+        return list(sinks)                  # nothing saved yet, nothing to ring
+    return [n for n in sinks
+            if n.name != enh.node_name and not would_loop(enh, n.name, all_enh)]
+
+
 # ------------------------------------------------------------ live A/B --
 # Comparing "with EQ" against "without EQ" must never stop the unit: stopping
 # it removes the sink, and every stream playing into it is torn down (apps
