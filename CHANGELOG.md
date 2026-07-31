@@ -37,6 +37,12 @@ thank you.
   plugin sinks read ~6% while Carla showed 43% for the same graph. It now
   reports the driver's cycle time against the quantum — the figure JACK-based
   tools report — averaged the way they average it.
+- **The Monitor page samples every second, and you can change that.** It polled
+  every three seconds, which is where the DSP load's lag came from — one
+  `pw-top` sample is a single graph cycle, so a slow tick sees very few of
+  them. A new **Sample rate** row (1/2/3/5 s) lets a plugin-heavy graph be
+  watched closely or a slow machine spared; the load stays averaged over the
+  same span whichever you pick, and the sparklines still cover ~3 minutes.
 - **Xruns are counted as dropouts, not as error counters.** PipeWire raises an
   error count on the driver *and* on the node that overran, so adding up every
   node turned one dropout into several; the counter also ran from each node's
