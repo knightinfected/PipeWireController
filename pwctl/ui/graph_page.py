@@ -18,8 +18,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 
-from ..backend import graph, prefs, routing, rules
-from .widgets import async_call, icon_button, pick_file
+from ..backend import graph, prefs, pw, routing, rules
+from .widgets import async_call, esc, icon_button, pick_file
 
 NODE_W = 200.0
 ROW_H = 18.0
@@ -897,23 +897,35 @@ class NodeDialog(Adw.Dialog):
                                    subtitle=f'{lat:.2f} ms'))
 
         is_hw = node.name.startswith(('alsa_', 'bluez_'))
-        manage = Adw.PreferencesGroup(
-            title='Persistent rules',
-            description='Stored as WirePlumber rules; applied after a '
-                        'WirePlumber restart.' if is_hw else
-                        'Only available for hardware (ALSA/Bluetooth) nodes.')
+        # A hidden object never comes back to the graph, so this dialog can't
+        # be the way back — point at the page that lists them instead.
+        manage_desc = ('Stored as WirePlumber rules; applied after a '
+                       'WirePlumber restart. Hidden devices are listed — and '
+                       'can be brought back — on the Devices page.') if is_hw \
+            else 'Only available for hardware (ALSA/Bluetooth) nodes.'
+        manage = Adw.PreferencesGroup(title='Persistent rules',
+                                      description=manage_desc)
         rule = rules.node_rule(node.name) if is_hw else {}
         self.rename_row = Adw.EntryRow(title='Rename (description)')
         self.rename_row.set_text(rule.get('rename', ''))
         self.rename_row.set_sensitive(is_hw)
         manage.add(self.rename_row)
         self.hide_row = Adw.SwitchRow(
-            title='Hide this node',
-            subtitle='Disables the node entirely — it disappears from every '
-                     'app until re-enabled here.')
+            title='Hide this output' if node.kind == 'sink' else
+                  'Hide this input' if node.kind == 'source' else
+                  'Hide this node',
+            subtitle='Disables this endpoint — it disappears from every app. '
+                     'The sound card itself stays listed in your desktop’s '
+                     'sound settings.')
         self.hide_row.set_active(bool(rule.get('hide')))
         self.hide_row.set_sensitive(is_hw)
         manage.add(self.hide_row)
+        # Filled in once the card behind this node is resolved (its name lives
+        # on the Device object, not in the node's props).
+        self.card = None
+        self.card_row = Adw.SwitchRow(title='Hide the whole sound card',
+                                      visible=False)
+        manage.add(self.card_row)
         apply_btn = Gtk.Button(label='Save rules', halign=Gtk.Align.END,
                                margin_top=8, sensitive=is_hw)
         apply_btn.add_css_class('suggested-action')
@@ -958,6 +970,33 @@ class NodeDialog(Adw.Dialog):
         view.set_content(sw)
         self.set_child(view)
         self._load_meta()
+        if is_hw:
+            self._load_card()
+
+    def _load_card(self):
+        """Resolve this node's sound card, then offer the card-level hide."""
+        try:
+            dev_id = int(self.node.props.get('device.id'))
+        except (TypeError, ValueError):
+            return
+
+        def work():
+            card = pw.card_map().get(dev_id)
+            if not card:
+                return None
+            return card, bool(rules.device_rule(card[0]).get('hide'))
+
+        def done(res, e):
+            if e or not res:
+                return
+            card, hidden = res
+            self.card = card
+            self.card_row.set_subtitle(
+                f'Disables {esc(card[1])} and every input and output it '
+                'provides, everywhere.')
+            self.card_row.set_active(hidden)
+            self.card_row.set_visible(True)
+        async_call(work, done)
 
     def _load_meta(self):
         node_id = self.node.id
@@ -1000,9 +1039,13 @@ class NodeDialog(Adw.Dialog):
         hide = self.hide_row.get_active()
         name = self.node.name
         label = self.node.label
+        card = self.card
+        card_hide = self.card_row.get_active() if card else None
 
         def work():
             rules.set_node_rule(name, rename=rename, hide=hide, desc=label)
+            if card is not None:
+                rules.set_device_rule(card[0], hide=card_hide, desc=card[1])
             return True
         async_call(work, lambda r, e: (
             self.window.toast('Rules saved' if not e else f'Failed: {e}'),
