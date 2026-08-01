@@ -16,9 +16,9 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from ..backend import chains, plugins, pw
-from .widgets import async_call, confirm, group, icon_button, page_scroller, \
-    pill, state_style
+from ..backend import chains, enhance, plugins, pw
+from .widgets import async_call, combine_devices, confirm, group, \
+    icon_button, page_scroller, pill, state_style
 
 _CACHE = {'ladspa': None, 'lv2': None}
 
@@ -177,8 +177,20 @@ class EffectDialog(Adw.Dialog):
         g.add(self.name_row)
         self.target_row = Adw.ComboRow(
             title='Output to',
-            subtitle='Where the processed audio goes (Auto = default output)')
+            subtitle='Where the processed audio goes (Auto = default '
+                     'output). Another rack or an equalizer is a valid '
+                     'target — that is how longer chains are built.')
         g.add(self.target_row)
+
+        combine_row = Adw.ActionRow(
+            title='Send to several devices',
+            subtitle='Combines the outputs you pick into one target — for '
+                     'playing on speakers and HDMI at the same time.')
+        combine_btn = Gtk.Button(label='Combine…', valign=Gtk.Align.CENTER)
+        combine_btn.connect('clicked', self._combine)
+        combine_row.add_suffix(combine_btn)
+        combine_row.set_activatable_widget(combine_btn)
+        g.add(combine_row)
 
         self.rack_group = Adw.PreferencesGroup(
             title='Rack (signal order)',
@@ -223,15 +235,22 @@ class EffectDialog(Adw.Dialog):
 
         def collect():
             lad, lv2 = _scan_all()
-            return lad + lv2, pw.list_audio_nodes()
+            return (lad + lv2, pw.list_audio_nodes(),
+                    chains.list_chains(), enhance.list_enhancements())
         async_call(collect, self._loaded)
 
     def _loaded(self, result, error):
         if error or result is None:
             return
-        self._all, nodes = result
-        self._sinks = [n for n in nodes if n.is_sink
-                       and not n.name.startswith('effect_input.')]
+        self._all, nodes, all_chains, all_enh = result
+        # A rack may feed another rack or an equalizer — that is how plugin
+        # chains are built.  Only this rack itself and targets that lead back
+        # to it are excluded.
+        edges = chains.target_edges(all_chains)
+        edges.update(enhance.target_edges(all_enh))
+        self._sinks = chains.pick_targets(
+            self.meta.node_name if self.meta else '',
+            [n for n in nodes if n.is_sink], edges)
         names = ['Auto (default output)'] + \
                 [n.description for n in self._sinks]
         self.target_row.set_model(Gtk.StringList.new(names))
@@ -240,6 +259,23 @@ class EffectDialog(Adw.Dialog):
                         if n.name == self.meta.target), 0)
             self.target_row.set_selected(idx)
         self._fill_browser()
+
+    def _combine(self, _b):
+        def created(node_name, message):
+            if not node_name:
+                self.window.toast(message)
+                return
+            # Not in the model yet — append and select so saving now targets
+            # it, without waiting for a device rescan.
+            self._sinks.append(pw.AudioNode(
+                id=-1, name=node_name, description=message,
+                media_class='Audio/Sink'))
+            self.target_row.get_model().append(message)
+            self.target_row.set_selected(len(self._sinks))
+            self.window.toast(f'“{message}” created and selected')
+        combine_devices(self.window, list(self._sinks), created,
+                        name_hint=self.name_row.get_text().strip()
+                        or 'Combined output')
 
     # ------------------------------------------------------------- browser --
     def _fill_browser(self):

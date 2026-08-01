@@ -32,7 +32,8 @@ from pathlib import Path
 
 from .. import spa_json
 from . import system
-from .chains import GEN_DIR, ensure_unit
+from .chains import GEN_DIR, ensure_unit, pick_targets
+from .chains import would_loop as chain_would_loop
 from .config import XDG_CONFIG
 
 ENH_DIR = XDG_CONFIG / 'pipewire-controller' / 'enhance'
@@ -330,43 +331,33 @@ def _find_node(name: str):
 
 # ------------------------------------------------------------- chaining --
 # An equalizer's output is just a stream, so it can be pointed at another
-# equalizer's sink: EQ -> EQ -> ... -> device, which is how people stack
-# filters (a room-correction curve in front of a taste curve, say).  The only
-# thing that must not be allowed is a ring, where audio would be fed back into
-# a sink further up its own path and never reach a device.
+# equalizer's sink — or at a plugin rack, or at a virtual device.  The ring
+# check lives in `chains` because a ring can run through objects of every
+# kind (EQ -> rack -> EQ), so it cannot be decided from enhancements alone.
+
+def target_edges(items: list[Enhancement]) -> dict[str, str]:
+    """{sink we publish -> the node it currently feeds} for these items."""
+    return {e.node_name: e.params.get('target', '') for e in items}
+
 
 def would_loop(enh: Enhancement, target: str,
                all_enh: list[Enhancement]) -> bool:
     """True if sending `enh` to `target` closes a ring of enhancements."""
-    if not target:
-        return False                        # "follow default" ends outside
-    by_node = {e.node_name: e for e in all_enh}
-    by_node[enh.node_name] = enh            # in case it isn't saved yet
-    seen = {enh.id}
-    node = target
-    while node:
-        nxt = by_node.get(node)
-        if nxt is None:
-            return False                    # ends at a device: no ring
-        if nxt.id in seen:
-            return True
-        seen.add(nxt.id)
-        node = nxt.params.get('target')
-    return False
+    return chain_would_loop(enh.node_name, target, target_edges(all_enh))
 
 
 def eq_targets(enh: Enhancement | None, sinks: list,
-               all_enh: list[Enhancement]) -> list:
+               all_enh: list[Enhancement], edges: dict | None = None) -> list:
     """The sinks `enh` may send its output to, in the given order.
 
     Other equalizers stay in the list (that is the whole point of chaining);
     what is dropped is this equalizer itself and any chain that would come
-    back round to it.
+    back round to it.  Pass `edges` from `chains.target_edges()` as well to
+    catch rings that run through plugin racks.
     """
-    if enh is None:
-        return list(sinks)                  # nothing saved yet, nothing to ring
-    return [n for n in sinks
-            if n.name != enh.node_name and not would_loop(enh, n.name, all_enh)]
+    known = dict(edges or {})
+    known.update(target_edges(all_enh))
+    return pick_targets(enh.node_name if enh else '', sinks, known)
 
 
 # ------------------------------------------------------------ live A/B --

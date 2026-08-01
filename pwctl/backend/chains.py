@@ -70,6 +70,16 @@ class ChainMeta:
         return f'pwctl-chain@{self.id}.service'
 
     @property
+    def node_name(self) -> str:
+        """The sink this chain publishes — how other objects address it.
+
+        Source-kind templates publish `pwctl.<id>` instead (see
+        `templates._source_props`), but only sinks can ever be a playback
+        target, so this is the name that matters for routing.
+        """
+        return f'effect_input.pwctl.{self.id}'
+
+    @property
     def conf_path(self) -> Path:
         return GEN_DIR / f'{self.id}.conf'
 
@@ -221,6 +231,52 @@ def delete(meta: ChainMeta):
     for p in (meta.conf_path, meta.meta_path):
         if p.is_file():
             p.unlink()
+
+
+# --------------------------------------------------------------- routing --
+# Anything we publish as a sink can feed anything else we publish as a sink:
+# a rack into a rack into an equalizer into a device is exactly how people
+# stack processing, and PipeWire links them without complaint.  The only
+# arrangement that must be refused is a ring, where audio would be fed back
+# into a sink further up its own path and never reach a device.  These helpers
+# are shared by chains and enhancements, so they take a plain edge map rather
+# than either module's objects.
+
+def target_edges(metas) -> dict[str, str]:
+    """{sink we publish -> the node it currently feeds} for these chains."""
+    return {m.node_name: m.target for m in metas}
+
+
+def would_loop(node_name: str, target: str, edges: dict[str, str]) -> bool:
+    """True if pointing `node_name` at `target` closes a ring.
+
+    `edges` maps each sink we manage to the node it feeds.  A name absent from
+    it ends outside our objects — a real device — which can never ring, so the
+    walk stops there.  An empty target means "follow default", which also ends
+    outside.
+    """
+    if not target:
+        return False
+    seen = {node_name}
+    node = target
+    while node:
+        if node in seen:
+            return True
+        seen.add(node)
+        node = edges.get(node, '')
+    return False
+
+
+def pick_targets(node_name: str, sinks: list, edges: dict[str, str]) -> list:
+    """The sinks `node_name` may feed, in the order given.
+
+    Other managed sinks stay in the list — chaining them is the point.  What
+    is dropped is this object itself and any target whose own chain leads back
+    here.  Pass an empty `node_name` for an object that does not exist yet.
+    """
+    return [n for n in sinks
+            if n.name != node_name
+            and not would_loop(node_name, n.name, edges)]
 
 
 def clone(meta: ChainMeta) -> ChainMeta:

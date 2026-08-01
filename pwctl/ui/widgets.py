@@ -119,6 +119,62 @@ def prompt_number(parent, heading, body, initial, on_accept,
     entry.grab_focus()
 
 
+def combine_devices(parent, sinks, on_created, name_hint='Combined output'):
+    """Tick several output devices and get one sink that feeds them all.
+
+    A filter chain, rack or equalizer has a single playback target, so "play
+    on the speakers and the HDMI at once" is really "target one sink that
+    fans out".  That sink is an ordinary combine-sink virtual device — this
+    just builds it without making the user go and learn that first.
+    `on_created(node_name, description)` fires once it is running.
+    """
+    dlg = Adw.AlertDialog(
+        heading='Send to several devices',
+        body='The chosen devices are combined into one output, which this '
+             'becomes the target of. It appears on the Virtual Devices page '
+             'like any other, so you can rename or remove it later.')
+    listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+    listbox.add_css_class('boxed-list')
+    checks = []
+    for n in sinks:
+        row = Adw.ActionRow(title=esc(n.description), subtitle=esc(n.name),
+                            title_lines=1, subtitle_lines=1)
+        chk = Gtk.CheckButton(valign=Gtk.Align.CENTER)
+        row.add_prefix(chk)
+        row.set_activatable_widget(chk)
+        listbox.append(row)
+        checks.append((chk, n))
+    sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
+                            min_content_height=220, propagate_natural_height=True)
+    sw.set_child(listbox)
+    dlg.set_extra_child(sw)
+    dlg.add_response('cancel', 'Cancel')
+    dlg.add_response('ok', 'Combine')
+    dlg.set_response_appearance('ok', Adw.ResponseAppearance.SUGGESTED)
+    dlg.set_default_response('ok')
+
+    def on_resp(_d, resp):
+        if resp != 'ok':
+            return
+        picked = [n for chk, n in checks if chk.get_active()]
+        if len(picked) < 2:
+            on_created(None, 'Pick at least two devices to combine')
+            return
+        from ..backend import virtual
+        dev = virtual.new_device(
+            f'{name_hint} ({len(picked)} devices)', 'combine-sink',
+            members=[n.name for n in picked])
+        dev.enabled = True
+
+        def done(result, e):
+            ok, err = result if result else (False, str(e or ''))
+            on_created(dev.node_name if ok else None,
+                       dev.name if ok else (err or 'could not be created'))
+        async_call(lambda: virtual.apply(dev), done)
+    dlg.connect('response', on_resp)
+    dlg.present(parent)
+
+
 def text_viewer_dialog(parent, title, text, editable=False, on_save=None):
     dlg = Adw.Dialog(title=title, content_width=720, content_height=560)
     tv = Gtk.TextView(editable=editable, monospace=True,

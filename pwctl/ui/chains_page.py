@@ -10,7 +10,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gtk  # noqa: E402
 
-from ..backend import chains, hrir, pw, system
+from ..backend import chains, enhance, hrir, pw, system
 from ..backend.templates import TEMPLATES
 from .widgets import (async_call, confirm, esc, group, icon_button, page_scroller,
                       pick_file, pill, state_style, text_viewer_dialog)
@@ -460,20 +460,28 @@ class ChainDialog(Adw.Dialog):
         pick_file(self.window, 'Choose AutoEq file', picked, filters=EQ_FILTER)
 
     def _load_targets(self):
-        def apply(nodes, error):
-            if error or not nodes:
+        def collect():
+            return (pw.list_audio_nodes(), chains.list_chains(),
+                    enhance.list_enhancements())
+
+        def apply(result, error):
+            if error or not result:
                 return
-            names = ['Auto (follow default)']
-            self.target_names = ['']
-            for n in nodes:
-                if n.is_sink and not n.name.startswith('effect_input.'):
-                    names.append(n.description)
-                    self.target_names.append(n.name)
+            nodes, all_chains, all_enh = result
+            # One chain may feed another (and an equalizer counts as one):
+            # only this chain and targets that lead back to it are excluded.
+            edges = chains.target_edges(all_chains)
+            edges.update(enhance.target_edges(all_enh))
+            sinks = chains.pick_targets(
+                self.meta.node_name if self.meta else '',
+                [n for n in nodes if n.is_sink], edges)
+            names = ['Auto (follow default)'] + [n.description for n in sinks]
+            self.target_names = [''] + [n.name for n in sinks]
             self.target_row.set_model(Gtk.StringList.new(names))
             if self.meta and self.meta.target in self.target_names:
                 self.target_row.set_selected(
                     self.target_names.index(self.meta.target))
-        async_call(pw.list_audio_nodes, apply)
+        async_call(collect, apply)
 
     def _edit_raw(self, _b):
         raw = self.meta.params.get('raw_text', '') if self.meta else ''
