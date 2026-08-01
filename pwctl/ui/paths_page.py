@@ -1,33 +1,44 @@
 """Signal Paths: build a chain from an app to an output, stage by stage.
 
-Sources on top, mixes below, sends between them.  A source is where audio
-enters — an app, a microphone, or everything on the default output — and
-carries its own chain; a mix carries a chain of its own and feeds real
-devices.  One source and one mix is a straight line, which is what most setups
-are; the second dimension only matters when a chain has to split.
+Sources in the left column, mixes in the right, the sends drawn between them.
+A source is where audio enters — an app, a microphone, or everything on the
+default output — and carries its own chain; a mix carries a chain of its own
+and feeds real devices.  One source and one mix is a straight line, which is
+what most setups are; the second dimension only matters when a chain has to
+split.
+
+The page is deliberately *not* a list of settings rows.  What the user is
+building is a signal flow, so the flow is the interface: each strip is a card
+whose chain is always visible as a row of stage chips, and a send is a curve
+between two cards rather than a sentence in a subtitle.  Rows were tried first
+and read as a control panel for something else — the shape of the audio was
+nowhere on screen, and the page sat in one narrow column with the rest of the
+window empty.
 
 Two audiences pull in opposite directions and both are served here.  Someone
 who just wants an equalizer on everything should never meet the word "mix":
-Quick setup builds the whole arrangement in one click.  Someone running twenty
-plugin sinks into three outputs needs every picker to cope with a long list,
-so devices, plugins and apps are all chosen through a searchable dialog rather
-than a dropdown that becomes unusable past a dozen entries.
+Quick setup builds the whole arrangement in one click, and is the entire page
+until something exists.  Someone running twenty plugin sinks into three
+outputs needs every picker to cope with a long list, so devices, plugins and
+apps are all chosen through a searchable dialog rather than a dropdown that
+becomes unusable past a dozen entries.
 """
 
 from __future__ import annotations
 
 import json
 
+import cairo
 import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
 from ..backend import levels, paths, plugins, prefs, pw, virtual
 from .volume import make_volume
 from .widgets import async_call, confirm, esc, group, icon_button, \
-    page_scroller, pick_file, pick_folder, pill, state_style
+    pick_file, pick_folder, pill, state_style
 
 _PLUGIN_CACHE: dict = {'all': None}
 
@@ -36,12 +47,26 @@ KIND_ICON = {
     'mic': 'audio-input-microphone-symbolic',
     'everything': 'audio-volume-high-symbolic',
 }
+KIND_BLURB = {
+    'app': 'An application',
+    'mic': 'A microphone',
+    'everything': 'Everything on the default output',
+}
 STAGE_ICON = {
     'eq': 'audio-x-generic-symbolic',
     'effect': 'applications-multimedia-symbolic',
     'convolver': 'audio-headphones-symbolic',
 }
 BAND_TYPES = [('PK', 'Peak'), ('LSC', 'Low shelf'), ('HSC', 'High shelf')]
+
+# Channel counts users recognise.  "7.1" says more than "8ch" and takes less
+# room; anything unusual falls back to the count.
+LAYOUT_NAMES = {1: 'Mono', 2: 'Stereo', 3: '2.1', 4: 'Quad',
+                6: '5.1', 8: '7.1'}
+
+
+def _layout_name(n: int) -> str:
+    return LAYOUT_NAMES.get(n, f'{n} ch')
 
 
 def _adj(lo, hi, val, step, page):
@@ -53,6 +78,96 @@ def _all_plugins():
     if _PLUGIN_CACHE['all'] is None:
         _PLUGIN_CACHE['all'] = plugins.scan_ladspa() + plugins.scan_lv2()
     return _PLUGIN_CACHE['all']
+
+
+# ------------------------------------------------------------- primitives --
+
+def micro(text: str) -> Gtk.Label:
+    """A section label: small, heavy, quiet.  Uppercased here rather than in
+    CSS so it does not depend on GTK's text-transform support."""
+    lbl = Gtk.Label(label=text.upper(), xalign=0, valign=Gtk.Align.CENTER)
+    lbl.add_css_class('path-label')
+    return lbl
+
+
+def avatar(icon_name: str, kind: str) -> Gtk.Image:
+    img = Gtk.Image.new_from_icon_name(icon_name)
+    img.set_pixel_size(18)
+    img.add_css_class('path-avatar')
+    img.add_css_class(f'k-{kind}')
+    img.set_valign(Gtk.Align.CENTER)
+    return img
+
+
+def chip(label: str, tooltip: str = '', on_click=None, icon: str = '',
+         active: bool = False, toggle: bool = False) -> Gtk.Widget:
+    btn = Gtk.ToggleButton() if toggle else Gtk.Button()
+    btn.add_css_class('path-chip')
+    btn.set_valign(Gtk.Align.CENTER)
+    if tooltip:
+        btn.set_tooltip_text(tooltip)
+    box = Gtk.Box(spacing=5)
+    lbl = Gtk.Label(label=esc(label), ellipsize=Pango.EllipsizeMode.END,
+                    max_width_chars=18)
+    box.append(lbl)
+    if icon:
+        box.append(Gtk.Image.new_from_icon_name(icon))
+    btn.set_child(box)
+    if toggle:
+        btn.set_active(active)
+    elif active:
+        btn.add_css_class('on')
+    if on_click:
+        btn.connect('toggled' if toggle else 'clicked', on_click)
+    return btn
+
+
+def add_button(tooltip: str, on_click) -> Gtk.Button:
+    btn = Gtk.Button(icon_name='list-add-symbolic', tooltip_text=tooltip,
+                     valign=Gtk.Align.CENTER, css_classes=['path-add'])
+    btn.connect('clicked', on_click)
+    return btn
+
+
+def menu_popover(items) -> Gtk.Popover:
+    """Popover of flat icon+label buttons.  `items` is (icon, label, fn) or
+    None for a separator."""
+    pop = Gtk.Popover()
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2,
+                  margin_top=6, margin_bottom=6,
+                  margin_start=6, margin_end=6)
+    for item in items:
+        if item is None:
+            box.append(Gtk.Separator(margin_top=3, margin_bottom=3))
+            continue
+        icon, label, fn, *rest = item
+        btn = Gtk.Button(css_classes=['flat'])
+        if rest and rest[0]:
+            btn.add_css_class(rest[0])
+        inner = Gtk.Box(spacing=10)
+        inner.append(Gtk.Image.new_from_icon_name(icon))
+        inner.append(Gtk.Label(label=label, xalign=0, hexpand=True))
+        btn.set_child(inner)
+        btn.connect('clicked', lambda _b, f=fn: (pop.popdown(), f()))
+        box.append(btn)
+    pop.set_child(box)
+    return pop
+
+
+def chip_row(label: str, *widgets) -> Adw.WrapBox:
+    """A labelled row of chips that wraps instead of overflowing — a mix with
+    six outputs has to stay inside its card."""
+    # Chips keep their natural width and the box takes another line when it
+    # runs out — squeezing them instead (WrapPolicy.MINIMUM) turns every
+    # device name into an ellipsis long before the card is actually full.
+    # `max_width_chars` on the chip labels is what keeps that natural width
+    # bounded, so one very long name can't set the column width.
+    box = Adw.WrapBox(child_spacing=6, line_spacing=6)
+    box.append(micro(label))
+    for w in widgets:
+        if w is not None:
+            box.append(w)
+    return box
 
 
 # --------------------------------------------------------------- pickers --
@@ -129,6 +244,82 @@ def prompt_text(parent, heading, body, initial, on_accept, action='Save'):
     entry.grab_focus()
 
 
+# ------------------------------------------------------------------ wires --
+
+class Wires(Gtk.DrawingArea):
+    """The gutter between the two columns, with a curve per send.
+
+    Positions are read straight off the live widget tree (`compute_bounds`
+    against this area), so the curves follow the cards wherever the layout
+    puts them — no bookkeeping to keep in sync, and nothing to get wrong when
+    a card grows a stage.  If a card is not allocated yet the draw is retried
+    once on idle, which is the normal case for the first frame after a
+    rebuild.
+    """
+
+    def __init__(self, page):
+        super().__init__()
+        self.page = page
+        self._retries = 0
+        self.set_content_width(64)
+        self.set_vexpand(True)
+        self.set_can_target(False)      # never eats clicks meant for a card
+        self.set_draw_func(self._draw)
+        # Colours come out of the stylesheet rather than from
+        # AdwStyleManager: on a machine with a third-party GTK theme the two
+        # disagree, and a wire painted the manager's blue next to grey
+        # buttons looks like a bug.  `pens` are two invisible widgets that
+        # carry nothing but a css class and are read for their resolved
+        # colour, so the curve runs from the source avatar's hue to the mix
+        # avatar's hue and follows the theme.
+        self._pen_src = self._pen_dst = None
+
+    def set_pens(self, src, dst):
+        self._pen_src, self._pen_dst = src, dst
+
+    def _draw(self, _area, cr, w, h):
+        pairs = self.page.wire_pairs()
+        if not pairs:
+            return
+        fg = self.get_color()
+        c_src = self._pen_src.get_color() if self._pen_src else fg
+        c_dst = self._pen_dst.get_color() if self._pen_dst else fg
+        for src, dst, live in pairs:
+            ok1, r1 = src.compute_bounds(self)
+            ok2, r2 = dst.compute_bounds(self)
+            if not (ok1 and ok2):
+                if self._retries < 8:
+                    self._retries += 1
+                    GLib.idle_add(self.queue_draw)
+                return
+            self._retries = 0
+            y1 = r1.origin.y + r1.size.height / 2
+            y2 = r2.origin.y + r2.size.height / 2
+            if live:
+                grad = cairo.LinearGradient(0, y1, w, y2)
+                grad.add_color_stop_rgba(0, c_src.red, c_src.green,
+                                         c_src.blue, 0.9)
+                grad.add_color_stop_rgba(1, c_dst.red, c_dst.green,
+                                         c_dst.blue, 0.9)
+                cr.set_source(grad)
+                cr.set_line_width(2.0)
+                cr.set_dash([])
+            else:
+                cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.22)
+                cr.set_line_width(1.5)
+                cr.set_dash([3.0, 4.0])
+            cr.move_to(0, y1)
+            cr.curve_to(w * 0.55, y1, w * 0.45, y2, w, y2)
+            cr.stroke()
+            cr.set_dash([])
+            ends = ((0.0, y1, c_src), (float(w), y2, c_dst))
+            for x, y, col in ends:
+                if live:
+                    cr.set_source_rgba(col.red, col.green, col.blue, 0.9)
+                cr.arc(x, y, 3.0, 0, 6.2832)
+                cr.fill()
+
+
 # ----------------------------------------------------------- stage editor --
 
 class StageDialog(Adw.Window):
@@ -177,10 +368,10 @@ class StageDialog(Adw.Window):
         body = self._kind_group()
 
         save = Gtk.Button(label='Save', halign=Gtk.Align.END, margin_top=12,
-                          css_classes=['suggested-action'])
+                          css_classes=['suggested-action', 'pill'])
         save.connect('clicked', self._save)
         remove = Gtk.Button(label='Remove from chain', halign=Gtk.Align.START,
-                            css_classes=['destructive-action'])
+                            css_classes=['destructive-action', 'pill'])
         remove.connect('clicked', self._remove)
         actions = Gtk.Box(spacing=8, margin_top=12)
         actions.append(remove)
@@ -406,68 +597,149 @@ class PathsPage:
         self.window = window
         self.volume_style = prefs.get('volume_style') or 'meter'
         self._strips: list = []
+        self._states: dict = {}
         self._nodes: list = []
         self._streams: list = []
         self._vols: dict = {}
+        self._cards: dict = {}          # strip.id -> card widget
 
-        self.quick = group(
-            'Quick setup',
-            'Each of these builds a complete path in one step. You can take '
-            'it apart afterwards — they are ordinary sources and mixes.')
-        for title, sub, fn in (
-            ('Equalize everything',
+        self.widget = self._build()
+        self.widget.connect('map', lambda *_: self.refresh())
+
+    # ------------------------------------------------------------- shell --
+    def _build(self):
+        # toolbar: what exists, and how to add to it
+        self.summary = Gtk.Label(xalign=0, hexpand=True,
+                                 ellipsize=Pango.EllipsizeMode.END)
+        self.summary.add_css_class('dim-label')
+        add_src = Gtk.Button(css_classes=['suggested-action'],
+                             tooltip_text='A source is where audio enters')
+        add_src.set_child(Adw.ButtonContent(icon_name='list-add-symbolic',
+                                            label='Source'))
+        add_src.connect('clicked', lambda *_: self._new_strip('source'))
+        add_mix = Gtk.Button(tooltip_text='A mix feeds your output devices')
+        add_mix.set_child(Adw.ButtonContent(icon_name='list-add-symbolic',
+                                            label='Mix'))
+        add_mix.connect('clicked', lambda *_: self._new_strip('mix'))
+        more = Gtk.MenuButton(icon_name='view-more-symbolic',
+                              css_classes=['flat'], tooltip_text='More')
+        more.set_popover(menu_popover([
+            ('document-open-symbolic', 'Import a path…', self._import),
+            ('view-refresh-symbolic', 'Refresh', self.refresh),
+        ]))
+        toolbar = Gtk.Box(spacing=8, css_classes=['path-toolbar'])
+        toolbar.append(self.summary)
+        toolbar.append(add_mix)
+        toolbar.append(add_src)
+        toolbar.append(more)
+        self.toolbar = toolbar
+
+        # quick setup — the whole page until something exists
+        self.quick = self._quick_setup()
+
+        # the board: sources | wires | mixes
+        self.col_src, self.src_body = self._column(
+            'Sources', 'Add a source', lambda: self._new_strip('source'))
+        self.col_mix, self.mix_body = self._column(
+            'Mixes', 'Add a mix', lambda: self._new_strip('mix'))
+        self.wires = Wires(self)
+        self.board = Gtk.Box(spacing=0)
+        self.board.append(self.col_src)
+        self.board.append(self.wires)
+        self.board.append(self.col_mix)
+        pens = [Gtk.Label(css_classes=[c], visible=False)
+                for c in ('path-wire-src', 'path-wire-dst')]
+        for pen in pens:
+            self.board.append(pen)
+        self.wires.set_pens(*pens)
+        sg = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        sg.add_widget(self.col_src)
+        sg.add_widget(self.col_mix)
+
+        # Below ~720px of content the two columns stop being readable, so
+        # they stack and the gutter goes away — same information, one column.
+        bin_ = Adw.BreakpointBin(width_request=320, height_request=200)
+        bin_.set_child(self.board)
+        bp = Adw.Breakpoint.new(
+            Adw.BreakpointCondition.parse('max-width: 720px'))
+        bp.add_setter(self.board, 'orientation', Gtk.Orientation.VERTICAL)
+        bp.add_setter(self.board, 'spacing', 24)
+        bp.add_setter(self.wires, 'visible', False)
+        bin_.add_breakpoint(bp)
+        self.board_bin = bin_
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
+                      margin_top=18, margin_bottom=36,
+                      margin_start=16, margin_end=16)
+        box.append(toolbar)
+        box.append(self.quick)
+        box.append(bin_)
+        clamp = Adw.Clamp(maximum_size=1600, tightening_threshold=1100)
+        clamp.set_child(box)
+        sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                vexpand=True)
+        sw.set_child(clamp)
+        return sw
+
+    def _column(self, title, tooltip, on_add):
+        head = Gtk.Box(spacing=8)
+        head.append(micro(title))
+        count = Gtk.Label(xalign=0, css_classes=['path-count'], hexpand=True,
+                          valign=Gtk.Align.CENTER)
+        head.append(count)
+        head.append(add_button(tooltip, lambda *_: on_add()))
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                      hexpand=True, valign=Gtk.Align.START)
+        col.append(head)
+        col.append(body)
+        col._count = count
+        return col, body
+
+    def _quick_setup(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        title = Gtk.Label(label='Start with a ready-made path', xalign=0,
+                          css_classes=['title-4'])
+        sub = Gtk.Label(
+            label='Each of these builds a complete path in one step. You can '
+                  'take it apart afterwards — they are ordinary sources and '
+                  'mixes.',
+            xalign=0, wrap=True, css_classes=['dim-label'])
+        box.append(title)
+        box.append(sub)
+        wrap = Adw.WrapBox(child_spacing=12, line_spacing=12,
+                           natural_line_length=1200,
+                           justify=Adw.JustifyMode.FILL)
+        for icon, title_t, sub_t, fn in (
+            ('audio-x-generic-symbolic', 'Equalize everything',
              'One equalizer between every app and your current output.',
              self._quick_eq_all),
-            ('Put effects on one app',
-             'Send a single app through a plugin chain, leaving the rest '
-             'of your audio alone.', self._quick_app_fx),
-            ('Speakers and a separate stream mix',
+            ('applications-multimedia-symbolic', 'Put effects on one app',
+             'Send a single app through a plugin chain, leaving the rest of '
+             'your audio alone.', self._quick_app_fx),
+            ('camera-video-symbolic', 'Speakers and a stream mix',
              'One chain into your speakers, a second into a virtual output '
              'that OBS or Discord can capture.', self._quick_stream),
         ):
-            row = Adw.ActionRow(title=title, subtitle=sub, activatable=True)
-            row.add_prefix(Gtk.Image.new_from_icon_name(
-                'starred-symbolic'))
-            row.add_suffix(Gtk.Image.new_from_icon_name('go-next-symbolic'))
-            row.connect('activated', lambda _r, f=fn: f())
-            self.quick.add(row)
-
-        self.sources_group = group(
-            'Sources',
-            'Where audio comes in, and what happens to it before it is sent '
-            'on. A source with no sends follows the default output.')
-        self.sources_group.set_header_suffix(self._add_button(
-            'Add a source', lambda: self._new_strip('source')))
-
-        self.mixes_group = group(
-            'Mixes',
-            'A chain of its own, feeding real devices. Pick several devices '
-            'and they are combined into one output automatically.')
-        self.mixes_group.set_header_suffix(self._add_button(
-            'Add a mix', lambda: self._new_strip('mix')))
-
-        self.tools_group = group('Sharing')
-        imp = Adw.ActionRow(
-            title='Import a path',
-            subtitle='Load sources and mixes someone exported. They arrive '
-                     'switched off so you can look before turning them on.',
-            activatable=True)
-        imp.add_suffix(Gtk.Image.new_from_icon_name(
-            'document-open-symbolic'))
-        imp.connect('activated', lambda *_: self._import())
-        self.tools_group.add(imp)
-
-        self._rows: list = []
-        self.widget = page_scroller(self.quick, self.sources_group,
-                                    self.mixes_group, self.tools_group,
-                                    width=860)
-        self.widget.connect('map', lambda *_: self.refresh())
-
-    def _add_button(self, tooltip, fn):
-        b = Gtk.Button(icon_name='list-add-symbolic',
-                       valign=Gtk.Align.CENTER, tooltip_text=tooltip)
-        b.connect('clicked', lambda *_: fn())
-        return b
+            btn = Gtk.Button(css_classes=['path-recipe'], hexpand=True)
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            img = Gtk.Image.new_from_icon_name(icon)
+            img.set_pixel_size(18)
+            img.add_css_class('path-recipe-icon')
+            img.set_halign(Gtk.Align.START)
+            inner.append(img)
+            t = Gtk.Label(label=title_t, xalign=0, css_classes=['heading'],
+                          wrap=True)
+            inner.append(t)
+            s = Gtk.Label(label=sub_t, xalign=0, wrap=True,
+                          max_width_chars=30,
+                          css_classes=['dim-label', 'caption'])
+            inner.append(s)
+            btn.set_child(inner)
+            btn.connect('clicked', lambda _b, f=fn: f())
+            wrap.append(btn)
+        box.append(wrap)
+        return box
 
     # ------------------------------------------------------------ refresh --
     def refresh(self):
@@ -484,161 +756,230 @@ class PathsPage:
     def _apply(self, payload, error):
         if error or payload is None:
             return
-        self._strips, states, self._nodes, self._streams = payload
-        self._states = states
-        for row in self._rows:
-            (self.sources_group if row._role == 'source'
-             else self.mixes_group).remove(row)
-        self._rows = []
+        self._strips, self._states, self._nodes, self._streams = payload
         self._vols = {}
+        self._cards = {}
+        for body in (self.src_body, self.mix_body):
+            child = body.get_first_child()
+            while child is not None:
+                nxt = child.get_next_sibling()
+                body.remove(child)
+                child = nxt
 
         srcs = paths.sources(self._strips)
         mixes = paths.mixes(self._strips)
-        self.quick.set_visible(not self._strips)
+        empty = not self._strips
+        self.quick.set_visible(empty)
+        self.board_bin.set_visible(not empty)
+        self.col_src._count.set_label(str(len(srcs)) if srcs else '')
+        self.col_mix._count.set_label(str(len(mixes)) if mixes else '')
+        self._set_summary(srcs, mixes)
+        if empty:
+            return
 
         for s in srcs:
-            r = self._strip_row(s, mixes)
-            self.sources_group.add(r)
-            self._rows.append(r)
-        if not srcs:
-            self.sources_group.add(self._empty_row(
-                'No sources yet',
-                'Add one, or use Quick setup above.', 'source'))
+            card = self._strip_card(s, mixes)
+            self._cards[s.id] = card
+            self.src_body.append(card)
+        self.src_body.append(self._ghost(
+            'Add a source', 'An app, a microphone, or everything',
+            lambda: self._new_strip('source')))
         for m in mixes:
-            r = self._strip_row(m, mixes)
-            self.mixes_group.add(r)
-            self._rows.append(r)
-        if not mixes:
-            self.mixes_group.add(self._empty_row(
-                'No mixes yet',
-                'A source needs somewhere to send its audio.', 'mix'))
+            card = self._strip_card(m, mixes)
+            self._cards[m.id] = card
+            self.mix_body.append(card)
+        self.mix_body.append(self._ghost(
+            'Add a mix', 'A chain of its own, feeding real devices',
+            lambda: self._new_strip('mix')))
+        GLib.idle_add(self.wires.queue_draw)
 
-    def _empty_row(self, title, sub, role):
-        row = Adw.ActionRow(title=title, subtitle=sub, activatable=True)
-        row.add_prefix(Gtk.Image.new_from_icon_name('list-add-symbolic'))
-        row.connect('activated', lambda *_: self._new_strip(role))
-        row._role = role
-        self._rows.append(row)
-        return row
+    def _set_summary(self, srcs, mixes):
+        if not self._strips:
+            self.summary.set_label(
+                'Nothing routed yet — audio takes its usual path.')
+            return
+        outs = len({o for m in mixes for o in m.outputs})
+        live = sum(1 for s in self._strips
+                   if s.enabled and self._states.get(s.id) == 'active')
+        bits = [f'{len(srcs)} source' + ('s' if len(srcs) != 1 else ''),
+                f'{len(mixes)} mix' + ('es' if len(mixes) != 1 else '')]
+        if outs:
+            bits.append(f'{outs} output' + ('s' if outs != 1 else ''))
+        bits.append(f'{live} running')
+        self.summary.set_label(' · '.join(bits))
 
-    # --------------------------------------------------------- strip rows --
+    def wire_pairs(self):
+        """(source card, mix card, live) for every send — read by Wires."""
+        out = []
+        for s in paths.sources(self._strips):
+            src_card = self._cards.get(s.id)
+            if src_card is None:
+                continue
+            src_live = s.enabled and self._states.get(s.id) == 'active'
+            by_id = {m.id: m for m in paths.mixes(self._strips)}
+            for mid in s.sends:
+                dst = self._cards.get(mid)
+                if dst is None:
+                    continue
+                mix = by_id.get(mid)
+                live = bool(src_live and mix and mix.enabled
+                            and self._states.get(mid) == 'active')
+                out.append((src_card, dst, live))
+        return out
+
+    def _ghost(self, title, subtitle, on_click):
+        btn = Gtk.Button(css_classes=['path-ghost'])
+        inner = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
+        inner.append(Gtk.Image.new_from_icon_name('list-add-symbolic'))
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        labels.append(Gtk.Label(label=title, xalign=0,
+                                css_classes=['heading']))
+        labels.append(Gtk.Label(label=subtitle, xalign=0,
+                                css_classes=['dim-label', 'caption']))
+        inner.append(labels)
+        btn.set_child(inner)
+        btn.connect('clicked', lambda *_: on_click())
+        return btn
+
+    # --------------------------------------------------------- strip card --
     def _node_for(self, strip):
         return next((n for n in self._nodes if n.name == strip.node_name), None)
-
-    def _flow_text(self, strip, mixes):
-        stages = strip.active_stages()
-        chain = ' › '.join(s.get('name', '?') for s in stages) or 'no processing'
-        if strip.role == 'source':
-            by_id = {m.id: m for m in mixes}
-            dest = ', '.join(by_id[m].name for m in strip.sends if m in by_id)
-            dest = dest or 'follows the default output'
-        else:
-            dest = ', '.join(self._device_label(o) for o in strip.outputs) \
-                or 'follows the default output'
-        return f'{chain}  →  {dest}'
 
     def _device_label(self, node_name):
         n = next((x for x in self._nodes if x.name == node_name), None)
         return n.description if n else node_name
 
-    def _strip_row(self, strip, mixes):
+    def _strip_card(self, strip, mixes):
         state = self._states.get(strip.id, 'inactive')
         running = strip.enabled and state == 'active'
-        row = Adw.ExpanderRow(
-            title=esc(strip.name),
-            subtitle=esc(self._flow_text(strip, mixes)),
-            title_lines=1, subtitle_lines=2)
-        row._role = strip.role
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                       css_classes=['path-card'])
+        card.add_css_class('live' if running else 'idle')
+        card.append(self._card_head(strip, state, running))
+        if running:
+            vol = self._volume_box(strip)
+            if vol is not None:
+                card.append(vol)
+        card.append(self._rail(strip))
+        if strip.role == 'source':
+            card.append(self._sends_box(strip, mixes))
+            card.append(self._apps_box(strip))
+        else:
+            card.append(self._outputs_box(strip))
+        return card
+
+    def _card_head(self, strip, state, running):
+        head = Gtk.Box(spacing=10)
+        kind = strip.kind if strip.role == 'source' else 'mix'
         icon = KIND_ICON.get(strip.kind, 'audio-card-symbolic') \
             if strip.role == 'source' else 'audio-speakers-symbolic'
-        row.add_prefix(Gtk.Image.new_from_icon_name(icon))
-        if running:
-            row.add_css_class('enh-active')
-            # A running strip shows its chain without being asked, the way a
-            # running equalizer does — the chain is the point of the page.
-            row.set_expanded(True)
+        head.append(avatar(icon, kind))
 
-        sw = Gtk.Switch(active=strip.enabled, valign=Gtk.Align.CENTER)
+        names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1,
+                        hexpand=True, valign=Gtk.Align.CENTER)
+        line = Gtk.Box(spacing=6)
+        title = Gtk.Label(label=esc(strip.name), xalign=0,
+                          css_classes=['heading'],
+                          ellipsize=Pango.EllipsizeMode.END)
+        line.append(title)
+        tag = Gtk.Label(label=_layout_name(strip.channels),
+                        css_classes=['path-tag'], valign=Gtk.Align.CENTER)
+        tag.set_tooltip_text(f'{strip.channels} channels: '
+                             + ' '.join(strip.positions))
+        line.append(tag)
+        if strip.enabled and state == 'failed':
+            line.append(pill('failed', state_style(state)))
+        names.append(line)
+        sub = Gtk.Label(label=esc(self._card_subtitle(strip)), xalign=0,
+                        css_classes=['dim-label', 'caption'],
+                        ellipsize=Pango.EllipsizeMode.END)
+        names.append(sub)
+        head.append(names)
+
+        dot = Gtk.Box(css_classes=['path-dot'], valign=Gtk.Align.CENTER)
+        if running:
+            dot.add_css_class('on')
+        elif strip.enabled and state == 'failed':
+            dot.add_css_class('err')
+        elif strip.enabled:
+            dot.add_css_class('busy')
+        dot.set_tooltip_text(state if strip.enabled else 'switched off')
+        head.append(dot)
+
+        sw = Gtk.Switch(active=strip.enabled, valign=Gtk.Align.CENTER,
+                        tooltip_text='Turn this strip on or off')
         sw.connect('state-set', self._toggle, strip)
-        # ExpanderRow packs suffixes right-to-left, so add in reverse to get
-        # the same visual order as a plain row.
-        row.add_suffix(sw)
-        row.add_suffix(pill(str(len(strip.positions)) + 'ch',
-                            'dim-label'))
-        if strip.enabled and state != 'active':
-            row.add_suffix(pill(state, state_style(state)))
+        head.append(sw)
 
-        kids = [self._chain_row(strip)]
+        more = Gtk.MenuButton(icon_name='view-more-symbolic',
+                              css_classes=['flat'], valign=Gtk.Align.CENTER,
+                              tooltip_text='More')
+        more.set_popover(menu_popover([
+            ('document-edit-symbolic', 'Rename…',
+             lambda s=strip: self._rename(s)),
+            ('media-playlist-repeat-symbolic', 'Channel layout…',
+             lambda s=strip: self._pick_layout(s)),
+            ('document-save-symbolic', 'Export…',
+             lambda s=strip: self._export(s)),
+            None,
+            ('user-trash-symbolic', 'Delete',
+             lambda s=strip: self._delete(s), 'destructive-flat'),
+        ]))
+        head.append(more)
+        return head
+
+    def _card_subtitle(self, strip):
         if strip.role == 'source':
-            kids.append(self._sends_row(strip, mixes))
-            kids.append(self._apps_row(strip))
-        else:
-            kids.append(self._outputs_row(strip))
-        if running:
-            vr = self._volume_row(strip)
-            if vr:
-                kids.append(vr)
-        kids.append(self._actions_row(strip))
-        for k in kids:
-            # Each nested row paints its own background, so the accent edge
-            # has to be repeated on every child or it survives only in the
-            # gaps between them.
-            if running:
-                k.add_css_class('enh-inner')
-            row.add_row(k)
-        return row
+            by_id = {m.id: m for m in paths.mixes(self._strips)}
+            dest = ', '.join(by_id[m].name for m in strip.sends if m in by_id)
+            base = KIND_BLURB.get(strip.kind, 'A source')
+            return f'{base} → {dest}' if dest \
+                else f'{base} → the default output'
+        feeders = [s.name for s in paths.sources(self._strips)
+                   if strip.id in s.sends]
+        return ('Fed by ' + ', '.join(feeders)) if feeders \
+            else 'Nothing feeds this yet'
 
-    def _chain_row(self, strip):
-        """The chain gets a full-width row of its own.
-
-        A twenty-plugin chain has no chance as a row suffix, so this is built
-        as a real Gtk.ListBoxRow (a plain widget handed to add_row() would be
-        wrapped in one that never gets our styling) with the chips wrapping
-        across the whole width.
-        """
-        row = Gtk.ListBoxRow(activatable=False, selectable=False)
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
-                        margin_top=12, margin_bottom=12,
-                        margin_start=12, margin_end=12)
-        head = Gtk.Box(spacing=8)
-        head.append(Gtk.Label(label='Signal chain', xalign=0,
-                              css_classes=['heading'], hexpand=True))
+    # -- chain rail --------------------------------------------------------
+    def _rail(self, strip):
+        rail = Adw.WrapBox(child_spacing=5, line_spacing=5,
+                           css_classes=['path-rail'])
+        for i, st in enumerate(strip.stages):
+            if i:
+                rail.append(Gtk.Label(label='›', css_classes=['path-arrow'],
+                                      valign=Gtk.Align.CENTER))
+            rail.append(self._stage_chip(strip, st))
+        if not strip.stages:
+            rail.append(Gtk.Label(
+                label='No processing — audio passes straight through',
+                css_classes=['dim-label', 'caption'], xalign=0,
+                valign=Gtk.Align.CENTER, max_width_chars=42,
+                ellipsize=Pango.EllipsizeMode.END))
         add = Gtk.MenuButton(icon_name='list-add-symbolic',
                              valign=Gtk.Align.CENTER,
                              tooltip_text='Add a stage',
-                             css_classes=['flat'])
+                             css_classes=['path-add'])
         add.set_popover(self._stage_popover(strip))
-        head.append(add)
-        outer.append(head)
+        rail.append(add)
+        return rail
 
-        flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
-                           max_children_per_line=8, column_spacing=6,
-                           row_spacing=6, homogeneous=False,
-                           halign=Gtk.Align.START)
-        for i, st in enumerate(strip.stages):
-            if i:
-                flow.append(Gtk.Label(label='›', css_classes=['dim-label'],
-                                      valign=Gtk.Align.CENTER))
-            chip = Gtk.Button(valign=Gtk.Align.CENTER,
-                              css_classes=['pill', 'path-stage'],
-                              tooltip_text='Bypassed' if st.get('bypass')
-                              else 'Edit this stage')
-            content = Gtk.Box(spacing=6)
-            content.append(Gtk.Image.new_from_icon_name(
-                STAGE_ICON.get(st.get('kind'), 'preferences-other-symbolic')))
-            content.append(Gtk.Label(label=esc(st.get('name', '?'))))
-            chip.set_child(content)
-            if st.get('bypass'):
-                chip.add_css_class('path-stage-off')
-            chip.connect('clicked', lambda _b, s=st: self._edit_stage(strip, s))
-            flow.append(chip)
-        if not strip.stages:
-            flow.append(Gtk.Label(
-                label='No processing — audio passes straight through',
-                css_classes=['dim-label'], xalign=0))
-        outer.append(flow)
-        row.set_child(outer)
-        return row
+    def _stage_chip(self, strip, st):
+        kind = st.get('kind', '')
+        btn = Gtk.Button(valign=Gtk.Align.CENTER,
+                         css_classes=['path-stage', f'k-{kind}'],
+                         tooltip_text='Bypassed — click to edit'
+                         if st.get('bypass') else 'Edit this stage')
+        content = Gtk.Box(spacing=6)
+        content.append(Gtk.Image.new_from_icon_name(
+            STAGE_ICON.get(kind, 'preferences-other-symbolic')))
+        content.append(Gtk.Label(label=esc(st.get('name', '?')),
+                                 ellipsize=Pango.EllipsizeMode.END,
+                                 max_width_chars=18))
+        btn.set_child(content)
+        if st.get('bypass'):
+            btn.add_css_class('path-stage-off')
+        btn.connect('clicked', lambda _b, s=st: self._edit_stage(strip, s))
+        return btn
 
     def _stage_popover(self, strip):
         pop = Gtk.Popover()
@@ -651,10 +992,13 @@ class PathsPage:
             ('convolver', 'Convolver', 'An impulse response file'),
         ):
             b = Gtk.Button(css_classes=['flat'])
-            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-            inner.append(Gtk.Label(label=label, xalign=0))
-            inner.append(Gtk.Label(label=sub, xalign=0,
-                                   css_classes=['dim-label', 'caption']))
+            inner = Gtk.Box(spacing=10)
+            inner.append(Gtk.Image.new_from_icon_name(STAGE_ICON[kind]))
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+            text.append(Gtk.Label(label=label, xalign=0))
+            text.append(Gtk.Label(label=sub, xalign=0,
+                                  css_classes=['dim-label', 'caption']))
+            inner.append(text)
             b.set_child(inner)
             b.connect('clicked', lambda _b, k=kind: (pop.popdown(),
                                                      self._add_stage(strip, k)))
@@ -662,85 +1006,71 @@ class PathsPage:
         pop.set_child(box)
         return pop
 
-    def _sends_row(self, strip, mixes):
-        row = Adw.ActionRow(
-            title='Sends to',
-            subtitle='Pick more than one and they are combined automatically.')
-        box = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER)
+    # -- destinations ------------------------------------------------------
+    def _sends_box(self, strip, mixes):
+        chips = []
         for m in mixes:
-            tog = Gtk.ToggleButton(label=esc(m.name), active=m.id in strip.sends,
-                                   valign=Gtk.Align.CENTER,
-                                   css_classes=['pill'])
-            tog.connect('toggled', self._toggle_send, strip, m.id)
-            box.append(tog)
+            chips.append(chip(m.name, f'Send this source into “{m.name}”',
+                              lambda b, s=strip, mid=m.id:
+                              self._toggle_send(b, s, mid),
+                              active=m.id in strip.sends, toggle=True))
         if not mixes:
-            box.append(Gtk.Label(label='No mixes yet',
-                                 css_classes=['dim-label']))
-        row.add_suffix(box)
-        return row
+            chips.append(chip('Add a mix', 'A source needs somewhere to go',
+                              lambda *_: self._new_strip('mix'),
+                              icon='list-add-symbolic'))
+        return chip_row('Sends to', *chips)
 
-    def _outputs_row(self, strip):
-        row = Adw.ActionRow(
-            title='Out to',
-            subtitle='Several devices are combined into one output.')
-        box = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER)
-        for o in strip.outputs:
-            chip = Gtk.Button(label=esc(self._device_label(o)),
-                              valign=Gtk.Align.CENTER,
-                              css_classes=['pill'],
-                              tooltip_text='Remove this output')
-            chip.connect('clicked', self._drop_output, strip, o)
-            box.append(chip)
-        add = icon_button('list-add-symbolic', 'Add an output',
-                          lambda *_: self._add_output(strip))
-        box.append(add)
-        row.add_suffix(box)
-        return row
+    def _outputs_box(self, strip):
+        chips = [chip(self._device_label(o), 'Remove this output',
+                      lambda _b, s=strip, o=o: self._drop_output(s, o),
+                      icon='window-close-symbolic', active=True)
+                 for o in strip.outputs]
+        if not strip.outputs:
+            chips.append(Gtk.Label(label='Follows the default output',
+                                   css_classes=['dim-label', 'caption'],
+                                   valign=Gtk.Align.CENTER))
+        chips.append(add_button('Add an output',
+                                lambda *_: self._add_output(strip)))
+        return chip_row('Out to', *chips)
 
-    def _apps_row(self, strip):
+    def _apps_box(self, strip):
+        node = self._node_for(strip)
         here = [s for s in self._streams
-                if s.target_id and self._node_for(strip)
-                and s.target_id == self._node_for(strip).id]
-        row = Adw.ActionRow(
-            title='Apps playing here',
-            subtitle=esc(', '.join(s.name for s in here)) if here
-            else 'Nothing yet — send an app here to hear the chain.')
-        btn = Gtk.Button(label='Send an app here', valign=Gtk.Align.CENTER)
-        btn.connect('clicked', lambda *_: self._send_app(strip))
-        row.add_suffix(btn)
-        return row
+                if node is not None and s.target_id == node.id]
+        chips = [chip(s.name, f'{s.media or "playing"} — click to send it '
+                               'back to the default output',
+                      lambda _b, st=s: self._release_app(st),
+                      icon='window-close-symbolic', active=True)
+                 for s in here]
+        if not here:
+            chips.append(Gtk.Label(label='Nothing playing here yet',
+                                   css_classes=['dim-label', 'caption'],
+                                   valign=Gtk.Align.CENTER))
+        chips.append(add_button('Send an app here',
+                                lambda *_: self._send_app(strip)))
+        return chip_row('Playing', *chips)
 
-    def _volume_row(self, strip):
+    def _volume_box(self, strip):
         node = self._node_for(strip)
         if node is None:
             return None
-        row = Adw.ActionRow(title='Level', title_lines=1)
+        box = Gtk.Box(spacing=8)
+        mute = Gtk.ToggleButton(icon_name='audio-volume-muted-symbolic',
+                                active=node.muted, valign=Gtk.Align.CENTER,
+                                css_classes=['flat', 'circular'],
+                                tooltip_text='Mute')
+        mute.connect('toggled', lambda b, n=node: pw.set_mute(n.id,
+                                                              b.get_active()))
+        box.append(mute)
         ctl = make_volume(self.volume_style,
-                          lambda v, n=node: pw.set_volume(n.id, v),
-                          compact=True)
+                          lambda v, n=node: pw.set_volume(n.id, v))
         ctl.set_value(node.volume if node.volume is not None else 1.0)
         if node.serial and node.serial > 0 and not levels.at_capacity():
             ctl.set_meter(node.serial)
         self._vols[strip.id] = ctl
-        mute = Gtk.ToggleButton(icon_name='audio-volume-muted-symbolic',
-                                active=node.muted, valign=Gtk.Align.CENTER,
-                                tooltip_text='Mute')
-        mute.connect('toggled', lambda b, n=node: pw.set_mute(n.id,
-                                                              b.get_active()))
-        row.add_suffix(ctl.widget)
-        row.add_suffix(mute)
-        return row
-
-    def _actions_row(self, strip):
-        row = Adw.ActionRow(title='This strip')
-        for icon, tip, fn in (
-            ('document-edit-symbolic', 'Rename', self._rename),
-            ('document-save-symbolic', 'Export', self._export),
-            ('user-trash-symbolic', 'Delete', self._delete),
-        ):
-            row.add_suffix(icon_button(icon, tip,
-                                       lambda *_, f=fn, s=strip: f(s)))
-        return row
+        ctl.widget.set_hexpand(True)
+        box.append(ctl.widget)
+        return box
 
     # ------------------------------------------------------------ actions --
     def _save_and_apply(self, strip, message=None):
@@ -769,7 +1099,7 @@ class PathsPage:
                        else [m for m in strip.sends if m != mix_id])
         self._save_and_apply(strip)
 
-    def _drop_output(self, _b, strip, node_name):
+    def _drop_output(self, strip, node_name):
         strip.outputs = [o for o in strip.outputs if o != node_name]
         self._save_and_apply(strip)
 
@@ -789,8 +1119,9 @@ class PathsPage:
             strip.outputs = [*strip.outputs, key]
             self._save_and_apply(strip)
         search_picker(self.window, 'Add an output',
-                      'Where this mix sends its audio.', items, picked,
-                      empty='No output devices found')
+                      'Where this mix sends its audio. Pick several and they '
+                      'are combined into one output automatically.',
+                      items, picked, empty='No output devices found')
 
     def _new_capture_sink(self, strip):
         def make(name):
@@ -828,12 +1159,27 @@ class PathsPage:
 
         def picked(stream_id):
             def done(ok, e):
-                self.window.toast('Moved' if ok and not e else 'Could not move it')
+                self.window.toast('Moved' if ok and not e
+                                  else 'Could not move it')
                 self.refresh()
             async_call(lambda: pw.move_stream(stream_id, node.serial), done)
         search_picker(self.window, 'Send an app here',
                       'The app keeps playing; it is just relinked.',
                       items, picked)
+
+    def _release_app(self, stream):
+        """Put an app back on the default output."""
+        dest = next((n for n in self._nodes if n.is_sink and n.is_default),
+                    None)
+        if dest is None:
+            self.window.toast('No default output to send it back to')
+            return
+
+        def done(ok, e):
+            self.window.toast('Back on the default output' if ok and not e
+                              else 'Could not move it')
+            self.refresh()
+        async_call(lambda: pw.move_stream(stream.id, dest.serial), done)
 
     def _add_stage(self, strip, kind):
         stage = paths.new_stage(kind, {'eq': 'Equalizer', 'effect': 'Plugin',
@@ -887,6 +1233,24 @@ class PathsPage:
                 self._save_and_apply(strip)
         prompt_text(self.window, 'Rename', 'What this strip is called.',
                     strip.name, go)
+
+    def _pick_layout(self, strip):
+        from ..backend import surround
+        # Same list Virtual Devices offers, plus mono, so a strip in front of
+        # a microphone doesn't have to pretend to be stereo.
+        layouts = [('mono', 'Mono 1.0', ['FL'])] + list(surround.LAYOUTS)
+        items = [(pos, label, ' '.join(pos)) for _k, label, pos in layouts]
+
+        def picked(positions):
+            positions = list(positions)
+            if positions == list(strip.positions):
+                return
+            strip.positions = positions
+            self._save_and_apply(
+                strip, f'“{strip.name}” is now {_layout_name(len(positions))}')
+        search_picker(self.window, 'Channel layout',
+                      'How many channels this strip carries. Every stage is '
+                      'built across all of them.', items, picked)
 
     def _delete(self, strip):
         def go():

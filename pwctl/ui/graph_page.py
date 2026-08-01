@@ -629,8 +629,13 @@ class GraphPage:
         spacer = Gtk.Box(hexpand=True)
         bar.append(spacer)
 
+        # The hint has to be able to disappear.  Every page lives in the same
+        # Gtk.Stack, so the stack's minimum width is the widest page's — an
+        # un-ellipsized sentence here was making *all* pages demand 960 px and
+        # get clipped in a tiled or half-screen window.
         self.hint = Gtk.Label(label='Drag port → port to connect · '
-                                    'double-click a node for details')
+                                    'double-click a node for details',
+                              ellipsize=Pango.EllipsizeMode.END)
         self.hint.add_css_class('dim-label')
         self.hint.add_css_class('caption')
         bar.append(self.hint)

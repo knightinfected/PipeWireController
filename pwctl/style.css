@@ -69,6 +69,24 @@ row.overridden {
     margin: 2px 8px;
 }
 
+/* The sidebar is on screen for every page, so it sets the tone for the whole
+   app.  Plain selection reads as a settings list; an accent tint on the
+   selected page reads as navigation.  Colours come from libadwaita, so this
+   follows the user's accent and both light and dark. */
+.navigation-sidebar row:selected {
+    background: alpha(@accent_color, 0.14);
+    color: @accent_color;
+    font-weight: 700;
+}
+
+.navigation-sidebar row:selected image {
+    color: @accent_color;
+}
+
+.navigation-sidebar row:selected:hover {
+    background: alpha(@accent_color, 0.2);
+}
+
 /* ------------------------------------------------ dashboard stream rows -- */
 
 .vol-list > row {
@@ -170,29 +188,268 @@ row.enh-idle label.title {
     color: alpha(currentColor, 0.85);
 }
 
-/* ---- Signal Paths --------------------------------------------------- */
+/* ===================================================== Signal Paths ==== */
+/* This page is a board, not a settings list: two columns of cards with the
+   sends drawn between them.  Everything below is namespaced `.path-*`.
+ *
+ * Colour rule used throughout: a hue is never written raw, it is
+ * `mix(<palette hue>, @window_fg_color, f)`.  Mixing toward the theme's own
+ * foreground lightens the hue on a dark theme and darkens it on a light one,
+ * so one declaration stays legible in both without needing a dark-mode
+ * marker class (which a separate toplevel — a dialog — would not inherit). */
+
+/* -- micro heading: "SOURCES", "SENDS TO".  Uppercasing is done in Python
+      so it does not depend on GTK's text-transform support. */
+.path-label {
+    font-size: 0.72em;
+    font-weight: 800;
+    opacity: 0.5;
+}
+
+.path-count {
+    font-size: 0.72em;
+    font-weight: 800;
+    opacity: 0.35;
+    font-feature-settings: "tnum";
+}
+
+/* -- the strip card ---------------------------------------------------- */
+.path-card {
+    background: @card_bg_color;
+    border: 1px solid alpha(currentColor, 0.09);
+    border-radius: 14px;
+    padding: 12px;
+}
+
+/* Running strips carry the accent edge the Equalizer page uses, plus a lift,
+   so "what is live" is readable from across the room. */
+.path-card.live {
+    border-color: alpha(@success_color, 0.45);
+    box-shadow: inset 3px 0 0 0 @success_color,
+                0 6px 18px -12px alpha(@success_color, 0.9);
+}
+
+/* Idle strips keep their layout and spend less ink.  Only the text fades —
+   never the controls, which stay just as clickable. */
+.path-card.idle label.heading {
+    opacity: 0.7;
+}
+
+/* The add-a-strip placeholder: same footprint as a card, obviously empty. */
+button.path-ghost {
+    border: 1px dashed alpha(currentColor, 0.25);
+    border-radius: 14px;
+    padding: 18px 12px;
+    background: none;
+    box-shadow: none;
+}
+
+button.path-ghost:hover {
+    border-style: solid;
+    border-color: @accent_color;
+    background: alpha(@accent_color, 0.07);
+    color: @accent_color;
+}
+
+/* -- avatar: the one place each kind gets its own hue ------------------- */
+.path-avatar {
+    min-width: 34px;
+    min-height: 34px;
+    border-radius: 10px;
+    background: alpha(currentColor, 0.09);
+}
+
+.path-avatar.k-app {
+    background: alpha(@blue_3, 0.18);
+    color: mix(@blue_3, @window_fg_color, 0.35);
+}
+
+.path-avatar.k-mic {
+    background: alpha(@orange_3, 0.2);
+    color: mix(@orange_3, @window_fg_color, 0.3);
+}
+
+.path-avatar.k-everything {
+    background: alpha(@purple_3, 0.2);
+    color: mix(@purple_3, @window_fg_color, 0.4);
+}
+
+.path-avatar.k-mix {
+    background: alpha(@green_4, 0.2);
+    color: mix(@green_4, @window_fg_color, 0.35);
+}
+
+/* -- state dot --------------------------------------------------------- */
+.path-dot {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 99px;
+    background: alpha(currentColor, 0.25);
+}
+
+.path-dot.on {
+    background: @success_color;
+    box-shadow: 0 0 0 3px alpha(@success_color, 0.18);
+}
+
+.path-dot.busy {
+    background: @warning_color;
+}
+
+.path-dot.err {
+    background: @error_color;
+}
+
+/* -- channel-layout tag ------------------------------------------------ */
+.path-tag {
+    font-size: 0.72em;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 6px;
+    background: alpha(currentColor, 0.1);
+    opacity: 0.75;
+}
+
+/* -- the chain rail ---------------------------------------------------- */
+/* A recessed strip so the chain reads as the contents of the card rather
+   than another row of controls stacked on it. */
+.path-rail {
+    background: alpha(currentColor, 0.05);
+    border-radius: 10px;
+    padding: 7px 8px;
+}
+
 /* A stage chip is a button, so it inherits button padding that reads as
-   heavy next to a row's own text; these are meant to look like tokens in a
-   sentence, not like controls competing with the row. */
+   heavy next to the card's own text; these are meant to look like tokens in
+   a sentence, not controls competing with the card. */
 button.path-stage {
     padding: 4px 10px;
     min-height: 0;
     font-size: 0.92em;
-    border-radius: 9px;
+    font-weight: 600;
+    border-radius: 8px;
+    background: @card_bg_color;
+    border: 1px solid alpha(currentColor, 0.13);
+    box-shadow: none;
 }
 
+button.path-stage:hover {
+    border-color: @accent_color;
+    background: alpha(@accent_color, 0.08);
+}
+
+/* The kind is carried by the icon's hue, so a long chain stays scannable
+   without turning into a rainbow of filled chips. */
 button.path-stage image {
-    opacity: 0.7;
+    color: mix(@blue_3, @window_fg_color, 0.35);
+}
+
+button.path-stage.k-effect image {
+    color: mix(@purple_3, @window_fg_color, 0.4);
+}
+
+button.path-stage.k-convolver image {
+    color: mix(@orange_3, @window_fg_color, 0.3);
 }
 
 /* Bypassed: still legible, clearly out of the signal. Only the label and its
    icon are dimmed — dimming the whole chip would make it read as disabled
    rather than switched out. */
+button.path-stage-off {
+    border-style: dashed;
+}
+
 button.path-stage-off label,
 button.path-stage-off image {
     opacity: 0.45;
 }
 
-button.path-stage-off {
-    border-style: dashed;
+.path-arrow {
+    opacity: 0.3;
+    font-size: 0.85em;
+}
+
+/* -- small round add button, used in the rail and in the chip rows ----- */
+button.path-add {
+    min-width: 24px;
+    min-height: 24px;
+    padding: 0 4px;
+    border-radius: 8px;
+    border: 1px dashed alpha(currentColor, 0.28);
+    background: none;
+    box-shadow: none;
+}
+
+button.path-add:hover {
+    border-style: solid;
+    border-color: @accent_color;
+    background: alpha(@accent_color, 0.1);
+    color: @accent_color;
+}
+
+/* -- send / output / app chips ---------------------------------------- */
+button.path-chip {
+    padding: 3px 10px;
+    min-height: 0;
+    font-size: 0.88em;
+    border-radius: 99px;
+    background: alpha(currentColor, 0.07);
+    border: 1px solid transparent;
+    box-shadow: none;
+}
+
+button.path-chip:hover {
+    border-color: alpha(@accent_color, 0.6);
+}
+
+/* An active send is where the audio actually goes — same green as a running
+   card, so the two read as one fact. */
+button.path-chip:checked,
+button.path-chip.on {
+    background: alpha(@success_color, 0.16);
+    color: mix(@success_color, @window_fg_color, 0.15);
+    font-weight: 600;
+}
+
+button.path-chip image {
+    opacity: 0.55;
+}
+
+/* -- quick-setup recipes ---------------------------------------------- */
+button.path-recipe {
+    padding: 16px;
+    border-radius: 14px;
+    background: @card_bg_color;
+    border: 1px solid alpha(currentColor, 0.09);
+    box-shadow: none;
+}
+
+button.path-recipe:hover {
+    border-color: @accent_color;
+    background: alpha(@accent_color, 0.07);
+}
+
+.path-recipe-icon {
+    min-width: 34px;
+    min-height: 34px;
+    border-radius: 10px;
+    background: alpha(@accent_color, 0.16);
+    color: @accent_color;
+}
+
+/* -- the toolbar above the board -------------------------------------- */
+.path-toolbar {
+    padding-bottom: 2px;
+}
+
+/* -- wire colours ------------------------------------------------------ */
+/* Read by the drawing code off two invisible marker widgets, so the curve
+   between two cards is painted in the same hues as their avatars and follows
+   the active theme instead of a hardcoded blue. */
+.path-wire-src {
+    color: mix(@blue_3, @window_fg_color, 0.35);
+}
+
+.path-wire-dst {
+    color: mix(@green_4, @window_fg_color, 0.35);
 }
