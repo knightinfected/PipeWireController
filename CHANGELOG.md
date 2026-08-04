@@ -43,6 +43,12 @@ earns its place once a chain has to split.
   click on a stage takes it in or out of the signal; double-click or
   right-click opens it. While you are dragging, every place the thing could
   land says so, so you are never guessing at what is allowed.
+- **Colour tells you what you are looking at.** Sources are blue and mixes are
+  green — the cards, the headings above them and the curves running between
+  them all use the same two colours, and a strip that is actually running
+  carries its colour more strongly than one that is switched off. A send or an
+  output turns green once it is carrying audio, so what is live is something
+  you can see rather than something you have to read.
 - **One process per chain, not one per plugin.** Every stage in a strip is
   compiled into a single filter graph: twenty effects are one entry in your
   device list and one buffer hop, instead of twenty of each. Hand-written
