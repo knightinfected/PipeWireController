@@ -25,6 +25,56 @@ and commit log.
 
 ## Unreleased
 
+**Signal Paths: pick where audio comes in, build a chain, pick where it goes**
+
+A new page, and the first one that is about the *shape* of your audio rather
+than about settings. A **source** is where sound enters — one app, a
+microphone, or everything on the default output — and carries its own chain of
+processing. A **mix** carries a chain of its own and feeds real devices.
+Sources sit on the left, mixes on the right, and the sends between them are
+drawn as curves, so a glance tells you what is going where. One source and one
+mix is a straight line, which is what most setups are; the second column only
+earns its place once a chain has to split.
+
+- **One process per chain, not one per plugin.** Every stage in a strip is
+  compiled into a single filter graph: twenty effects are one entry in your
+  device list and one buffer hop, instead of twenty of each. Hand-written
+  configs force the opposite, which is how a serious chain ends up adding
+  twenty quanta of latency.
+- **Equalizer bands can be moved while the audio plays.** Signal Paths builds
+  its equalizers from biquad filters rather than the preset-file kind, so
+  frequency, gain and Q take effect as you change them — no restart, no gap.
+- **Quick setup builds a whole arrangement in one click** — an equalizer on
+  everything, effects on a single app, or speakers plus a separate stream mix
+  with a virtual output that OBS or Discord can record. Each one is ordinary
+  sources and mixes afterwards, so you can take it apart.
+- **Send one chain to several devices** and they are combined into one output
+  for you; pick several outputs on a mix and the same thing happens. You never
+  have to learn what a combine sink is.
+- Chains, sends and outputs can be exported to a file and imported again.
+  Imported paths arrive switched off so you can look before turning them on.
+
+**Effects and equalizers stop being dead ends**
+
+Also from [u/yhcheng888](https://www.reddit.com/user/yhcheng888/)'s report
+below — running twenty plugin sinks in series into three outputs.
+
+- **An effect rack can feed another effect rack.** The output picker excluded
+  every rack, including the ones you had just built, so rack → rack was the one
+  combination that could not be made — while rack → equalizer already could.
+  Racks, equalizers and filter chains now share one check, which also catches
+  loops that run through a mix of them (equalizer → rack → equalizer) — those
+  were invisible before.
+- **Equalizers are no longer stereo-only.** A new channel layout row offers
+  everything from mono to 7.1, so an equalizer can sit in front of a surround
+  card instead of folding it down.
+- **Any of them can play to several devices at once.** Tick the outputs and the
+  combined device is built and selected for you.
+- **Pages no longer get cut off in a narrow window.** One over-wide toolbar on
+  the Patchbay was setting a floor for *every* page, so tiling the window or
+  putting it on half a screen clipped the right-hand side of whatever you were
+  looking at.
+
 **Hiding a device now really hides it, honest graph numbers, and chained
 equalizers**
 
