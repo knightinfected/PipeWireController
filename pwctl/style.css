@@ -11,6 +11,18 @@
 @define-color pwctl_drop mix(@blue_3, @window_fg_color, 0.15);
 @define-color pwctl_link mix(@green_4, @window_fg_color, 0.15);
 
+/* The two identities on the Signal Paths board: a source is blue, a mix is
+   green.  One hue per role, used for the card tint, the channel tag, the
+   wires in the gutter and every hover on the page, so the whole board reads
+   as two connected halves rather than one flat grey surface.
+
+   `@accent_color` is deliberately absent from the board for the same reason
+   the drop indicators avoid it — a third-party GTK theme is free to resolve
+   it to grey, and one does here, which turned every highlight the page had
+   into a slightly lighter shade of the background. */
+@define-color pwctl_src mix(@blue_3, @window_fg_color, 0.3);
+@define-color pwctl_mix mix(@green_4, @window_fg_color, 0.3);
+
 .status-pill {
     padding: 2px 10px;
     border-radius: 99px;
@@ -217,6 +229,18 @@ row.enh-idle label.title {
     opacity: 0.5;
 }
 
+/* A column heading takes its column's hue, so "SOURCES" and "MIXES" name the
+   two halves of the board in the same colours the cards under them use. */
+.path-label.k-source {
+    color: @pwctl_src;
+    opacity: 0.9;
+}
+
+.path-label.k-mix {
+    color: @pwctl_mix;
+    opacity: 0.9;
+}
+
 .path-count {
     font-size: 0.72em;
     font-weight: 800;
@@ -232,18 +256,53 @@ row.enh-idle label.title {
     padding: 12px;
 }
 
-/* Running strips carry the accent edge the Equalizer page uses, plus a lift,
-   so "what is live" is readable from across the room. */
-.path-card.live {
-    border-color: alpha(@success_color, 0.45);
-    box-shadow: inset 3px 0 0 0 @success_color,
-                0 6px 18px -12px alpha(@success_color, 0.9);
+/* A card is tinted with its column's hue rather than left on the plain card
+   background.  The tint is mixed *into* `@card_bg_color` instead of layered
+   over it with alpha, so one declaration covers light and dark: on a dark
+   theme it lifts the surface toward the hue, on a light one it settles into
+   it, and either way the card keeps a real opaque surface underneath.
+   Kept faint — this is the identity of the card, not its state. */
+.path-card.role-source {
+    background: mix(@card_bg_color, @blue_3, 0.07);
+    border-color: alpha(@blue_3, 0.22);
+}
+
+.path-card.role-mix {
+    background: mix(@card_bg_color, @green_4, 0.07);
+    border-color: alpha(@green_4, 0.22);
+}
+
+/* Running strips deepen that same tint and take the accent edge the Equalizer
+   page uses, plus a lift, so "what is live" is readable from across the room.
+   The edge is the card's own hue and not one shared success green: with both
+   columns going green on start-up the board lost the source/mix split at
+   exactly the moment there was something to look at. */
+.path-card.role-source.live {
+    background: mix(@card_bg_color, @blue_3, 0.14);
+    border-color: alpha(@blue_3, 0.5);
+    box-shadow: inset 3px 0 0 0 @pwctl_src,
+                0 6px 18px -12px alpha(@blue_3, 0.9);
+}
+
+.path-card.role-mix.live {
+    background: mix(@card_bg_color, @green_4, 0.14);
+    border-color: alpha(@green_4, 0.5);
+    box-shadow: inset 3px 0 0 0 @pwctl_mix,
+                0 6px 18px -12px alpha(@green_4, 0.9);
 }
 
 /* Idle strips keep their layout and spend less ink.  Only the text fades —
    never the controls, which stay just as clickable. */
 .path-card.idle label.heading {
     opacity: 0.7;
+}
+
+/* The card's top band doubles as its drag handle, so it gets a hairline of
+   its own: the card reads as a header with contents under it rather than as
+   five stacked rows of equal weight. */
+.path-head {
+    padding-bottom: 8px;
+    box-shadow: inset 0 -1px 0 0 alpha(currentColor, 0.12);
 }
 
 /* The add-a-strip placeholder: same footprint as a card, obviously empty. */
@@ -257,9 +316,9 @@ button.path-ghost {
 
 button.path-ghost:hover {
     border-style: solid;
-    border-color: @accent_color;
-    background: alpha(@accent_color, 0.07);
-    color: @accent_color;
+    border-color: @pwctl_src;
+    background: alpha(@pwctl_src, 0.09);
+    color: @pwctl_src;
 }
 
 /* -- avatar: the one place each kind gets its own hue ------------------- */
@@ -321,13 +380,39 @@ button.path-ghost:hover {
     opacity: 0.75;
 }
 
+/* Tinted like everything else the card owns, so "Stereo" reads as part of the
+   name rather than as a disabled-looking grey box next to it. */
+.path-card.role-source .path-tag {
+    background: alpha(@blue_3, 0.2);
+    color: @pwctl_src;
+    opacity: 1;
+}
+
+.path-card.role-mix .path-tag {
+    background: alpha(@green_4, 0.2);
+    color: @pwctl_mix;
+    opacity: 1;
+}
+
 /* -- the chain rail ---------------------------------------------------- */
 /* A recessed strip so the chain reads as the contents of the card rather
-   than another row of controls stacked on it. */
+   than another row of controls stacked on it.  The border is transparent
+   rather than absent so the empty variant below can turn it on without the
+   rail changing height. */
 .path-rail {
-    background: alpha(currentColor, 0.05);
+    background: alpha(currentColor, 0.06);
+    border: 1px solid transparent;
     border-radius: 10px;
     padding: 7px 8px;
+}
+
+/* An empty chain is an invitation, not a component: filled, it was the widest
+   and emptiest block on the card, which is most of what made a fresh board
+   look like dead space. */
+.path-rail.path-rail-empty {
+    background: none;
+    border-color: alpha(currentColor, 0.14);
+    border-style: dashed;
 }
 
 /* A stage chip is a button, so it inherits button padding that reads as
@@ -345,8 +430,8 @@ button.path-stage {
 }
 
 button.path-stage:hover {
-    border-color: @accent_color;
-    background: alpha(@accent_color, 0.08);
+    border-color: @pwctl_src;
+    background: alpha(@pwctl_src, 0.1);
 }
 
 /* The kind is carried by the icon's hue, so a long chain stays scannable
@@ -393,9 +478,9 @@ button.path-add {
 
 button.path-add:hover {
     border-style: solid;
-    border-color: @accent_color;
-    background: alpha(@accent_color, 0.1);
-    color: @accent_color;
+    border-color: @pwctl_src;
+    background: alpha(@pwctl_src, 0.12);
+    color: @pwctl_src;
 }
 
 /* -- send / output / app chips ---------------------------------------- */
@@ -410,16 +495,31 @@ button.path-chip {
 }
 
 button.path-chip:hover {
-    border-color: alpha(@accent_color, 0.6);
+    border-color: alpha(@pwctl_src, 0.6);
 }
 
-/* An active send is where the audio actually goes — same green as a running
-   card, so the two read as one fact. */
-button.path-chip:checked,
-button.path-chip.on {
-    background: alpha(@success_color, 0.16);
-    color: mix(@success_color, @window_fg_color, 0.15);
+/* An active send is where the audio actually goes — the same green as a mix
+   card and as a live wire in the gutter, so the three read as one fact.
+ *
+ * Written under `.path-card` on purpose.  A chip is a real GtkToggleButton,
+ * and a theme's own `button:checked` outranks a plain `.path-chip:checked`;
+ * that is how these ended up as grey pills that gave no sign of carrying
+ * audio.  The extra class puts them out of reach of that. */
+.path-card button.path-chip:checked,
+.path-card button.path-chip.on {
+    background: alpha(@green_4, 0.2);
+    color: @pwctl_mix;
+    border-color: alpha(@green_4, 0.4);
     font-weight: 600;
+}
+
+/* The dot in front of the label.  It inherits the chip's colour, so it is
+   green exactly when the chip is live and invisible otherwise. */
+.path-chip-dot {
+    min-width: 6px;
+    min-height: 6px;
+    border-radius: 99px;
+    background: currentColor;
 }
 
 button.path-chip image {
@@ -436,16 +536,16 @@ button.path-recipe {
 }
 
 button.path-recipe:hover {
-    border-color: @accent_color;
-    background: alpha(@accent_color, 0.07);
+    border-color: @pwctl_src;
+    background: alpha(@pwctl_src, 0.09);
 }
 
 .path-recipe-icon {
     min-width: 34px;
     min-height: 34px;
     border-radius: 10px;
-    background: alpha(@accent_color, 0.16);
-    color: @accent_color;
+    background: alpha(@blue_3, 0.2);
+    color: @pwctl_src;
 }
 
 /* -- the toolbar above the board -------------------------------------- */
@@ -478,19 +578,32 @@ button.path-recipe:hover {
     border-style: dashed;
 }
 
+/* Every card selector in this section carries `.path-card` twice.  A card is
+   tinted by role *and* by state — `.path-card.role-mix.live` — which is three
+   classes, and a drop indicator written with two would quietly lose to it on
+   exactly the running cards a drag is most likely to cross.  The repeat costs
+   nothing and keeps the rule of the section true: while a drag is in flight,
+   the indicator wins. */
+
 .path-rail.drop-ready {
     background: alpha(@pwctl_drop, 0.1);
+    border-color: alpha(@pwctl_drop, 0.45);
+    border-style: solid;
     box-shadow: inset 0 0 0 2px alpha(@pwctl_drop, 0.45);
 }
 
-.path-card.drop-ready {
-    border-color: alpha(@pwctl_drop, 0.6);
-    box-shadow: inset 0 0 0 1px alpha(@pwctl_drop, 0.35);
+/* A 1px ring was enough to read as "possible" while every card was the same
+   neutral grey.  Now that a card already carries its own hue — and a mix card
+   already carries green, which is the colour `link-ready` speaks in — the ring
+   has to be thick enough to be a ring rather than a slightly brighter border. */
+.path-card.path-card.drop-ready {
+    border-color: alpha(@pwctl_drop, 0.75);
+    box-shadow: inset 0 0 0 2px alpha(@pwctl_drop, 0.4);
 }
 
-.path-card.link-ready {
-    border-color: alpha(@pwctl_link, 0.65);
-    box-shadow: inset 0 0 0 1px alpha(@pwctl_link, 0.4);
+.path-card.path-card.link-ready {
+    border-color: alpha(@pwctl_link, 0.8);
+    box-shadow: inset 0 0 0 2px alpha(@pwctl_link, 0.45);
 }
 
 /* The caret is drawn twice: inside the chip, where it cannot be clipped, and
@@ -506,30 +619,28 @@ button.path-recipe:hover {
                 4px 0 0 0 @pwctl_drop;
 }
 
-/* These come after `.path-card.live` on purpose: same specificity, so the
-   later rule wins and a running card still shows where the drop would go. */
-.path-card.drop-before {
+.path-card.path-card.drop-before {
     box-shadow: inset 0 4px 0 0 @pwctl_drop,
                 0 -5px 0 0 @pwctl_drop;
 }
 
-.path-card.drop-after {
+.path-card.path-card.drop-after {
     box-shadow: inset 0 -4px 0 0 @pwctl_drop,
                 0 5px 0 0 @pwctl_drop;
 }
 
 /* "Something goes inside this card": a stage joining its chain, or an app
    being routed through it. */
-.path-card.drop-into {
+.path-card.path-card.drop-into {
     border-color: @pwctl_drop;
-    background: alpha(@pwctl_drop, 0.14);
+    background: mix(@card_bg_color, @pwctl_drop, 0.22);
     box-shadow: 0 0 0 1px @pwctl_drop;
 }
 
 /* "These two get wired together" — a different act, so a different colour. */
-.path-card.link-into {
+.path-card.path-card.link-into {
     border-color: @pwctl_link;
-    background: alpha(@pwctl_link, 0.14);
+    background: mix(@card_bg_color, @pwctl_link, 0.22);
     box-shadow: 0 0 0 1px @pwctl_link;
 }
 
@@ -537,6 +648,8 @@ button.path-recipe:hover {
    filling instead. */
 .path-rail.drop-into {
     background: alpha(@pwctl_drop, 0.22);
+    border-color: @pwctl_drop;
+    border-style: solid;
     box-shadow: inset 0 0 0 2px @pwctl_drop;
 }
 

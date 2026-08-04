@@ -100,11 +100,16 @@ def _all_plugins():
 
 # ------------------------------------------------------------- primitives --
 
-def micro(text: str) -> Gtk.Label:
+def micro(text: str, kind: str = '') -> Gtk.Label:
     """A section label: small, heavy, quiet.  Uppercased here rather than in
-    CSS so it does not depend on GTK's text-transform support."""
+    CSS so it does not depend on GTK's text-transform support.
+
+    `kind` tints it with a column's hue, which is only wanted for the two
+    column headings — the ones inside a card stay quiet."""
     lbl = Gtk.Label(label=text.upper(), xalign=0, valign=Gtk.Align.CENTER)
     lbl.add_css_class('path-label')
+    if kind:
+        lbl.add_css_class(f'k-{kind}')
     return lbl
 
 
@@ -125,6 +130,12 @@ def chip(label: str, tooltip: str = '', on_click=None, icon: str = '',
     if tooltip:
         btn.set_tooltip_text(tooltip)
     box = Gtk.Box(spacing=5)
+    # A dot in front of the label, shown only while the chip is live.  It
+    # takes the chip's own colour, so "this send carries audio" is legible at
+    # a glance instead of resting entirely on a tinted background.
+    dot = Gtk.Box(css_classes=['path-chip-dot'], valign=Gtk.Align.CENTER,
+                  visible=active)
+    box.append(dot)
     lbl = Gtk.Label(label=esc(label), ellipsize=Pango.EllipsizeMode.END,
                     max_width_chars=18)
     box.append(lbl)
@@ -133,6 +144,10 @@ def chip(label: str, tooltip: str = '', on_click=None, icon: str = '',
     btn.set_child(box)
     if toggle:
         btn.set_active(active)
+        # The rebuild that follows a toggle waits on the graph, so the dot
+        # follows the button directly — otherwise a chip sits checked and
+        # dotless for as long as the apply takes.
+        btn.connect('toggled', lambda b: dot.set_visible(b.get_active()))
     elif active:
         btn.add_css_class('on')
     if on_click:
@@ -469,7 +484,7 @@ class Wires(Gtk.DrawingArea):
                 grad.add_color_stop_rgba(1, c_dst.red, c_dst.green,
                                          c_dst.blue, 0.9)
                 cr.set_source(grad)
-                cr.set_line_width(2.0)
+                cr.set_line_width(2.5)
                 cr.set_dash([])
             else:
                 cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.22)
@@ -848,7 +863,12 @@ class PathsPage:
         box.append(toolbar)
         box.append(self.quick)
         box.append(bin_)
-        clamp = Adw.Clamp(maximum_size=1600, tightening_threshold=1100)
+        # 1600 let each column grow past 700px on a wide screen, which a card
+        # has nothing to do with: the name sits in the first third and the
+        # rest is the rail stretching out empty.  Cards look built rather than
+        # stretched at around 600, and long device names still wrap instead of
+        # being cut.
+        clamp = Adw.Clamp(maximum_size=1320, tightening_threshold=1100)
         clamp.set_child(box)
         sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
                                 vexpand=True)
@@ -857,7 +877,7 @@ class PathsPage:
 
     def _column(self, title, tooltip, on_add, role):
         head = Gtk.Box(spacing=8)
-        head.append(micro(title))
+        head.append(micro(title, role))
         count = Gtk.Label(xalign=0, css_classes=['path-count'], hexpand=True,
                           valign=Gtk.Align.CENTER)
         head.append(count)
@@ -1052,6 +1072,10 @@ class PathsPage:
         running = strip.enabled and state == 'active'
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
                        css_classes=['path-card'])
+        # Two independent facts, two classes: which column it belongs to (its
+        # hue, which never changes) and whether it is running (how strongly
+        # that hue is carried).
+        card.add_css_class(f'role-{strip.role}')
         card.add_css_class('live' if running else 'idle')
         card.append(self._card_head(strip, state, running, card))
         if running:
@@ -1137,7 +1161,7 @@ class PathsPage:
         return ok
 
     def _card_head(self, strip, state, running, card):
-        head = Gtk.Box(spacing=10)
+        head = Gtk.Box(spacing=10, css_classes=['path-head'])
         kind = strip.kind if strip.role == 'source' else 'mix'
         icon = KIND_ICON.get(strip.kind, 'audio-card-symbolic') \
             if strip.role == 'source' else 'audio-speakers-symbolic'
@@ -1262,6 +1286,7 @@ class PathsPage:
                     on_leave=lambda: rail.remove_css_class('drop-into'))
         self._rails[strip.id] = rail
         if not strip.stages:
+            rail.add_css_class('path-rail-empty')
             rail.append(Gtk.Label(
                 label='No processing — audio passes straight through',
                 css_classes=['dim-label', 'caption'], xalign=0,
