@@ -44,7 +44,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from ..backend import levels, paths, plugins, prefs, pw, virtual
+from ..backend import levels, path_templates, paths, plugins, prefs, pw, \
+    virtual
 from .volume import make_volume
 from .widgets import async_call, confirm, esc, group, icon_button, \
     pick_file, pick_folder, pill, state_style
@@ -162,6 +163,85 @@ def chip(label: str, tooltip: str = '', on_click=None, icon: str = '',
         btn.add_css_class('on')
     if on_click:
         btn.connect('toggled' if toggle else 'clicked', on_click)
+    return btn
+
+
+def catalog_card(icon: str, title: str, blurb: str, on_click, chain=(),
+                 badge: str = '', tone: str = 'recipe') -> Gtk.Button:
+    """One offer in the catalog: a recipe or a template.
+
+    Recipes and templates are different things — one builds a whole
+    arrangement, the other a single strip — but they answer the same question
+    ("what can I start from?"), so they are drawn as one kind of card and
+    told apart by the badge and by the hue of the icon tile.
+
+    The chain is drawn as the board draws it, in the same chips with the same
+    arrows, so a card is a small picture of what it is about to build rather
+    than a paragraph describing it.
+    """
+    btn = Gtk.Button(css_classes=['path-recipe', f'k-{tone}'])
+    # Explicitly *not* expanding, and it has to be said out loud: GTK treats a
+    # widget as expanding when any descendant does, and the badge below pushes
+    # itself to the right edge with `hexpand`.  Left alone, that reaches the
+    # card, and a last line holding one card stretches it across the whole
+    # width — a banner where a card was meant to be.  Setting the flag here
+    # explicitly overrides what the children ask for.
+    btn.set_hexpand(False)
+    inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
+
+    top = Gtk.Box(spacing=10)
+    img = Gtk.Image.new_from_icon_name(icon)
+    img.set_pixel_size(18)
+    img.add_css_class('path-recipe-icon')
+    img.add_css_class(f'k-{tone}')
+    img.set_valign(Gtk.Align.CENTER)
+    top.append(img)
+    if badge:
+        lbl = Gtk.Label(label=badge, valign=Gtk.Align.CENTER, halign=Gtk.Align.END,
+                        hexpand=True, css_classes=['path-tpl-badge', f'k-{tone}'])
+        top.append(lbl)
+    inner.append(top)
+
+    # Every label is bounded, and they are all bounded to about the same
+    # width.  A wrap box packs its lines by natural width, so one card whose
+    # blurb happens to fit on a long line makes that whole row hold two cards
+    # while the next holds three — the grid stops looking like a grid.
+    inner.append(Gtk.Label(label=esc(title), xalign=0, wrap=True,
+                           max_width_chars=22, css_classes=['heading']))
+    inner.append(Gtk.Label(label=esc(blurb), xalign=0, wrap=True,
+                           max_width_chars=28,
+                           css_classes=['dim-label', 'caption']))
+    if chain:
+        # Left to itself a wrap box asks for every child on one line, which a
+        # five-stage chain turns into a very wide card.
+        rail = Adw.WrapBox(child_spacing=4, line_spacing=4, margin_top=2,
+                           natural_line_length=210)
+        for i, name in enumerate(chain):
+            step = Gtk.Label(label=esc(name), css_classes=['path-tpl-step'],
+                             ellipsize=Pango.EllipsizeMode.END,
+                             max_width_chars=16, valign=Gtk.Align.CENTER)
+            if not i:
+                rail.append(step)
+                continue
+            # Same trick the board's rail uses: the arrow travels with the
+            # chip it points at, so a wrapped line never ends in a stray "›".
+            pair = Gtk.Box(spacing=4)
+            pair.append(Gtk.Label(label='›', css_classes=['path-arrow'],
+                                  valign=Gtk.Align.CENTER))
+            pair.append(step)
+            rail.append(pair)
+        inner.append(rail)
+
+    # Filled in later, if a scan finds this machine has none of the plugins a
+    # template asks for.  Built here and left hidden so the card never changes
+    # height when the answer arrives.
+    note = Gtk.Label(xalign=0, wrap=True, max_width_chars=28, visible=False,
+                     css_classes=['caption', 'path-tpl-warn'])
+    inner.append(note)
+
+    btn.set_child(inner)
+    btn.connect('clicked', lambda *_: on_click())
+    btn._note = note
     return btn
 
 
@@ -805,6 +885,7 @@ class PathsPage:
         self._soon = 0                  # extra refresh after a unit restart
         self._dragging = False
         self._sig = None                # last rendered structural signature
+        self._scanned = False           # catalog has asked what is installed
 
         self.widget = self._build()
         self.widget.connect('map', self._on_map)
@@ -816,23 +897,40 @@ class PathsPage:
         self.summary = Gtk.Label(xalign=0, hexpand=True,
                                  ellipsize=Pango.EllipsizeMode.END)
         self.summary.add_css_class('dim-label')
+        # `can_shrink` lets a label ellipsize away to its icon instead of
+        # setting a floor under the toolbar.  Every page shares one Gtk.Stack,
+        # so a toolbar that cannot shrink is a minimum width charged to the
+        # whole app — and three labelled buttons across is exactly the shape
+        # that does it.
         add_src = Gtk.Button(css_classes=['suggested-action'],
                              tooltip_text='A source is where audio enters')
         add_src.set_child(Adw.ButtonContent(icon_name='list-add-symbolic',
-                                            label='Source'))
+                                            label='Source', can_shrink=True))
         add_src.connect('clicked', lambda *_: self._new_strip('source'))
         add_mix = Gtk.Button(tooltip_text='A mix feeds your output devices')
         add_mix.set_child(Adw.ButtonContent(icon_name='list-add-symbolic',
-                                            label='Mix'))
+                                            label='Mix', can_shrink=True))
         add_mix.connect('clicked', lambda *_: self._new_strip('mix'))
+        # Its own colour, because it does something of a different order from
+        # the two beside it: those add an empty strip, this one arrives with a
+        # chain already in it.
+        tpl = Gtk.Button(css_classes=['path-tpl-btn'],
+                         tooltip_text='Start from a ready-made chain')
+        tpl.set_child(Adw.ButtonContent(icon_name='view-grid-symbolic',
+                                        label='Templates', can_shrink=True))
+        tpl.connect('clicked', lambda *_: self._open_templates())
         more = Gtk.MenuButton(icon_name='view-more-symbolic',
                               css_classes=['flat'], tooltip_text='More')
         more.set_popover(menu_popover([
             ('document-open-symbolic', 'Import a path…', self._import),
             ('view-refresh-symbolic', 'Refresh', self.refresh),
+            None,
+            ('user-trash-symbolic', 'Delete strips…', self._manage_strips,
+             'destructive-flat'),
         ]))
         toolbar = Gtk.Box(spacing=8, css_classes=['path-toolbar'])
         toolbar.append(self.summary)
+        toolbar.append(tpl)
         toolbar.append(add_mix)
         toolbar.append(add_src)
         toolbar.append(more)
@@ -861,24 +959,12 @@ class PathsPage:
         sg.add_widget(self.col_src)
         sg.add_widget(self.col_mix)
 
-        # Below ~720px of content the two columns stop being readable, so
-        # they stack and the gutter goes away — same information, one column.
-        bin_ = Adw.BreakpointBin(width_request=320, height_request=200)
-        bin_.set_child(self.board)
-        bp = Adw.Breakpoint.new(
-            Adw.BreakpointCondition.parse('max-width: 720px'))
-        bp.add_setter(self.board, 'orientation', Gtk.Orientation.VERTICAL)
-        bp.add_setter(self.board, 'spacing', 24)
-        bp.add_setter(self.wires, 'visible', False)
-        bin_.add_breakpoint(bp)
-        self.board_bin = bin_
-
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
                       margin_top=18, margin_bottom=36,
                       margin_start=16, margin_end=16)
         box.append(toolbar)
         box.append(self.quick)
-        box.append(bin_)
+        box.append(self.board)
         # 1600 let each column grow past 700px on a wide screen, which a card
         # has nothing to do with: the name sits in the first third and the
         # rest is the rail stretching out empty.  Cards look built rather than
@@ -889,7 +975,38 @@ class PathsPage:
         sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
                                 vexpand=True)
         sw.set_child(clamp)
-        return sw
+
+        # Below ~720px of board the two columns stop being readable, so they
+        # stack and the gutter goes away — same information, one column.
+        #
+        # The bin wraps the *scroller*, and that placement is the whole point.
+        # AdwBreakpointBin reports a minimum size of zero by design, so that it
+        # can be squeezed far enough for a breakpoint to apply; with the bin
+        # inside the scrolled window the scroller therefore believed the entire
+        # board fitted in the bin's 200px height request, never showed a
+        # scrollbar, and simply clipped everything past the bottom of the
+        # window once there were more than a few strips.  Outside it, the
+        # scroller measures the real content again and the bin only ever sees
+        # the space the page actually has.
+        #
+        # The condition moved 720 -> 752 with it: it used to be tested against
+        # the board's own width, which is the clamped content minus this box's
+        # 16px margins, and is now tested against the width of the whole page.
+        # The requests are the bin's whole minimum size, since its own measure
+        # reports zero.  352 is the page minimum this page has always had and
+        # is checked by the harness; the height is only there because the bin
+        # needs one, and is kept at roughly the toolbar so the page does not
+        # start dictating how short the window may be.
+        bin_ = Adw.BreakpointBin(width_request=352, height_request=64)
+        bin_.set_child(sw)
+        bp = Adw.Breakpoint.new(
+            Adw.BreakpointCondition.parse('max-width: 752px'))
+        bp.add_setter(self.board, 'orientation', Gtk.Orientation.VERTICAL)
+        bp.add_setter(self.board, 'spacing', 24)
+        bp.add_setter(self.wires, 'visible', False)
+        bin_.add_breakpoint(bp)
+        self.scroller = sw
+        return bin_
 
     def _column(self, title, tooltip, on_add, role):
         head = Gtk.Box(spacing=8)
@@ -912,50 +1029,129 @@ class PathsPage:
         col._count = count
         return col, body
 
+    # ------------------------------------------------------- empty board --
+    # Nothing is on screen and nothing has been decided yet, so this is the
+    # page's one chance to answer "what is this for?".  It answers with the
+    # things themselves rather than with an explanation: three complete
+    # arrangements, then the plain single strips, then the chains people
+    # actually run.  Everything here builds ordinary strips, so none of it is
+    # a door the user cannot walk back out of.
+
+    RECIPES = (
+        ('format-justify-fill-symbolic', 'Equalize everything',
+         'One equalizer between every app and your current output.',
+         '_quick_eq_all'),
+        ('applications-multimedia-symbolic', 'Put effects on one app',
+         'Send a single app through a plugin chain, leaving the rest of your '
+         'audio alone.', '_quick_app_fx'),
+        ('camera-video-symbolic', 'Speakers and a stream mix',
+         'One chain into your speakers, a second into a virtual output that '
+         'OBS or Discord can capture.', '_quick_stream'),
+        ('audio-headphones-symbolic', 'Headphones and speakers',
+         'A speaker mix carrying the audio and a headphone mix with its own '
+         'tilt waiting beside it. Switch with one click.',
+         '_quick_two_outputs'),
+    )
+
     def _quick_setup(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
-        title = Gtk.Label(label='Start with a ready-made path', xalign=0,
-                          css_classes=['title-4'])
-        sub = Gtk.Label(
+        # Its own registry, not shared with the dialog's: a dialog is thrown
+        # away when it closes, and a scan landing afterwards must not reach
+        # into cards that no longer exist.
+        cards: dict = {}
+        box.append(Gtk.Label(label='Start with a ready-made path', xalign=0,
+                             css_classes=['title-4']))
+        box.append(Gtk.Label(
             label='Each of these builds a complete path in one step. You can '
                   'take it apart afterwards — they are ordinary sources and '
                   'mixes.',
-            xalign=0, wrap=True, css_classes=['dim-label'])
-        box.append(title)
-        box.append(sub)
+            xalign=0, wrap=True, css_classes=['dim-label']))
+        box.append(self._card_grid([
+            catalog_card(icon, title, sub, getattr(self, fn),
+                         badge='Complete path', tone='recipe')
+            for icon, title, sub, fn in self.RECIPES]))
+
+        box.append(self._section('One strip at a time',
+                                 'A single source or mix with its chain '
+                                 'already filled in. Add as many as you like '
+                                 'and wire them together.'))
+        box.append(self._card_grid(
+            [self._template_card(t, cards)
+             for t in path_templates.starters()]))
+
+        box.append(self._section(
+            'Advanced',
+            'Chains built the way they are built for broadcast, streaming and '
+            'monitoring. Anything needing a plugin this machine does not have '
+            'is left out and named when it happens.'))
+        box.append(self._card_grid(
+            [self._template_card(t, cards)
+             for t in path_templates.advanced()]))
+        # Not scanned here: this runs while the window is being built, and
+        # every page is built whether or not it is ever opened.  Plugin
+        # discovery dlopens every LADSPA library on the system, which is not
+        # something to do on the way to the Dashboard.  `_render` asks for it
+        # the first time these cards are actually on screen.
+        self._tpl_registry = cards
+        return box
+
+    def _section(self, title, subtitle):
+        head = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4,
+                       margin_top=16)
+        head.append(micro(title))
+        head.append(Gtk.Label(label=subtitle, xalign=0, wrap=True,
+                              css_classes=['dim-label', 'caption']))
+        return head
+
+    def _card_grid(self, cards):
+        """A grid that reflows instead of scrolling sideways.
+
+        `natural_line_length` is what decides how many cards a line holds, so
+        the same catalog is three across in a window and two in a dialog
+        without either being told how wide it is."""
         wrap = Adw.WrapBox(child_spacing=12, line_spacing=12,
                            natural_line_length=1200,
                            justify=Adw.JustifyMode.FILL)
-        for icon, title_t, sub_t, fn in (
-            ('audio-x-generic-symbolic', 'Equalize everything',
-             'One equalizer between every app and your current output.',
-             self._quick_eq_all),
-            ('applications-multimedia-symbolic', 'Put effects on one app',
-             'Send a single app through a plugin chain, leaving the rest of '
-             'your audio alone.', self._quick_app_fx),
-            ('camera-video-symbolic', 'Speakers and a stream mix',
-             'One chain into your speakers, a second into a virtual output '
-             'that OBS or Discord can capture.', self._quick_stream),
-        ):
-            btn = Gtk.Button(css_classes=['path-recipe'], hexpand=True)
-            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-            img = Gtk.Image.new_from_icon_name(icon)
-            img.set_pixel_size(18)
-            img.add_css_class('path-recipe-icon')
-            img.set_halign(Gtk.Align.START)
-            inner.append(img)
-            t = Gtk.Label(label=title_t, xalign=0, css_classes=['heading'],
-                          wrap=True)
-            inner.append(t)
-            s = Gtk.Label(label=sub_t, xalign=0, wrap=True,
-                          max_width_chars=30,
-                          css_classes=['dim-label', 'caption'])
-            inner.append(s)
-            btn.set_child(inner)
-            btn.connect('clicked', lambda _b, f=fn: f())
-            wrap.append(btn)
-        box.append(wrap)
-        return box
+        for c in cards:
+            wrap.append(c)
+        return wrap
+
+    def _template_card(self, tpl, registry, on_pick=None):
+        card = catalog_card(
+            tpl.icon, tpl.title, tpl.blurb,
+            (lambda t=tpl: on_pick(t)) if on_pick
+            else (lambda t=tpl: self._load_template(t)),
+            chain=tpl.chain,
+            badge='Source' if tpl.role == 'source' else 'Mix',
+            tone=tpl.role)
+        card.set_tooltip_text(tpl.detail or tpl.blurb)
+        card._tpl = tpl
+        registry[tpl.id] = card
+        return card
+
+    def _scan_plugins(self, registry):
+        """Find out what this machine can actually build, in the background.
+
+        Discovery dlopens every LADSPA library and walks every LV2 bundle, so
+        it is far too slow to hold a card up: the catalog draws immediately
+        and the cards that turn out to be short of a plugin say so when the
+        answer arrives.
+        """
+        def done(installed, error):
+            if error or not installed:
+                return
+            for tid, card in registry.items():
+                tpl = path_templates.by_id(tid)
+                if tpl is None:
+                    continue
+                gone = path_templates.missing_steps(tpl, installed)
+                if not gone:
+                    continue
+                card._note.set_label(esc(
+                    'Not installed here: ' + ', '.join(gone) +
+                    ' — built without ' + ('them' if len(gone) > 1 else 'it')))
+                card._note.set_visible(True)
+        async_call(_all_plugins, done)
 
     # ------------------------------------------------------------ refresh --
     def _on_map(self, *_a):
@@ -1065,7 +1261,10 @@ class PathsPage:
         mixes = paths.mixes(self._strips)
         empty = not self._strips
         self.quick.set_visible(empty)
-        self.board_bin.set_visible(not empty)
+        self.board.set_visible(not empty)
+        if empty and not self._scanned:
+            self._scanned = True
+            self._scan_plugins(self._tpl_registry)
         self.col_src._count.set_label(str(len(srcs)) if srcs else '')
         self.col_mix._count.set_label(str(len(mixes)) if mixes else '')
         self._set_summary(srcs, mixes)
@@ -2010,6 +2209,138 @@ class PathsPage:
                 'through it go back to the default output.',
                 'Delete', go)
 
+    def _manage_strips(self):
+        """Tick several strips off and delete them, or clear the board.
+
+        Deleting from the card menu is one confirmation each, which is fine
+        for one and tiresome for the eight a scrapped experiment leaves
+        behind.  Clearing everything lives in the same dialog because it is
+        the same intention taken to its end, and putting it anywhere else
+        would make it a surprise.
+        """
+        if not self._strips:
+            self.window.toast('There is nothing to delete')
+            return
+        dlg = Adw.Dialog(title='Delete strips', content_width=520,
+                         content_height=620)
+        picks: dict = {}
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
+                      margin_top=12, margin_bottom=18,
+                      margin_start=16, margin_end=16)
+        box.append(Gtk.Label(
+            label='Whatever you remove takes its chain and any device it '
+                  'built with it. Apps playing through a deleted strip go '
+                  'back to the default output.',
+            xalign=0, wrap=True, css_classes=['dim-label']))
+
+        for role, title in (('source', 'Sources'), ('mix', 'Mixes')):
+            rows = [s for s in self._strips if s.role == role]
+            if not rows:
+                continue
+            g = group(title)
+            for s in rows:
+                state = self._states.get(s.id, 'inactive')
+                running = s.enabled and state == 'active'
+                bits = [f'{len(s.stages)} stage'
+                        + ('s' if len(s.stages) != 1 else '')]
+                if s.role == 'source' and s.sends:
+                    bits.append(f'{len(s.sends)} send'
+                                + ('s' if len(s.sends) != 1 else ''))
+                if s.role == 'mix' and s.outputs:
+                    bits.append(f'{len(s.outputs)} output'
+                                + ('s' if len(s.outputs) != 1 else ''))
+                bits.append('running' if running
+                            else ('off' if not s.enabled else state))
+                row = Adw.ActionRow(title=esc(s.name),
+                                    subtitle=esc(' · '.join(bits)),
+                                    activatable=True, title_lines=1,
+                                    subtitle_lines=1)
+                check = Gtk.CheckButton(valign=Gtk.Align.CENTER)
+                row.add_prefix(check)
+                row.set_activatable_widget(check)
+                picks[s.id] = (check, s)
+                g.add(row)
+            box.append(g)
+
+        count = Gtk.Label(xalign=0, hexpand=True, css_classes=['dim-label'])
+        delete = Gtk.Button(label='Delete selected', sensitive=False,
+                            css_classes=['destructive-action', 'pill'])
+        actions = Gtk.Box(spacing=10, margin_top=4)
+        actions.append(count)
+        actions.append(delete)
+
+        def selected():
+            return [s for check, s in picks.values() if check.get_active()]
+
+        def retally(*_a):
+            n = len(selected())
+            delete.set_sensitive(bool(n))
+            count.set_label(f'{n} selected' if n else 'Nothing selected')
+        for check, _s in picks.values():
+            check.connect('toggled', retally)
+        retally()
+
+        delete.connect('clicked', lambda *_: self._confirm_delete(
+            dlg, selected(), 'Delete the selected strips?'))
+        box.append(actions)
+
+        # The last thing on the page, spelt out and boxed off, because it is
+        # the one action here that does not need a single tick to be armed.
+        reset = group('Start over',
+                      'Removes every source and mix on the board, along with '
+                      'the units and combine devices they created. Your '
+                      'devices, equalizers and filter chains are untouched.')
+        row = Adw.ActionRow(title='Delete everything',
+                            subtitle=f'{len(self._strips)} strips')
+        wipe = Gtk.Button(label='Reset the board', valign=Gtk.Align.CENTER,
+                          css_classes=['destructive-action'])
+        wipe.connect('clicked', lambda *_: self._confirm_delete(
+            dlg, list(self._strips), 'Delete every strip on the board?'))
+        row.add_suffix(wipe)
+        reset.add(row)
+        box.append(reset)
+
+        sw = Gtk.ScrolledWindow(vexpand=True,
+                                hscrollbar_policy=Gtk.PolicyType.NEVER)
+        sw.set_child(box)
+        view = Adw.ToolbarView()
+        view.add_top_bar(Adw.HeaderBar())
+        view.set_content(sw)
+        dlg.set_child(view)
+        dlg.present(self.window)
+
+    def _confirm_delete(self, dlg, strips, heading):
+        if not strips:
+            return
+        names = ', '.join(s.name for s in strips[:4])
+        if len(strips) > 4:
+            names += f' and {len(strips) - 4} more'
+
+        def go():
+            dlg.close()
+            self._delete_many(strips)
+        confirm(self.window, heading, f'{names}. This cannot be undone.',
+                f'Delete {len(strips)}', go)
+
+    def _delete_many(self, strips):
+        # Sources first: deleting a mix walks the sources that fed it and
+        # regenerates each one to drop the dangling send, and there is no
+        # point rebuilding a strip that is about to be deleted anyway.
+        order = sorted(strips, key=lambda s: s.role != 'source')
+
+        def run():
+            for s in order:
+                paths.delete(s)
+            return True
+
+        def done(_r, e):
+            self.window.toast(f'Could not finish: {e}' if e
+                              else f'Deleted {len(order)} strip'
+                                   + ('s' if len(order) != 1 else ''))
+            self.refresh()
+        async_call(run, done)
+
     # ------------------------------------------------------------ sharing --
     def _export(self, strip):
         data = {'format': 'pwctl-signal-path-1',
@@ -2107,6 +2438,157 @@ class PathsPage:
 
     def _quick_app_fx(self):
         self._quick_pair('App', 'Speakers', [], kind='app')
+
+    def _quick_two_outputs(self):
+        """Speakers now, headphones ready beside them.
+
+        Both mixes are built and both are running; only the speaker one is
+        fed.  Sending to both at once would mean the same audio arriving at
+        the same device twice, so the second mix is left waiting for its send
+        — which is one click on the source's chip, and is the gesture worth
+        learning from this arrangement.
+        """
+        dev = self._default_sink_name()
+        spk = paths.new_strip('Speakers', 'mix', outputs=[dev] if dev else [])
+        spk.enabled = True
+        tilt = paths.new_stage('eq', 'Headphone tilt')
+        tilt['params'] = {'preamp': -1.0, 'bands': [
+            {'on': True, 'type': 'LSC', 'freq': 105.0, 'gain': 1.5, 'q': 0.7},
+            {'on': True, 'type': 'PK', 'freq': 3200.0, 'gain': -1.5, 'q': 1.1},
+            {'on': True, 'type': 'HSC', 'freq': 10000.0, 'gain': 1.0,
+             'q': 0.7}]}
+        head = paths.new_strip('Headphones', 'mix', stages=[tilt])
+        head.enabled = True
+        src = paths.new_strip('Everything', 'source', kind='everything',
+                              sends=[spk.id])
+        src.enabled = True
+        made = [spk, head, src]
+
+        def build():
+            for s in made:
+                ok, err = paths.apply(s, made)
+                if not ok:
+                    return ok, err
+            return True, ''
+
+        def done(result, e):
+            ok, err = result if result else (False, str(e or ''))
+            self.window.toast(
+                'Ready — click the “Headphones” chip on the source to send '
+                'there instead' if ok else f'Failed: {err or "unknown error"}')
+            self.refresh()
+        async_call(build, done)
+
+    # ---------------------------------------------------------- templates --
+    def _open_templates(self):
+        """The catalog as a dialog, for a board that already has things on it.
+
+        Same cards as the empty board shows, in one uninterrupted order:
+        simple at the top, a full broadcast chain at the bottom, and no
+        headings in between.  Where something belongs on that scale is the
+        only classification the list makes, and a search entry is what makes
+        the length of it harmless.
+        """
+        dlg = Adw.Dialog(title='Templates', content_width=980,
+                         content_height=720)
+        registry: dict = {}
+        search = Gtk.SearchEntry(placeholder_text='Search templates…')
+        cards = [self._template_card(t, registry,
+                                     on_pick=lambda t2: (dlg.close(),
+                                                         self._load_template(t2)))
+                 for t in path_templates.CATALOG]
+        grid = self._card_grid(cards)
+        nothing = Adw.StatusPage(title='Nothing matches',
+                                 icon_name='edit-find-symbolic', vexpand=True,
+                                 visible=False)
+
+        def filter_cards(*_a):
+            needle = search.get_text().strip().lower()
+            hits = 0
+            for card in cards:
+                t = card._tpl
+                hay = f'{t.title} {t.blurb} {t.detail} {" ".join(t.chain)}'
+                ok = needle in hay.lower()
+                card.set_visible(ok)
+                hits += ok
+            grid.set_visible(bool(hits))
+            nothing.set_visible(not hits)
+        search.connect('search-changed', filter_cards)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                      margin_top=12, margin_bottom=18,
+                      margin_start=16, margin_end=16)
+        box.append(Gtk.Label(
+            label='Each one builds an ordinary strip with its chain already '
+                  'filled in — rename it, reorder it or pull it apart '
+                  'afterwards. They run from the simplest at the top to the '
+                  'ones people run for broadcast at the bottom.',
+            xalign=0, wrap=True, css_classes=['dim-label']))
+        box.append(search)
+        box.append(grid)
+        box.append(nothing)
+        sw = Gtk.ScrolledWindow(vexpand=True,
+                                hscrollbar_policy=Gtk.PolicyType.NEVER)
+        sw.set_child(box)
+        view = Adw.ToolbarView()
+        view.add_top_bar(Adw.HeaderBar())
+        view.set_content(sw)
+        dlg.set_child(view)
+        dlg.present(self.window)
+        self._scan_plugins(registry)
+
+    def _load_template(self, tpl):
+        """Build the template's strip, and whatever it needs to be audible.
+
+        A source stands on its own — with no send it simply plays into the
+        default output — but a mix with nothing feeding it is a sink no audio
+        ever reaches, so an empty board gets a plain source to go with it.
+        Everything is created switched on, like the quick-setup recipes: a
+        template that leaves you one more click away from hearing it is not
+        much of a head start.
+        """
+        def ready(installed, error):
+            installed = installed or []
+            stages, missing = path_templates.build_stages(tpl, installed)
+            strip = paths.new_strip(tpl.title, tpl.role, kind=tpl.kind,
+                                    positions=list(tpl.positions),
+                                    stages=stages)
+            strip.enabled = True
+            made = [strip]
+            if tpl.role == 'source':
+                mixes = paths.mixes(self._strips)
+                # One mix is unambiguous, so wire it up; with several, guessing
+                # would be worse than the chip the user can click.
+                if len(mixes) == 1:
+                    strip.sends = [mixes[0].id]
+            elif not paths.sources(self._strips):
+                paths.save_meta(strip)     # so the source gets its own order
+                src = paths.new_strip('Everything', 'source',
+                                      kind='everything', sends=[strip.id],
+                                      positions=list(tpl.positions))
+                src.enabled = True
+                made = [strip, src]        # the mix has to exist first
+
+            def build():
+                for s in made:
+                    ok, err = paths.apply(s, self._strips + made)
+                    if not ok:
+                        return ok, err
+                return True, ''
+
+            def done(result, e):
+                ok, err = result if result else (False, str(e or ''))
+                if not ok:
+                    self.window.toast(f'Failed: {err or "unknown error"}')
+                elif missing:
+                    self.window.toast(
+                        f'“{tpl.title}” ready, without ' + ', '.join(missing)
+                        + ' — no plugin for that on this machine')
+                else:
+                    self.window.toast(f'“{tpl.title}” ready')
+                self.refresh()
+            async_call(build, done)
+        async_call(_all_plugins, ready)
 
     def _quick_stream(self):
         dev = self._default_sink_name()

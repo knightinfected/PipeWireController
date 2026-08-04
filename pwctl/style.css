@@ -23,6 +23,12 @@
 @define-color pwctl_src mix(@blue_3, @window_fg_color, 0.3);
 @define-color pwctl_mix mix(@green_4, @window_fg_color, 0.3);
 
+/* The third hue on the board's catalog: neither a source nor a mix, but a
+   ready-made one of either — the Templates button and the recipe cards that
+   build a whole arrangement.  Purple because blue and green already mean the
+   two columns, and a template is not one of them. */
+@define-color pwctl_tpl mix(@purple_3, @window_fg_color, 0.3);
+
 .status-pill {
     padding: 2px 10px;
     border-radius: 99px;
@@ -526,7 +532,12 @@ button.path-chip image {
     opacity: 0.55;
 }
 
-/* -- quick-setup recipes ---------------------------------------------- */
+/* -- catalog cards: quick-setup recipes and templates ------------------ */
+/* One card for both, because they answer the same question — "what can I
+   start from?".  What tells them apart is the hue, and the hue says what the
+   card is about to build: blue a source, green a mix, purple a whole
+   arrangement.  That is the board's own vocabulary, so a card is recognisable
+   as a picture of what will appear when it is clicked. */
 button.path-recipe {
     padding: 16px;
     border-radius: 14px;
@@ -535,9 +546,34 @@ button.path-recipe {
     box-shadow: none;
 }
 
+button.path-recipe.k-source {
+    background: mix(@card_bg_color, @blue_3, 0.05);
+    border-color: alpha(@blue_3, 0.18);
+}
+
+button.path-recipe.k-mix {
+    background: mix(@card_bg_color, @green_4, 0.05);
+    border-color: alpha(@green_4, 0.18);
+}
+
+button.path-recipe.k-recipe {
+    background: mix(@card_bg_color, @purple_3, 0.05);
+    border-color: alpha(@purple_3, 0.18);
+}
+
 button.path-recipe:hover {
     border-color: @pwctl_src;
     background: alpha(@pwctl_src, 0.09);
+}
+
+button.path-recipe.k-mix:hover {
+    border-color: @pwctl_mix;
+    background: alpha(@pwctl_mix, 0.09);
+}
+
+button.path-recipe.k-recipe:hover {
+    border-color: @pwctl_tpl;
+    background: alpha(@pwctl_tpl, 0.09);
 }
 
 .path-recipe-icon {
@@ -546,6 +582,75 @@ button.path-recipe:hover {
     border-radius: 10px;
     background: alpha(@blue_3, 0.2);
     color: @pwctl_src;
+}
+
+.path-recipe-icon.k-mix {
+    background: alpha(@green_4, 0.2);
+    color: @pwctl_mix;
+}
+
+.path-recipe-icon.k-recipe {
+    background: alpha(@purple_3, 0.2);
+    color: @pwctl_tpl;
+}
+
+/* What the card builds, in one word, opposite the icon. */
+.path-tpl-badge {
+    font-size: 0.68em;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    border-radius: 99px;
+    background: alpha(currentColor, 0.08);
+    opacity: 0.75;
+}
+
+.path-tpl-badge.k-source {
+    color: @pwctl_src;
+    background: alpha(@blue_3, 0.14);
+}
+
+.path-tpl-badge.k-mix {
+    color: @pwctl_mix;
+    background: alpha(@green_4, 0.14);
+}
+
+.path-tpl-badge.k-recipe {
+    color: @pwctl_tpl;
+    background: alpha(@purple_3, 0.14);
+}
+
+/* The chain a template would build, drawn the way the board draws a chain —
+   smaller and inert, since there is nothing to click on yet. */
+.path-tpl-step {
+    font-size: 0.78em;
+    padding: 1px 8px;
+    border-radius: 99px;
+    background: alpha(currentColor, 0.08);
+    opacity: 0.85;
+}
+
+/* "This machine has no plugin for that stage."  A warning about what will be
+   missing, not an error — the rest of the template still builds. */
+.path-tpl-warn {
+    color: @warning_color;
+    opacity: 0.9;
+}
+
+/* -- the Templates button --------------------------------------------- */
+/* Purple rather than the suggested-action blue of "add a Source": it does
+   something of a different order from the two buttons beside it, and blue and
+   green are already spoken for by the two columns. */
+button.path-tpl-btn {
+    background: alpha(@purple_3, 0.16);
+    color: @pwctl_tpl;
+    border: 1px solid alpha(@purple_3, 0.35);
+    font-weight: 700;
+}
+
+button.path-tpl-btn:hover {
+    background: alpha(@purple_3, 0.26);
+    border-color: alpha(@purple_3, 0.6);
 }
 
 /* -- the toolbar above the board -------------------------------------- */
