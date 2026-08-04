@@ -58,14 +58,28 @@ earns its place once a chain has to split.
   its equalizers from biquad filters rather than the preset-file kind, so
   frequency, gain and Q take effect as you change them — no restart, no gap.
 - **Quick setup builds a whole arrangement in one click** — an equalizer on
-  everything, effects on a single app, or speakers plus a separate stream mix
-  with a virtual output that OBS or Discord can record. Each one is ordinary
-  sources and mixes afterwards, so you can take it apart.
+  everything, effects on a single app, speakers plus a separate stream mix
+  with a virtual output that OBS or Discord can record, or a speaker mix with
+  a headphone mix waiting beside it. Each one is ordinary sources and mixes
+  afterwards, so you can take it apart.
+- **Templates, from a plain speaker mix to a full broadcast chain.** Twenty-six
+  ready-made strips, in one order that runs from the simplest to the ones
+  people actually run for streaming and monitoring — bass boost, a loudness
+  curve for listening quietly, crossfeed for headphones, a turntable chain, the
+  gate → tone → compressor → limiter voice chain, a mastering bus. An empty
+  board shows the whole catalog; once you have built something, the Templates
+  button up top opens it as a searchable grid. Each card draws the chain it is
+  about to build, and anything wanting a plugin you do not have says so on the
+  card and is left out rather than producing a strip that will not start.
 - **Send one chain to several devices** and they are combined into one output
   for you; pick several outputs on a mix and the same thing happens. You never
   have to learn what a combine sink is.
+- **Delete several strips at once**, or clear the board and start again, from
+  one dialog with everything on it listed.
 - Chains, sends and outputs can be exported to a file and imported again.
   Imported paths arrive switched off so you can look before turning them on.
+- Fixed: a board with more sources or mixes than fitted on screen could not be
+  scrolled — the rest was simply cut off at the bottom of the window.
 
 **Effects and equalizers stop being dead ends**
 
