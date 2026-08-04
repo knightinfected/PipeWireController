@@ -34,6 +34,7 @@ with the same walker the chains and equalizers use.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import uuid
@@ -81,6 +82,7 @@ class Strip:
     match: dict = field(default_factory=dict)      # source -> app match rule
     enabled: bool = False
     persistent: bool = True
+    order: int = 0                            # position within its own column
 
     @property
     def node_name(self) -> str:
@@ -124,6 +126,12 @@ def ensure_dirs():
 
 
 def list_strips() -> list[Strip]:
+    """Every strip, in the order the board shows them.
+
+    `order` is per column and only ever set by the page.  Strips written
+    before it existed all read back as 0, and the sort is stable, so they keep
+    the filename order they have always had until something is dragged.
+    """
     ensure_dirs()
     out = []
     known = set(Strip.__dataclass_fields__)
@@ -133,6 +141,7 @@ def list_strips() -> list[Strip]:
             out.append(Strip(**{k: v for k, v in data.items() if k in known}))
         except (ValueError, TypeError):
             continue
+    out.sort(key=lambda s: s.order)
     return out
 
 
@@ -156,9 +165,13 @@ def new_strip(name: str, role: str, **kw) -> Strip:
         raise ValueError(f'unknown role {role!r}')
     base = _slug(name, role)
     sid = base
-    existing = {s.id for s in list_strips()}
-    while sid in existing:
+    existing = list_strips()
+    taken = {s.id for s in existing}
+    while sid in taken:
         sid = f'{base}-{uuid.uuid4().hex[:4]}'
+    # A new strip belongs at the bottom of its column, not the top.
+    kw.setdefault('order', max((s.order for s in existing if s.role == role),
+                               default=-1) + 1)
     return Strip(id=sid, name=name, role=role, **kw)
 
 
@@ -168,6 +181,19 @@ def new_stage(kind: str, name: str = '', **params) -> dict:
         raise ValueError(f'unknown stage kind {kind!r}')
     return {'id': uuid.uuid4().hex[:8], 'kind': kind,
             'name': name or kind, 'bypass': False, 'params': dict(params)}
+
+
+def clone_stage(stage: dict, rename: bool = True) -> dict:
+    """A copy of `stage` with an identity of its own.
+
+    Ids have to be fresh: the page finds a stage by id when a chip is clicked
+    or dropped, so two stages sharing one would be the same stage twice.
+    """
+    out = copy.deepcopy(stage)
+    out['id'] = uuid.uuid4().hex[:8]
+    if rename:
+        out['name'] = f"{out.get('name') or out.get('kind') or 'stage'} copy"
+    return out
 
 
 # ------------------------------------------------------------ graph build --
@@ -519,7 +545,7 @@ def output_targets(strip: Strip, sinks: list, edges: dict | None = None) -> list
 __all__ = [
     'Strip', 'ROLES', 'SOURCE_KINDS', 'STAGE_KINDS', 'BAND_FILTERS',
     'PATH_DIR', 'list_strips', 'sources', 'mixes', 'save_meta', 'new_strip',
-    'new_stage', 'build_graph', 'generate', 'resolve_target', 'sync_fan',
-    'apply', 'set_enabled', 'status', 'delete', 'target_edges',
+    'new_stage', 'clone_stage', 'build_graph', 'generate', 'resolve_target',
+    'sync_fan', 'apply', 'set_enabled', 'status', 'delete', 'target_edges',
     'mix_targets', 'output_targets', 'would_loop',
 ]

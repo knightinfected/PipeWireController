@@ -22,6 +22,15 @@ until something exists.  Someone running twenty plugin sinks into three
 outputs needs every picker to cope with a long list, so devices, plugins and
 apps are all chosen through a searchable dialog rather than a dropdown that
 becomes unusable past a dozen entries.
+
+Because the flow is on screen, it is also *handled* directly: stages are
+dragged along the rail to reorder them and between cards to move them, cards
+are dragged to rearrange a column or onto the opposite column to wire a send,
+and an app is dragged from one card to another to move what it is playing
+through.  A stage chip answers a single click by going in or out of the
+signal, and a double-click or right-click by opening its editor — the thing
+people do twenty times an hour is the cheapest gesture, and the thing they do
+once is the deliberate one.
 """
 
 from __future__ import annotations
@@ -33,7 +42,7 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from ..backend import levels, paths, plugins, prefs, pw, virtual
 from .volume import make_volume
@@ -58,6 +67,15 @@ STAGE_ICON = {
     'convolver': 'audio-headphones-symbolic',
 }
 BAND_TYPES = [('PK', 'Peak'), ('LSC', 'Low shelf'), ('HSC', 'High shelf')]
+
+# Rewriting the graph restarts the unit, so audio stops for an instant.  A
+# short delay after the last edit turns "bypass three stages" into one
+# interruption instead of three.
+APPLY_DELAY_MS = 350
+
+# The classes a drop indicator can be wearing; cleared together so a widget
+# never keeps one after the pointer has moved on.
+DROP_CLASSES = ('drop-before', 'drop-after', 'drop-into', 'link-into')
 
 # Channel counts users recognise.  "7.1" says more than "8ch" and takes less
 # room; anything unusual falls back to the count.
@@ -152,6 +170,155 @@ def menu_popover(items) -> Gtk.Popover:
         box.append(btn)
     pop.set_child(box)
     return pop
+
+
+# ------------------------------------------------------- drag and drop --
+# Everything rearrangeable on the board moves the same way: a small object
+# says what is being dragged, the widget under the pointer decides whether it
+# wants that kind, and the drop mutates the model and re-renders.  Each kind
+# is its own GType, so a card never has to inspect a stage drag to know it is
+# not for it — GTK filters by type before the controller is ever asked, and a
+# text drag from another application matches nothing here at all.
+#
+# Payloads carry ids, not objects.  A refresh in the middle of a drag replaces
+# every strip with a freshly loaded one, and a held reference would then
+# mutate a copy nothing else can see.
+
+class StageDrag(GObject.Object):
+    __gtype_name__ = 'PwctlPathStageDrag'
+
+    def __init__(self, strip_id: str = '', stage_id: str = ''):
+        super().__init__()
+        self.strip_id, self.stage_id = strip_id, stage_id
+
+
+class StripDrag(GObject.Object):
+    __gtype_name__ = 'PwctlPathStripDrag'
+
+    def __init__(self, strip_id: str = '', role: str = ''):
+        super().__init__()
+        self.strip_id, self.role = strip_id, role
+
+
+class StreamDrag(GObject.Object):
+    __gtype_name__ = 'PwctlPathStreamDrag'
+
+    def __init__(self, stream_id: int = 0, name: str = ''):
+        super().__init__()
+        self.stream_id, self.name = stream_id, name
+
+
+def clear_drop(widget):
+    for c in DROP_CLASSES:
+        widget.remove_css_class(c)
+
+
+def drag_source(widget, make_payload, icon=None, offset=(0, 0),
+                on_begin=None, on_end=None):
+    """Let `widget` start a drag carrying whatever `make_payload()` returns.
+
+    The controller runs in the capture phase because a stage chip is a real
+    button: its own click gesture sits in the bubble phase and was installed
+    first, so a bubble-phase drag source would only ever see presses it had
+    already lost.
+
+    `on_begin`/`on_end` bracket the whole gesture, which is how the board
+    lights up every place the thing being carried could land.  Without that,
+    "can I drop here?" can only be answered by trying it.
+    """
+    src = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
+    src.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+    hot = [0.0, 0.0]
+
+    def prepare(_s, x, y):
+        hot[0], hot[1] = x, y
+        payload = make_payload()
+        if payload is None:
+            return None
+        return Gdk.ContentProvider.new_for_value(
+            GObject.Value(type(payload), payload))
+
+    def begin(s, _drag):
+        widget.add_css_class('path-dragging')
+        s.set_icon(Gtk.WidgetPaintable.new(icon or widget),
+                   int(hot[0]) + offset[0], int(hot[1]) + offset[1])
+        if on_begin:
+            on_begin()
+
+    def end(*_a):
+        widget.remove_css_class('path-dragging')
+        if on_end:
+            on_end()
+        return False
+
+    src.connect('prepare', prepare)
+    src.connect('drag-begin', begin)
+    # Both endings have to be caught: a drop fires drag-end, a drag abandoned
+    # over nothing fires drag-cancel, and the board must come back either way.
+    src.connect('drag-end', end)
+    src.connect('drag-cancel', end)
+    widget.add_controller(src)
+    return src
+
+
+def drop_target(widget, gtype, on_drop, on_motion=None, on_leave=None):
+    """Accept drags of one payload type.
+
+    `on_motion(payload, x, y)` returns whether the drop would do anything and
+    is where the indicator is drawn; returning False greys the cursor, so the
+    pointer says "not here" before the button is released rather than after.
+    """
+    tgt = Gtk.DropTarget.new(gtype, Gdk.DragAction.MOVE)
+    tgt.set_preload(True)          # so motion can look at what is coming
+
+    def motion(_t, x, y):
+        value = tgt.get_value()
+        if value is None:          # not loaded yet — assume it will do
+            return Gdk.DragAction.MOVE
+        ok = True if on_motion is None else on_motion(value, x, y)
+        return Gdk.DragAction.MOVE if ok else 0
+
+    def leave(_t):
+        if on_leave:
+            on_leave()
+
+    def drop(_t, value, x, y):
+        if on_leave:
+            on_leave()
+        return bool(on_drop(value, x, y))
+
+    tgt.connect('enter', motion)
+    tgt.connect('motion', motion)
+    tgt.connect('leave', leave)
+    tgt.connect('drop', drop)
+    widget.add_controller(tgt)
+    return tgt
+
+
+def context_menu(anchor, items, x, y):
+    """Pop `items` up at a point inside `anchor`, and clean up after itself."""
+    pop = menu_popover(items)
+    pop.set_parent(anchor)
+    pop.set_has_arrow(False)
+    rect = Gdk.Rectangle()
+    rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+    pop.set_pointing_to(rect)
+    # Unparenting from inside "closed" tears the widget down while it is still
+    # emitting; one turn of the loop later is safe.
+    pop.connect('closed', lambda p: GLib.idle_add(p.unparent))
+    pop.popup()
+    return pop
+
+
+def dbl_ms() -> int:
+    """The desktop's double-click time — how long a single click waits."""
+    settings = Gtk.Settings.get_default()
+    if settings is None:
+        return 400
+    try:
+        return max(200, int(settings.get_property('gtk-double-click-time')))
+    except (TypeError, ValueError):
+        return 400
 
 
 def chip_row(label: str, *widgets) -> Adw.WrapBox:
@@ -602,6 +769,12 @@ class PathsPage:
         self._streams: list = []
         self._vols: dict = {}
         self._cards: dict = {}          # strip.id -> card widget
+        self._chips: dict = {}          # stage id -> chip widget
+        self._rails: dict = {}          # strip.id -> chain rail widget
+        self._timers: dict = {}         # strip.id -> pending apply
+        self._editing: set = set()      # stage ids with an open dialog
+        self._focus_stage = ''          # chip to re-focus after a rebuild
+        self._focus_timer = 0
 
         self.widget = self._build()
         self.widget.connect('map', lambda *_: self.refresh())
@@ -639,9 +812,10 @@ class PathsPage:
 
         # the board: sources | wires | mixes
         self.col_src, self.src_body = self._column(
-            'Sources', 'Add a source', lambda: self._new_strip('source'))
+            'Sources', 'Add a source', lambda: self._new_strip('source'),
+            'source')
         self.col_mix, self.mix_body = self._column(
-            'Mixes', 'Add a mix', lambda: self._new_strip('mix'))
+            'Mixes', 'Add a mix', lambda: self._new_strip('mix'), 'mix')
         self.wires = Wires(self)
         self.board = Gtk.Box(spacing=0)
         self.board.append(self.col_src)
@@ -681,7 +855,7 @@ class PathsPage:
         sw.set_child(clamp)
         return sw
 
-    def _column(self, title, tooltip, on_add):
+    def _column(self, title, tooltip, on_add, role):
         head = Gtk.Box(spacing=8)
         head.append(micro(title))
         count = Gtk.Label(xalign=0, css_classes=['path-count'], hexpand=True,
@@ -689,6 +863,12 @@ class PathsPage:
         head.append(count)
         head.append(add_button(tooltip, lambda *_: on_add()))
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        # The gaps between cards, and the space around the "add" placeholder,
+        # send a card to the end of the column.
+        drop_target(body, StripDrag,
+                    lambda p, _x, _y: self._drop_strip_end(p, role),
+                    on_motion=lambda p, _x, _y: p.role == role,
+                    on_leave=None)
         col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
                       hexpand=True, valign=Gtk.Align.START)
         col.append(head)
@@ -757,8 +937,19 @@ class PathsPage:
         if error or payload is None:
             return
         self._strips, self._states, self._nodes, self._streams = payload
+        self._render()
+
+    def _render(self):
+        """Rebuild the board from what is already in memory.
+
+        Split out of the refresh so a rearrangement shows up the instant it
+        happens: dragging a stage changes a list and redraws, and only the
+        rebuild of the actual audio graph waits behind `pw-dump`.
+        """
         self._vols = {}
         self._cards = {}
+        self._chips = {}
+        self._rails = {}
         for body in (self.src_body, self.mix_body):
             child = body.get_first_child()
             while child is not None:
@@ -792,6 +983,13 @@ class PathsPage:
             'Add a mix', 'A chain of its own, feeding real devices',
             lambda: self._new_strip('mix')))
         GLib.idle_add(self.wires.queue_draw)
+        chip = self._chips.get(self._focus_stage)
+        if chip is not None:
+            # Keyboard reordering only works if the stage keeps the focus it
+            # was moved with; the chip it had is gone by now.  `grab_focus`
+            # returns True, which as an idle callback means "call me again" —
+            # hence the wrapper rather than passing the method itself.
+            GLib.idle_add(lambda c=chip: (c.grab_focus(), False)[1])
 
     def _set_summary(self, srcs, mixes):
         if not self._strips:
@@ -855,7 +1053,7 @@ class PathsPage:
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
                        css_classes=['path-card'])
         card.add_css_class('live' if running else 'idle')
-        card.append(self._card_head(strip, state, running))
+        card.append(self._card_head(strip, state, running, card))
         if running:
             vol = self._volume_box(strip)
             if vol is not None:
@@ -866,14 +1064,85 @@ class PathsPage:
             card.append(self._apps_box(strip))
         else:
             card.append(self._outputs_box(strip))
+
+        # A card takes three kinds of drop.  Another card of the same role
+        # means "sit here"; one from the opposite column means "wire us
+        # together", which is the same fact the curve in the gutter draws.  A
+        # stage lands at the end of this chain, and an app is relinked to play
+        # through this strip.
+        drop_target(card, StripDrag,
+                    lambda p, _x, y: self._drop_strip(p, strip, y),
+                    on_motion=lambda p, _x, y: self._card_hover(card, p,
+                                                                strip, y),
+                    on_leave=lambda: clear_drop(card))
+        drop_target(card, StageDrag,
+                    lambda p, _x, _y: self._drop_stage(p, strip,
+                                                       len(strip.stages)),
+                    on_motion=lambda p, _x, _y: self._card_into(card, True),
+                    on_leave=lambda: clear_drop(card))
+        drop_target(card, StreamDrag,
+                    lambda p, _x, _y: self._drop_stream(p, strip),
+                    on_motion=lambda p, _x, _y: self._card_into(
+                        card, self._node_for(strip) is not None),
+                    on_leave=lambda: clear_drop(card))
         return card
 
-    def _card_head(self, strip, state, running):
+    # -- drop feedback -----------------------------------------------------
+    def _begin_drag(self, kind, strip):
+        """Mark everything that would accept what has just been picked up.
+
+        The indicator under the pointer says "it lands here"; this one says
+        "here is possible at all", which is the question a drag actually opens
+        with.  Two different classes because both can be on screen at once.
+        """
+        self._end_drag()
+        if kind == 'stage':
+            for rail in self._rails.values():
+                rail.add_css_class('drop-ready')
+            return
+        if kind == 'stream':
+            for s in self._strips:
+                card = self._cards.get(s.id)
+                if card is not None and self._node_for(s) is not None:
+                    card.add_css_class('drop-ready')
+            return
+        for s in self._strips:                      # a card being rearranged
+            card = self._cards.get(s.id)
+            if card is None or s.id == strip.id:
+                continue
+            card.add_css_class('drop-ready' if s.role == strip.role
+                               else 'link-ready')
+
+    def _end_drag(self):
+        for w in (*self._rails.values(), *self._cards.values()):
+            w.remove_css_class('drop-ready')
+            w.remove_css_class('link-ready')
+            clear_drop(w)
+
+    def _card_hover(self, card, payload, strip, y):
+        clear_drop(card)
+        if payload.strip_id == strip.id:
+            return False
+        if payload.role != strip.role:
+            card.add_css_class('link-into')     # a send, not a rearrangement
+            return True
+        card.add_css_class('drop-before' if y < card.get_height() / 2
+                           else 'drop-after')
+        return True
+
+    def _card_into(self, card, ok):
+        clear_drop(card)
+        if ok:
+            card.add_css_class('drop-into')
+        return ok
+
+    def _card_head(self, strip, state, running, card):
         head = Gtk.Box(spacing=10)
         kind = strip.kind if strip.role == 'source' else 'mix'
         icon = KIND_ICON.get(strip.kind, 'audio-card-symbolic') \
             if strip.role == 'source' else 'audio-speakers-symbolic'
-        head.append(avatar(icon, kind))
+        av = avatar(icon, kind)
+        head.append(av)
 
         names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1,
                         hexpand=True, valign=Gtk.Align.CENTER)
@@ -914,19 +1183,42 @@ class PathsPage:
         more = Gtk.MenuButton(icon_name='view-more-symbolic',
                               css_classes=['flat'], valign=Gtk.Align.CENTER,
                               tooltip_text='More')
-        more.set_popover(menu_popover([
+        more.set_popover(menu_popover(self._strip_menu(strip)))
+        head.append(more)
+
+        # The head is the card's handle: it is the one band with nothing in it
+        # that takes a press of its own, so the switch and the menu keep
+        # working while the card as a whole can be picked up and moved.
+        head.set_tooltip_text('Drag to rearrange, or onto the other column '
+                              'to connect')
+        for w in (av, names):
+            w.set_cursor_from_name('grab')
+        drag_source(head, lambda s=strip: StripDrag(s.id, s.role),
+                    icon=card, offset=(12, 12),
+                    on_begin=lambda: self._begin_drag('strip', strip),
+                    on_end=self._end_drag)
+
+        click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        click.connect('pressed', lambda _g, _n, x, y: context_menu(
+            head, self._strip_menu(strip), x, y))
+        head.add_controller(click)
+        return head
+
+    def _strip_menu(self, strip):
+        return [
             ('document-edit-symbolic', 'Rename…',
              lambda s=strip: self._rename(s)),
             ('media-playlist-repeat-symbolic', 'Channel layout…',
              lambda s=strip: self._pick_layout(s)),
+            None,
+            ('edit-copy-symbolic', 'Duplicate',
+             lambda s=strip: self._duplicate(s)),
             ('document-save-symbolic', 'Export…',
              lambda s=strip: self._export(s)),
             None,
             ('user-trash-symbolic', 'Delete',
              lambda s=strip: self._delete(s), 'destructive-flat'),
-        ]))
-        head.append(more)
-        return head
+        ]
 
     def _card_subtitle(self, strip):
         if strip.role == 'source':
@@ -945,10 +1237,30 @@ class PathsPage:
         rail = Adw.WrapBox(child_spacing=5, line_spacing=5,
                            css_classes=['path-rail'])
         for i, st in enumerate(strip.stages):
-            if i:
-                rail.append(Gtk.Label(label='›', css_classes=['path-arrow'],
-                                      valign=Gtk.Align.CENTER))
-            rail.append(self._stage_chip(strip, st))
+            chip_w = self._stage_chip(strip, st, i)
+            if not i:
+                rail.append(chip_w)
+                continue
+            # The arrow travels with the chip it points at.  As separate
+            # children of the wrap box they wrap separately, which leaves a
+            # line ending in a dangling "›" as soon as a chain is long enough
+            # to need two rows.
+            pair = Gtk.Box(spacing=5)
+            pair.append(Gtk.Label(label='›', css_classes=['path-arrow'],
+                                  valign=Gtk.Align.CENTER))
+            pair.append(chip_w)
+            rail.append(pair)
+        # Anywhere on the rail that is not a chip means "put it at the end",
+        # which is where a stage dragged in from another card usually goes.
+        def over_rail(*_a):
+            rail.add_css_class('drop-into')
+            return True
+        drop_target(rail, StageDrag,
+                    lambda p, _x, _y: self._drop_stage(p, strip,
+                                                       len(strip.stages)),
+                    on_motion=over_rail,
+                    on_leave=lambda: rail.remove_css_class('drop-into'))
+        self._rails[strip.id] = rail
         if not strip.stages:
             rail.append(Gtk.Label(
                 label='No processing — audio passes straight through',
@@ -963,12 +1275,15 @@ class PathsPage:
         rail.append(add)
         return rail
 
-    def _stage_chip(self, strip, st):
+    def _stage_chip(self, strip, st, index):
         kind = st.get('kind', '')
+        off = bool(st.get('bypass'))
         btn = Gtk.Button(valign=Gtk.Align.CENTER,
-                         css_classes=['path-stage', f'k-{kind}'],
-                         tooltip_text='Bypassed — click to edit'
-                         if st.get('bypass') else 'Edit this stage')
+                         css_classes=['path-stage', f'k-{kind}'])
+        btn.set_tooltip_text(
+            ('Bypassed — click to put it back in the signal' if off
+             else 'Click to bypass this stage')
+            + '\nDouble-click or right-click to edit it, drag to reorder')
         content = Gtk.Box(spacing=6)
         content.append(Gtk.Image.new_from_icon_name(
             STAGE_ICON.get(kind, 'preferences-other-symbolic')))
@@ -976,10 +1291,116 @@ class PathsPage:
                                  ellipsize=Pango.EllipsizeMode.END,
                                  max_width_chars=18))
         btn.set_child(content)
-        if st.get('bypass'):
+        if off:
             btn.add_css_class('path-stage-off')
-        btn.connect('clicked', lambda _b, s=st: self._edit_stage(strip, s))
+
+        # A single click switches the stage in or out; the work waits out the
+        # double-click window so that opening the editor never cuts the audio
+        # on the way in.  The chip itself flips immediately, so the delay is
+        # only ever felt by the graph, not by the user.
+        pending = {'id': 0}
+
+        def paint(bypassed):
+            if bypassed:
+                btn.add_css_class('path-stage-off')
+            else:
+                btn.remove_css_class('path-stage-off')
+
+        def fire():
+            pending['id'] = 0
+            self._toggle_bypass(strip, st)
+            return False
+
+        def clicked(_b):
+            if st.get('id') in self._editing or pending['id']:
+                return
+            paint(not st.get('bypass'))
+            pending['id'] = GLib.timeout_add(dbl_ms(), fire)
+        btn.connect('clicked', clicked)
+
+        def second(gesture, n_press, _x, _y):
+            if n_press < 2:
+                return
+            # Claiming stops the button's own gesture, so the second release
+            # never turns into another click to undo.
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            if pending['id']:
+                GLib.source_remove(pending['id'])
+                pending['id'] = 0
+                paint(bool(st.get('bypass')))
+            self._edit_stage(strip, st)
+        dbl = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
+        dbl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        dbl.connect('pressed', second)
+        btn.add_controller(dbl)
+
+        menu = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        menu.connect('pressed', lambda _g, _n, x, y: context_menu(
+            btn, self._stage_menu(strip, st), x, y))
+        btn.add_controller(menu)
+
+        keys = Gtk.EventControllerKey()
+        keys.connect('key-pressed', lambda _c, kv, _kc, mods:
+                     self._stage_key(btn, strip, st, kv, mods))
+        btn.add_controller(keys)
+
+        drag_source(btn, lambda: StageDrag(strip.id, st.get('id', '')),
+                    on_begin=lambda: self._begin_drag('stage', strip),
+                    on_end=self._end_drag)
+        drop_target(btn, StageDrag,
+                    lambda p, x, _y: self._drop_stage(
+                        p, strip,
+                        index + (0 if x < btn.get_width() / 2 else 1)),
+                    on_motion=lambda p, x, _y: self._stage_hover(btn, p, st, x),
+                    on_leave=lambda: clear_drop(btn))
+        self._chips[st.get('id', '')] = btn
         return btn
+
+    def _stage_hover(self, btn, payload, st, x):
+        clear_drop(btn)
+        if payload.stage_id == st.get('id'):
+            return False
+        btn.add_css_class('drop-before' if x < btn.get_width() / 2
+                          else 'drop-after')
+        return True
+
+    def _stage_menu(self, strip, st):
+        bypassed = bool(st.get('bypass'))
+        return [
+            ('document-edit-symbolic', 'Edit…',
+             lambda: self._edit_stage(strip, st)),
+            ('media-playback-start-symbolic' if bypassed
+             else 'media-playback-pause-symbolic',
+             'Put back in the signal' if bypassed else 'Bypass',
+             lambda: self._toggle_bypass(strip, st)),
+            None,
+            ('go-previous-symbolic', 'Move earlier',
+             lambda: self._move_stage(strip, st, -1)),
+            ('go-next-symbolic', 'Move later',
+             lambda: self._move_stage(strip, st, 1)),
+            ('edit-copy-symbolic', 'Duplicate',
+             lambda: self._duplicate_stage(strip, st)),
+            None,
+            ('user-trash-symbolic', 'Remove from the chain',
+             lambda: self._remove_stage(strip, st), 'destructive-flat'),
+        ]
+
+    def _stage_key(self, btn, strip, st, keyval, mods):
+        ctrl = bool(mods & Gdk.ModifierType.CONTROL_MASK)
+        if keyval in (Gdk.KEY_Delete, Gdk.KEY_KP_Delete):
+            self._remove_stage(strip, st)
+            return True
+        if ctrl and keyval in (Gdk.KEY_Left, Gdk.KEY_KP_Left):
+            self._move_stage(strip, st, -1)
+            return True
+        if ctrl and keyval in (Gdk.KEY_Right, Gdk.KEY_KP_Right):
+            self._move_stage(strip, st, 1)
+            return True
+        if keyval == Gdk.KEY_Menu:
+            context_menu(btn, self._stage_menu(strip, st),
+                         btn.get_width() / 2, btn.get_height())
+            return True
+        return False
 
     def _stage_popover(self, strip):
         pop = Gtk.Popover()
@@ -1037,11 +1458,17 @@ class PathsPage:
         node = self._node_for(strip)
         here = [s for s in self._streams
                 if node is not None and s.target_id == node.id]
-        chips = [chip(s.name, f'{s.media or "playing"} — click to send it '
-                               'back to the default output',
-                      lambda _b, st=s: self._release_app(st),
-                      icon='window-close-symbolic', active=True)
-                 for s in here]
+        chips = []
+        for s in here:
+            c = chip(s.name,
+                     f'{s.media or "playing"}\nClick to send it back to the '
+                     'default output, or drag it onto another strip',
+                     lambda _b, st=s: self._release_app(st),
+                     icon='window-close-symbolic', active=True)
+            drag_source(c, lambda st=s: StreamDrag(st.id, st.name),
+                        on_begin=lambda: self._begin_drag('stream', strip),
+                        on_end=self._end_drag)
+            chips.append(c)
         if not here:
             chips.append(Gtk.Label(label='Nothing playing here yet',
                                    css_classes=['dim-label', 'caption'],
@@ -1074,6 +1501,8 @@ class PathsPage:
 
     # ------------------------------------------------------------ actions --
     def _save_and_apply(self, strip, message=None):
+        self._cancel_apply(strip.id)
+
         def done(result, e):
             ok, err = result if result else (False, str(e or ''))
             if message and ok:
@@ -1083,6 +1512,202 @@ class PathsPage:
             self.refresh()
         paths.save_meta(strip)
         async_call(lambda: paths.apply(strip, self._strips), done)
+
+    def _cancel_apply(self, strip_id):
+        tid = self._timers.pop(strip_id, None)
+        if tid:
+            GLib.source_remove(tid)
+
+    def _apply_soon(self, strip, message=None, render=True):
+        """Write the change now, rebuild the graph in a moment.
+
+        Rearranging a chain rewrites the filter graph, which restarts the unit
+        and stops audio for an instant.  Waiting out a fraction of a second
+        after the last edit is what makes bypassing three stages in a row one
+        interruption rather than three, and the page has already shown the
+        result by then either way.
+        """
+        paths.save_meta(strip)
+        if render:
+            self._render()
+        self._cancel_apply(strip.id)
+
+        def fire():
+            self._timers.pop(strip.id, None)
+            self._save_and_apply(strip, message)
+            return False
+        self._timers[strip.id] = GLib.timeout_add(APPLY_DELAY_MS, fire)
+
+    def _remember_focus(self, st):
+        """Keep the focus on a stage across the rebuilds a move causes."""
+        self._focus_stage = st.get('id', '')
+        if self._focus_timer:
+            GLib.source_remove(self._focus_timer)
+
+        def forget():
+            self._focus_timer = 0
+            self._focus_stage = ''
+            return False
+        # Long enough to cover the render and the refresh that follows the
+        # apply, short enough that an unrelated refresh later never steals the
+        # focus back.
+        self._focus_timer = GLib.timeout_add(3000, forget)
+
+    # -- stages ------------------------------------------------------------
+    def _toggle_bypass(self, strip, st):
+        st['bypass'] = not st.get('bypass')
+        name = st.get('name') or st.get('kind') or 'stage'
+        self._apply_soon(
+            strip, f'“{name}” bypassed' if st['bypass']
+            else f'“{name}” is back in the signal', render=False)
+
+    def _move_stage(self, strip, st, delta):
+        stages = list(strip.stages)
+        i = next((k for k, s in enumerate(stages)
+                  if s.get('id') == st.get('id')), None)
+        if i is None:
+            return
+        j = max(0, min(len(stages) - 1, i + delta))
+        if i == j:
+            return
+        stages.insert(j, stages.pop(i))
+        strip.stages = stages
+        self._remember_focus(st)
+        self._apply_soon(strip)
+
+    def _remove_stage(self, strip, st):
+        strip.stages = [s for s in strip.stages
+                        if s.get('id') != st.get('id')]
+        self._apply_soon(strip,
+                         f'“{st.get("name") or "Stage"}” removed')
+
+    def _duplicate_stage(self, strip, st):
+        clone = paths.clone_stage(st)
+        stages = list(strip.stages)
+        i = next((k for k, s in enumerate(stages)
+                  if s.get('id') == st.get('id')), len(stages) - 1)
+        stages.insert(i + 1, clone)
+        strip.stages = stages
+        self._apply_soon(strip, f'“{clone["name"]}” added')
+
+    def _drop_stage(self, payload, dst, index):
+        src = next((s for s in self._strips if s.id == payload.strip_id), None)
+        if src is None:
+            return False
+        stage = next((s for s in src.stages
+                      if s.get('id') == payload.stage_id), None)
+        if stage is None:
+            return False
+        if src.id == dst.id:
+            stages = list(dst.stages)
+            old = stages.index(stage)
+            if index in (old, old + 1):
+                return False            # dropped back where it came from
+            stages.pop(old)
+            if index > old:
+                index -= 1
+            stages.insert(index, stage)
+            dst.stages = stages
+            self._remember_focus(stage)
+            self._apply_soon(dst)
+            return True
+        # Across cards the stage really moves: it leaves one chain and joins
+        # another, so both are rewritten.
+        src.stages = [s for s in src.stages if s is not stage]
+        stages = list(dst.stages)
+        stages.insert(max(0, min(len(stages), index)), stage)
+        dst.stages = stages
+        self._remember_focus(stage)
+        self._apply_soon(src, render=False)
+        self._apply_soon(dst, f'“{stage.get("name") or "Stage"}” moved to '
+                              f'“{dst.name}”')
+        return True
+
+    # -- strips ------------------------------------------------------------
+    def _renumber(self, role):
+        """Write the current on-screen order back onto the strips."""
+        for i, s in enumerate(x for x in self._strips if x.role == role):
+            if s.order != i:
+                s.order = i
+                paths.save_meta(s)
+
+    def _place_strip(self, moving, seq, index):
+        seq = [s for s in seq if s.id != moving.id]
+        seq.insert(max(0, min(len(seq), index)), moving)
+        rest = [s for s in self._strips if s.role != moving.role]
+        self._strips = seq + rest
+        self._renumber(moving.role)
+        # Stable, like the store's own sort: the column just renumbered comes
+        # out in the new order and the other one is left exactly as it was.
+        self._strips = sorted(self._strips, key=lambda s: s.order)
+        self._render()
+        return True
+
+    def _drop_strip(self, payload, target, y):
+        moving = next((s for s in self._strips
+                       if s.id == payload.strip_id), None)
+        if moving is None or moving.id == target.id:
+            return False
+        if moving.role != target.role:
+            self._link_strips(moving, target)
+            return True
+        seq = [s for s in self._strips if s.role == target.role]
+        card = self._cards.get(target.id)
+        before = y < (card.get_height() / 2 if card is not None else 0)
+        rest = [s for s in seq if s.id != moving.id]
+        at = next((i for i, s in enumerate(rest) if s.id == target.id),
+                  len(rest))
+        return self._place_strip(moving, seq, at if before else at + 1)
+
+    def _drop_strip_end(self, payload, role):
+        moving = next((s for s in self._strips
+                       if s.id == payload.strip_id), None)
+        if moving is None or moving.role != role:
+            return False
+        seq = [s for s in self._strips if s.role == role]
+        return self._place_strip(moving, seq, len(seq))
+
+    def _link_strips(self, a, b):
+        """A card dropped on the opposite column becomes a send."""
+        src, mix = (a, b) if a.role == 'source' else (b, a)
+        if mix.id in src.sends:
+            self.window.toast(f'“{src.name}” already sends to “{mix.name}”')
+            return
+        src.sends = [*src.sends, mix.id]
+        self._apply_soon(src, f'“{src.name}” now sends to “{mix.name}”')
+
+    def _drop_stream(self, payload, strip):
+        node = self._node_for(strip)
+        if node is None:
+            self.window.toast(f'Turn “{strip.name}” on first')
+            return False
+        stream = next((s for s in self._streams
+                       if s.id == payload.stream_id), None)
+        if stream is None or stream.target_id == node.id:
+            return False
+
+        def done(ok, e):
+            self.window.toast(f'“{stream.name}” → “{strip.name}”'
+                              if ok and not e else 'Could not move it')
+            self.refresh()
+        async_call(lambda: pw.move_stream(stream.id, node.serial), done)
+        return True
+
+    def _duplicate(self, strip):
+        from dataclasses import asdict
+        d = asdict(strip)
+        for key in ('id', 'name', 'enabled', 'order'):
+            d.pop(key, None)
+        role = d.pop('role')
+        # Fresh stage ids, or the copy and the original would be the same
+        # chain as far as every click on the board is concerned.
+        d['stages'] = [paths.clone_stage(s, rename=False)
+                       for s in d.get('stages') or []]
+        clone = paths.new_strip(f'{strip.name} copy', role, **d)
+        clone.enabled = False
+        paths.save_meta(clone)
+        self.window.toast(f'“{clone.name}” added — switched off')
+        self.refresh()
 
     def _toggle(self, sw, state, strip):
         if state == strip.enabled:
@@ -1192,7 +1817,13 @@ class PathsPage:
         self._edit_stage(strip, stage, is_new=True)
 
     def _edit_stage(self, strip, stage, is_new=False):
+        sid = stage.get('id')
+        if sid in self._editing:
+            return
+        self._editing.add(sid)
+
         def done(saved):
+            self._editing.discard(sid)
             if not saved and is_new:
                 # Cancelling out of a stage that was created for this dialog
                 # leaves nothing behind, so a half-configured plugin never

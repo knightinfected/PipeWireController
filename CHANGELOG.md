@@ -36,6 +36,13 @@ drawn as curves, so a glance tells you what is going where. One source and one
 mix is a straight line, which is what most setups are; the second column only
 earns its place once a chain has to split.
 
+- **The board is handled directly, not through menus.** Drag a stage along its
+  chain to reorder it, or onto another card to move it there. Drag a card to
+  rearrange a column, or onto the opposite column to connect the two. Drag an
+  app from one strip to another to move what it is playing through. A single
+  click on a stage takes it in or out of the signal; double-click or
+  right-click opens it. While you are dragging, every place the thing could
+  land says so, so you are never guessing at what is allowed.
 - **One process per chain, not one per plugin.** Every stage in a strip is
   compiled into a single filter graph: twenty effects are one entry in your
   device list and one buffer hop, instead of twenty of each. Hand-written

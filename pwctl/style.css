@@ -1,5 +1,16 @@
 /* PipeWire Controller styling */
 
+/* Drop indicators need a colour that is unmistakably *not* an ordinary
+   border, and `@accent_color` cannot supply one: a third-party GTK theme is
+   free to resolve it to grey, and one does here — which turned every drag
+   indicator into a slightly brighter white line.  These are built from the
+   palette instead, mixed toward the theme's foreground so they stay legible
+   on light and dark alike, exactly like the avatar hues further down.
+   Blue means "it lands here"; green means "this makes a connection", which is
+   the colour the wires in the gutter already use for a live send. */
+@define-color pwctl_drop mix(@blue_3, @window_fg_color, 0.15);
+@define-color pwctl_link mix(@green_4, @window_fg_color, 0.15);
+
 .status-pill {
     padding: 2px 10px;
     border-radius: 99px;
@@ -440,6 +451,93 @@ button.path-recipe:hover {
 /* -- the toolbar above the board -------------------------------------- */
 .path-toolbar {
     padding-bottom: 2px;
+}
+
+/* -- drag and drop ----------------------------------------------------- */
+/* Three states, answering three different questions, and all three can be on
+   screen at once:
+ *
+ *   .drop-ready / .link-ready — "this would take it", set on every valid
+ *       destination for as long as the drag lasts.  A drag opens with "where
+ *       can this go?", and without this the only way to find out is to try.
+ *   .drop-before / .drop-after — "it lands here", an insertion caret between
+ *       two things.
+ *   .drop-into — "it goes in here", a container with no position to pick.
+ *
+ * `link-ready` is green rather than accent-coloured because dropping a card
+ * on the opposite column does something different from rearranging one: it
+ * makes a send, which is the same fact the green wires in the gutter draw. */
+
+/* What is being dragged stays in place, faded and dashed, so the chain reads
+   as having a gap in it rather than having lost a stage. */
+.path-dragging {
+    opacity: 0.3;
+}
+
+.path-stage.path-dragging {
+    border-style: dashed;
+}
+
+.path-rail.drop-ready {
+    background: alpha(@pwctl_drop, 0.1);
+    box-shadow: inset 0 0 0 2px alpha(@pwctl_drop, 0.45);
+}
+
+.path-card.drop-ready {
+    border-color: alpha(@pwctl_drop, 0.6);
+    box-shadow: inset 0 0 0 1px alpha(@pwctl_drop, 0.35);
+}
+
+.path-card.link-ready {
+    border-color: alpha(@pwctl_link, 0.65);
+    box-shadow: inset 0 0 0 1px alpha(@pwctl_link, 0.4);
+}
+
+/* The caret is drawn twice: inside the chip, where it cannot be clipped, and
+   again just outside it, where it fills the gap between two chips.  One alone
+   reads as "this chip is selected" rather than "it goes in this gap". */
+.path-stage.drop-before {
+    box-shadow: inset 4px 0 0 0 @pwctl_drop,
+                -4px 0 0 0 @pwctl_drop;
+}
+
+.path-stage.drop-after {
+    box-shadow: inset -4px 0 0 0 @pwctl_drop,
+                4px 0 0 0 @pwctl_drop;
+}
+
+/* These come after `.path-card.live` on purpose: same specificity, so the
+   later rule wins and a running card still shows where the drop would go. */
+.path-card.drop-before {
+    box-shadow: inset 0 4px 0 0 @pwctl_drop,
+                0 -5px 0 0 @pwctl_drop;
+}
+
+.path-card.drop-after {
+    box-shadow: inset 0 -4px 0 0 @pwctl_drop,
+                0 5px 0 0 @pwctl_drop;
+}
+
+/* "Something goes inside this card": a stage joining its chain, or an app
+   being routed through it. */
+.path-card.drop-into {
+    border-color: @pwctl_drop;
+    background: alpha(@pwctl_drop, 0.14);
+    box-shadow: 0 0 0 1px @pwctl_drop;
+}
+
+/* "These two get wired together" — a different act, so a different colour. */
+.path-card.link-into {
+    border-color: @pwctl_link;
+    background: alpha(@pwctl_link, 0.14);
+    box-shadow: 0 0 0 1px @pwctl_link;
+}
+
+/* The rail has no border of its own to recolour, so it says "in here" by
+   filling instead. */
+.path-rail.drop-into {
+    background: alpha(@pwctl_drop, 0.22);
+    box-shadow: inset 0 0 0 2px @pwctl_drop;
 }
 
 /* -- wire colours ------------------------------------------------------ */
