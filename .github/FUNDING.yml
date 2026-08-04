@@ -1,3 +1,4 @@
 # Adds the "Sponsor" button to the repo header.
+github: knightinfected
 # PayPal has no native key, so it goes under `custom` (max 4 URLs).
 custom: ["https://paypal.me/hmzknight"]

@@ -2,6 +2,7 @@
 
 [![AUR version](https://img.shields.io/aur/version/pipewire-controller?logo=archlinux&label=AUR)](https://aur.archlinux.org/packages/pipewire-controller)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![Sponsor on GitHub](https://img.shields.io/badge/GitHub-sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/knightinfected)
 [![Donate via PayPal](https://img.shields.io/badge/PayPal-support%20this%20project-00457C?logo=paypal&logoColor=white)](https://paypal.me/hmzknight)
 
 A native GTK4/libadwaita control center for PipeWire — for any Linux distro
@@ -255,7 +256,11 @@ please [open an issue](https://github.com/knightinfected/PipeWireController/issu
 
 ## Support
 
+[![Sponsor on GitHub](https://img.shields.io/badge/GitHub-sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/knightinfected)
 [![Donate via PayPal](https://img.shields.io/badge/PayPal-support%20this%20project-00457C?logo=paypal&logoColor=white)](https://paypal.me/hmzknight)
+
+Monthly through [GitHub Sponsors](https://github.com/sponsors/knightinfected),
+or one-off through PayPal — whichever suits you.
 
 Completely optional — the app is GPL-3.0 and always will be, and nothing is
 ever locked behind a donation.
