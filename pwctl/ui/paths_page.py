@@ -73,6 +73,16 @@ BAND_TYPES = [('PK', 'Peak'), ('LSC', 'Low shelf'), ('HSC', 'High shelf')]
 # interruption instead of three.
 APPLY_DELAY_MS = 350
 
+# The board draws the live graph, so it has to follow it: an app starting or
+# stopping, a strip's node coming back after a restart, a unit failing.  Same
+# cadence as the dashboard.  Cheap because a poll only rebuilds when what it
+# draws has actually changed — see `_signature`.
+POLL_SEC = 3
+
+# How long after `paths.apply` returns to look again.  systemd reports the
+# unit started before the graph has the node published, linked and playing.
+SETTLE_MS = 1500
+
 # The classes a drop indicator can be wearing; cleared together so a widget
 # never keeps one after the pointer has moved on.
 DROP_CLASSES = ('drop-before', 'drop-after', 'drop-into', 'link-into')
@@ -790,9 +800,15 @@ class PathsPage:
         self._editing: set = set()      # stage ids with an open dialog
         self._focus_stage = ''          # chip to re-focus after a rebuild
         self._focus_timer = 0
+        self._poll = 0                  # periodic refresh while on screen
+        self._busy = False              # a collect() is already in flight
+        self._soon = 0                  # extra refresh after a unit restart
+        self._dragging = False
+        self._sig = None                # last rendered structural signature
 
         self.widget = self._build()
-        self.widget.connect('map', lambda *_: self.refresh())
+        self.widget.connect('map', self._on_map)
+        self.widget.connect('unmap', self._on_unmap)
 
     # ------------------------------------------------------------- shell --
     def _build(self):
@@ -942,7 +958,44 @@ class PathsPage:
         return box
 
     # ------------------------------------------------------------ refresh --
+    def _on_map(self, *_a):
+        self.refresh()
+        if not self._poll:
+            self._poll = GLib.timeout_add_seconds(POLL_SEC, self._tick)
+
+    def _on_unmap(self, *_a):
+        if self._poll:
+            GLib.source_remove(self._poll)
+            self._poll = 0
+
+    def _tick(self):
+        self.refresh()
+        return True
+
+    def refresh_soon(self):
+        """One extra refresh a moment after a strip's unit was restarted.
+
+        `paths.apply` returns once systemd reports the unit started, which is
+        earlier than the graph has it: the node is not published, relinked and
+        playing again for a fraction of a second more.  Refreshing on that
+        boundary is what left a card with no volume row and "Nothing playing
+        here yet" — a true reading of a graph that was still coming back.  The
+        poll would heal it either way; this just makes it quick.
+        """
+        if self._soon:
+            return
+
+        def fire():
+            self._soon = 0
+            self.refresh()
+            return False
+        self._soon = GLib.timeout_add(SETTLE_MS, fire)
+
     def refresh(self):
+        if self._busy:
+            return
+        self._busy = True
+
         def collect():
             dump = pw.pw_dump()
             nodes = pw.list_audio_nodes(dump)
@@ -953,10 +1006,36 @@ class PathsPage:
             return strips, states, nodes, streams
         async_call(collect, self._apply)
 
+    def _signature(self):
+        """Everything on the board that a rebuild would change.
+
+        Deliberately *not* volume or mute: those arrive on every poll, the
+        controls already show them, and treating them as structure would tear
+        the card down under a slider the user is dragging.  They are the one
+        thing the poll leaves alone.
+        """
+        return (
+            tuple((s.id, s.role, s.order, s.name, s.kind, s.enabled,
+                   s.channels, tuple(s.sends), tuple(s.outputs),
+                   tuple((st.get('id'), st.get('name'), st.get('kind'),
+                          bool(st.get('bypass'))) for st in s.stages))
+                  for s in self._strips),
+            tuple(sorted(self._states.items())),
+            tuple(sorted((n.name, n.id, n.serial) for n in self._nodes)),
+            tuple(sorted((s.id, s.target_id, s.name) for s in self._streams)),
+        )
+
     def _apply(self, payload, error):
+        self._busy = False
         if error or payload is None:
             return
         self._strips, self._states, self._nodes, self._streams = payload
+        # A rebuild replaces every card, which cancels a drag in flight, closes
+        # the dialog's parent chip and restarts the level meters.  The poll
+        # exists to catch the graph changing underneath, so it only rebuilds
+        # when something it draws actually differs.
+        if self._signature() == self._sig or self._dragging or self._editing:
+            return
         self._render()
 
     def _render(self):
@@ -965,7 +1044,12 @@ class PathsPage:
         Split out of the refresh so a rearrangement shows up the instant it
         happens: dragging a stage changes a list and redraws, and only the
         rebuild of the actual audio graph waits behind `pw-dump`.
+
+        The signature is taken here rather than in `_apply` so it always
+        describes what is actually on screen, including the local edits that
+        render straight from memory without going near `pw-dump`.
         """
+        self._sig = self._signature()
         self._vols = {}
         self._cards = {}
         self._chips = {}
@@ -1120,6 +1204,9 @@ class PathsPage:
         with.  Two different classes because both can be on screen at once.
         """
         self._end_drag()
+        # A rebuild mid-drag destroys the widget being carried, so the poll
+        # holds off until the gesture is over.
+        self._dragging = True
         if kind == 'stage':
             for rail in self._rails.values():
                 rail.add_css_class('drop-ready')
@@ -1138,6 +1225,9 @@ class PathsPage:
                                else 'link-ready')
 
     def _end_drag(self):
+        # Safe to clear unconditionally: `_begin_drag` calls this to sweep up
+        # leftovers *before* it raises the flag.
+        self._dragging = False
         for w in (*self._rails.values(), *self._cards.values()):
             w.remove_css_class('drop-ready')
             w.remove_css_class('link-ready')
@@ -1535,6 +1625,7 @@ class PathsPage:
             elif not ok:
                 self.window.toast(f'Failed: {err or "unknown error"}')
             self.refresh()
+            self.refresh_soon()     # the graph is still coming back
         paths.save_meta(strip)
         async_call(lambda: paths.apply(strip, self._strips), done)
 
