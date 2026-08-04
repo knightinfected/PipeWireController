@@ -23,32 +23,101 @@ and commit log.
 
 ---
 
-## Unreleased
+## [v0.4.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.4.0) — 2026-08-04
 
-**Signal Paths: pick where audio comes in, build a chain, pick where it goes**
+**Signal Paths — decide where audio comes in, what happens to it, and where it
+goes**
 
 A new page, and the first one that is about the *shape* of your audio rather
 than about settings. A **source** is where sound enters — one app, a
 microphone, or everything on the default output — and carries its own chain of
 processing. A **mix** carries a chain of its own and feeds real devices.
 Sources sit on the left, mixes on the right, and the sends between them are
-drawn as curves, so a glance tells you what is going where. One source and one
-mix is a straight line, which is what most setups are; the second column only
-earns its place once a chain has to split.
+drawn as curves, so a glance tells you what is going where.
+
+![Signal Paths — sources on the left, mixes on the right, sends drawn between them](screenshots/signal-paths-board-light.png)
+
+![The same board in dark mode](screenshots/signal-paths-board.png)
+
+One source and one mix is a straight line, which is what most setups are. The
+second column only earns its place once a chain has to split.
+
+![One source, one mix, one output — the simplest useful path](screenshots/signal-paths-simple.png)
+
+Splitting is the thing a single chain per output cannot do: one source
+corrected four different ways, for four different pieces of hardware, without
+building it four times.
+
+![One source feeding four mixes, each corrected for its own hardware](screenshots/signal-paths-listening-chain.png)
+
+A mix on its own is a perfectly good path too — audio goes into it and out to
+your speakers, with nothing in front.
+
+![A mix on its own, feeding the built-in output](screenshots/signal-paths-mix-only.png)
+
+**You do not have to build any of it from scratch.** An empty board is the
+template catalog: four complete paths that build both halves in one click, then
+twenty-six ready-made strips running from the simplest at the top to the ones
+people actually run for broadcast at the bottom — bass boost, a loudness curve
+for listening quietly, crossfeed for headphones, a turntable chain, the
+gate → tone → compressor → limiter voice chain, a mastering bus.
+
+![An empty board shows the whole catalog](screenshots/signal-paths-start-light.png)
+
+![The same catalog in dark mode](screenshots/signal-paths-start.png)
+
+Each card draws the chain it is about to build. Anything wanting a plugin you
+do not have says so on the card and is left out, rather than producing a strip
+that will not start.
+
+![Template cards draw the chain they build](screenshots/signal-paths-start-zoom.png)
+
+Once you have built something the catalog gets out of the way; the **Templates**
+button up top opens it again as a searchable grid.
+
+![Templates browser](screenshots/signal-paths-templates-light.png)
+
+![Templates browser in dark mode](screenshots/signal-paths-templates.png)
+
+**Stages** are added to any strip: an equalizer whose bands you can move while
+the audio plays, any LADSPA or LV2 plugin on the system, or an impulse response
+file.
+
+![Adding a stage — equalizer, plugin or convolver](screenshots/signal-paths-add-stage-light.png)
+
+![The same menu in dark mode](screenshots/signal-paths-add-stage.png)
+
+**Clearing up is one dialog.** Tick the strips to remove, or start the board
+over — everything on it is listed with its chain, sends and state.
+
+![Delete strips — everything listed with its chain, sends and state](screenshots/signal-paths-delete-strips.png)
 
 - **The board is handled directly, not through menus.** Drag a stage along its
   chain to reorder it, or onto another card to move it there. Drag a card to
   rearrange a column, or onto the opposite column to connect the two. Drag an
-  app from one strip to another to move what it is playing through. A single
-  click on a stage takes it in or out of the signal; double-click or
-  right-click opens it. While you are dragging, every place the thing could
-  land says so, so you are never guessing at what is allowed.
+  app from one strip to another to move what it is playing through. While you
+  are dragging, every place the thing could land says so, so you are never
+  guessing at what is allowed.
+
+![Dragging a card — blue means rearrange, green means connect](screenshots/signal-paths-drag-card.png)
+
+- **A stage answers a click.** One click takes it in or out of the signal;
+  double-click or right-click opens it. Everything is on the menu too —
+  bypass, reorder, duplicate, remove.
+
+![Right-clicking a stage](screenshots/signal-paths-stage-menu.png)
+
+- **Volume controls follow the style you picked** for the rest of the app, so
+  the board matches the Dashboard.
+
+![The board with the classic volume style](screenshots/signal-paths-volume-style.png)
+
 - **Colour tells you what you are looking at.** Sources are blue and mixes are
   green — the cards, the headings above them and the curves running between
-  them all use the same two colours, and a strip that is actually running
-  carries its colour more strongly than one that is switched off. A send or an
-  output turns green once it is carrying audio, so what is live is something
-  you can see rather than something you have to read.
+  them use the same two colours, and a strip that is actually running carries
+  its colour more strongly than one that is switched off. A send or an output
+  turns green once it is carrying audio, so what is live is something you can
+  see rather than something you have to read.
 - **One process per chain, not one per plugin.** Every stage in a strip is
   compiled into a single filter graph: twenty effects are one entry in your
   device list and one buffer hop, instead of twenty of each. Hand-written
@@ -57,34 +126,22 @@ earns its place once a chain has to split.
 - **Equalizer bands can be moved while the audio plays.** Signal Paths builds
   its equalizers from biquad filters rather than the preset-file kind, so
   frequency, gain and Q take effect as you change them — no restart, no gap.
-- **Quick setup builds a whole arrangement in one click** — an equalizer on
-  everything, effects on a single app, speakers plus a separate stream mix
-  with a virtual output that OBS or Discord can record, or a speaker mix with
-  a headphone mix waiting beside it. Each one is ordinary sources and mixes
-  afterwards, so you can take it apart.
-- **Templates, from a plain speaker mix to a full broadcast chain.** Twenty-six
-  ready-made strips, in one order that runs from the simplest to the ones
-  people actually run for streaming and monitoring — bass boost, a loudness
-  curve for listening quietly, crossfeed for headphones, a turntable chain, the
-  gate → tone → compressor → limiter voice chain, a mastering bus. An empty
-  board shows the whole catalog; once you have built something, the Templates
-  button up top opens it as a searchable grid. Each card draws the chain it is
-  about to build, and anything wanting a plugin you do not have says so on the
-  card and is left out rather than producing a strip that will not start.
 - **Send one chain to several devices** and they are combined into one output
   for you; pick several outputs on a mix and the same thing happens. You never
   have to learn what a combine sink is.
-- **Delete several strips at once**, or clear the board and start again, from
-  one dialog with everything on it listed.
 - Chains, sends and outputs can be exported to a file and imported again.
   Imported paths arrive switched off so you can look before turning them on.
-- Fixed: a board with more sources or mixes than fitted on screen could not be
-  scrolled — the rest was simply cut off at the bottom of the window.
+
+Fixed while building it:
+
+- A board with more sources or mixes than fitted on screen **could not be
+  scrolled** — the rest was simply cut off at the bottom of the window.
+- The board **stopped following the graph**. A strip could be playing while its
+  card still said nothing was playing there and showed no volume control at
+  all; leaving the page and coming back was the only way to put it right. It
+  now keeps up on its own, without tearing down a card you are working in.
 
 **Effects and equalizers stop being dead ends**
-
-Also from [u/yhcheng888](https://www.reddit.com/user/yhcheng888/)'s report
-below — running twenty plugin sinks in series into three outputs.
 
 - **An effect rack can feed another effect rack.** The output picker excluded
   every rack, including the ones you had just built, so rack → rack was the one
@@ -102,11 +159,10 @@ below — running twenty plugin sinks in series into three outputs.
   putting it on half a screen clipped the right-hand side of whatever you were
   looking at.
 
-**Hiding a device now really hides it, honest graph numbers, and chained
-equalizers**
+**Honest graph numbers, and meters that stay put**
 
 Reported by [u/yhcheng888](https://www.reddit.com/user/yhcheng888/) on
-r/linuxaudio, who ran the app next to Carla with a twenty-plugin signal chain —
+r/linuxaudio, running the app next to Carla with a twenty-plugin signal chain —
 thank you.
 
 - **DSP load now means what it means everywhere else.** The Monitor page was
@@ -174,8 +230,6 @@ thank you.
 - **A hide that isn't actually in effect is flagged.** If the generated
   WirePlumber file was removed or edited by hand, the app no longer insists the
   device is hidden — the entry is marked *not in effect*, and Unhide clears it.
-
-_Screenshots: to be added before release._
 
 ---
 

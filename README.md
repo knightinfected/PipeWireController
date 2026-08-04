@@ -2,19 +2,26 @@
 
 [![AUR version](https://img.shields.io/aur/version/pipewire-controller?logo=archlinux&label=AUR)](https://aur.archlinux.org/packages/pipewire-controller)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![Donate via PayPal](https://img.shields.io/badge/PayPal-support%20this%20project-00457C?logo=paypal&logoColor=white)](https://paypal.me/hmzknight)
 
 A native GTK4/libadwaita control center for PipeWire — for any Linux distro
 running PipeWire (packaged on the AUR, install instructions for Fedora,
 Ubuntu/Debian and others below).
 Everything under PipeWire's *Configuration* documentation — clock/quantum
 tuning, stream processing, session policy, filter chains, HRIR virtual
-surround — exposed as toggles and dropdowns, plus **live level meters** on
-every volume control, a parametric **equalizer** and **microphone cleanup**
-([new in v0.3.6](#new-in-v036)), a live **patchbay**, performance
-**monitoring**, **virtual devices**, routing snapshots, per-application
-**policies** and LADSPA/LV2 **effect inserts** ([new in v0.3.0](#new-in-v030)).
+surround — exposed as toggles and dropdowns, plus **Signal Paths** for building
+the route your audio actually takes ([new in v0.4.0](#new-in-v040)), **live
+level meters** on every volume control, a parametric **equalizer** and
+**microphone cleanup** ([new in v0.3.6](#new-in-v036)), a live **patchbay**,
+performance **monitoring**, **virtual devices**, routing snapshots,
+per-application **policies** and LADSPA/LV2 **effect inserts**
+([new in v0.3.0](#new-in-v030)).
 
-![Dashboard — Overview, with live level meters on the default endpoints](screenshots/dashboard-0.3.6.png)
+![Dashboard — Overview, with live level meters on the default endpoints](screenshots/dashboard-0.4.0.png)
+
+![Signal Paths — sources on the left, mixes on the right, and the sends between them drawn as curves](screenshots/signal-paths-board-light.png)
+
+![Signal Paths — an empty board is the template catalog, from a plain speaker mix to a full broadcast chain](screenshots/signal-paths-start.png)
 
 ![Patchbay — the live graph of your whole session, drag a port onto another to connect](screenshots/patchbay-0.3.6.png)
 
@@ -39,6 +46,13 @@ every volume control, a parametric **equalizer** and **microphone cleanup**
 </p>
 
 More screenshots:
+[Signal Paths, one source and one mix](screenshots/signal-paths-simple.png) ·
+[Signal Paths, a mix on its own](screenshots/signal-paths-mix-only.png) ·
+[Signal Paths, dark mode](screenshots/signal-paths-board.png) ·
+[Template browser](screenshots/signal-paths-templates-light.png) ·
+[Template cards close-up](screenshots/signal-paths-start-zoom.png) ·
+[Adding a stage](screenshots/signal-paths-add-stage-light.png) ·
+[Delete strips](screenshots/signal-paths-delete-strips.png) ·
 [Output Devices](screenshots/output-devices-led-meter.png) ·
 [Output Devices with ports](screenshots/output-devices.png) ·
 [Output Devices, stepped volume](screenshots/output-devices-stepped.png) ·
@@ -54,11 +68,66 @@ More screenshots:
 [Device presets](screenshots/device-presets.png) ·
 [Volume style picker](screenshots/volume-style-picker.png)
 
-## New in v0.3.6
+## New in v0.4.0
 
 > 📋 For highlights of every release — including **v0.3.5** (card configuration
 > as its own control) and **v0.3.4** (import your existing virtual devices) —
 > see the **[changelog](CHANGELOG.md)**.
+
+**Signal Paths** — a new page, and the first one that is about the *shape* of
+your audio rather than about settings. A **source** is where sound enters — one
+app, a microphone, or everything on the default output — and carries its own
+chain of processing. A **mix** carries a chain of its own and feeds real
+devices. Sources sit on the left, mixes on the right, and the sends between
+them are drawn as curves, so a glance tells you what is going where.
+
+One source and one mix is a straight line, which is what most setups are. The
+second column earns its place once a chain has to split — one source corrected
+four different ways for four different pieces of hardware, without building it
+four times.
+
+<p align="center">
+  <img src="screenshots/signal-paths-listening-chain.png" alt="One source feeding four mixes, each corrected for its own hardware" width="51.5%">
+  <img src="screenshots/signal-paths-templates.png" alt="The template browser — a searchable grid of every ready-made strip" width="43.5%">
+</p>
+
+**Templates, from a plain speaker mix to a full broadcast chain.** An empty
+board *is* the catalog: four complete paths that build both halves in one
+click, then twenty-six ready-made strips running from the simplest at the top
+to the ones people actually run for broadcast at the bottom — bass boost, a
+loudness curve for listening quietly, crossfeed for headphones, a turntable
+chain, the gate → tone → compressor → limiter voice chain, a mastering bus.
+Each card draws the chain it is about to build, and anything wanting a plugin
+you do not have says so on the card and is left out, rather than producing a
+strip that will not start.
+
+**The board is handled directly, not through menus.** Drag a stage along its
+chain to reorder it, or onto another card to move it there. Drag a card to
+rearrange a column, or onto the opposite column to connect the two. Drag an app
+from one strip to another to move what it is playing through. A single click on
+a stage takes it in or out of the signal; double-click or right-click opens it.
+While you are dragging, every place the thing could land says so.
+
+<p align="center">
+  <img src="screenshots/signal-paths-drag-card.png" alt="Dragging a card — blue means rearrange, green means connect" width="56%">
+  <img src="screenshots/signal-paths-stage-menu.png" alt="Right-clicking a stage — bypass, reorder, duplicate, remove" width="37%">
+</p>
+
+**One process per chain, not one per plugin.** Every stage in a strip is
+compiled into a single filter graph: twenty effects are one entry in your
+device list and one buffer hop, instead of twenty of each. Equalizer bands are
+built from biquad filters rather than the preset-file kind, so frequency, gain
+and Q **take effect while the audio plays** — no restart, no gap. Send one
+chain to several devices and they are combined into one output for you; you
+never have to learn what a combine sink is.
+
+Also new: **effect racks can feed other effect racks** (rack → rack was the one
+combination that could not be made), **equalizers are no longer stereo-only** —
+a channel layout row offers everything from mono to 7.1 — and equalizers,
+racks and filter chains now share one loop check, which also catches rings
+running through a mix of them.
+
+## New in v0.3.6
 
 **Live level meters** — every volume control in the app now shows the audio
 actually flowing through it: the Dashboard mixer, both device tabs, the
@@ -153,10 +222,21 @@ profile & codec**, and **solo** toggles in the Dashboard mixer.
 
 Rough list, no particular order, no promises on timing:
 
+- ~~**Signal Paths — sources / mixer**~~ — shipped in v0.4.0. Still to do on it:
+  - UI design improvements.
+  - Proper bypass, without stopping playback to do it.
+  - Card dragging could be smoother.
+  - Pinning sources/mixers.
+  - …and more.
 - **Network audio manager** — PipeWire's network side in the GUI: RAOP/AirPlay
   sinks, streaming between machines, discovery.
-- **UI improvements** — the app is currently extremely boring to look at. The
-  live meters in v0.3.6 were a first step, there's a lot more to do.
+- **UI improvements overall** — the app has been extremely boring to look at.
+  The live meters in v0.3.6 and the Signal Paths board in v0.4.0 were first
+  steps, there's a lot more to do:
+  - Fix the Dashboard overview to really just be an overview.
+  - Move Playback, Output Devices and Recording Devices to their own top-level
+    sidebar entries.
+  - …and more — I have a lot of ideas, it just takes time.
 - **Quality of life** — scaling, where buttons actually live, gaps and
   spacing. Small stuff, but it adds up.
 - **Individual channel volume** (I know, I know.)
