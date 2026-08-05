@@ -259,7 +259,7 @@ please [open an issue](https://github.com/knightinfected/PipeWireController/issu
 [![Sponsor on GitHub](https://img.shields.io/badge/GitHub-sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/knightinfected)
 [![Donate via PayPal](https://img.shields.io/badge/PayPal-support%20this%20project-00457C?logo=paypal&logoColor=white)](https://paypal.me/hmzknight)
 
-Monthly through [GitHub Sponsors](https://github.com/sponsors/knightinfected),
+Any support will help me a ton and will allow me to spend more time maintaining this project and if you can't but want to support consider giving me feedback or issues you came across.  Support through [GitHub Sponsors](https://github.com/sponsors/knightinfected),
 or one-off through PayPal — whichever suits you.
 
 Completely optional — the app is GPL-3.0 and always will be, and nothing is
