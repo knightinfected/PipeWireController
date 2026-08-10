@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pipewire-controller"
+name = "pipewire-control-center"
 dynamic = ["version"]                       # single source: pwctl/__init__.py
 description = "GTK4/libadwaita control center for PipeWire — patchbay, monitoring, virtual devices, effect inserts, filter chains, HRIR virtual surround, and drop-in config management"
 readme = "README.md"
@@ -15,6 +15,25 @@ keywords = [
     "jack", "filter-chain", "surround", "hrir",
 ]
 classifiers = [
+    # NOT PUBLISHED ON PyPI, deliberately. PyPI rejects any upload carrying a
+    # classifier it doesn't know, so this line makes an accidental
+    # `uv build && uv publish` fail instead of erroring out at the index — or
+    # worse, succeeding under a name that isn't ours to take.
+    #
+    # Two reasons it stays that way:
+    #   1. `pip install` cannot produce a working app. GTK 4, libadwaita and
+    #      the GObject-Introspection typelibs are system libraries (see the
+    #      note on `dependencies` below), so a wheel would install and then
+    #      fail to start. Distro packages are the only channel that works.
+    #   2. The name `pipewire-controller` on PyPI belongs to an unrelated
+    #      project (a PyQt6 tray applet, first released 2026-02-13, so it
+    #      predates ours). See issue #4. PEP 541 gives no route to reclaim a
+    #      name from an active project, so rather than contest it we renamed:
+    #      the distribution, the binary and the desktop entry are all
+    #      `pipewire-control-center` as of 2026-08-10. The display name stays
+    #      "PipeWire Controller" — that is branding, not a filesystem path,
+    #      and nothing collides there.
+    "Private :: Do Not Upload",
     "Environment :: X11 Applications :: GTK",
     "Intended Audience :: End Users/Desktop",
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
@@ -43,7 +62,11 @@ Repository = "https://github.com/knightinfected/PipeWireController"
 Issues = "https://github.com/knightinfected/PipeWireController/issues"
 
 [project.scripts]
-pipewire-controller = "pwctl.app:main"
+pipewire-control-center = "pwctl.app:main"
+# Short alias. NOT `pwctl` — that is one transposition away from `wpctl`,
+# WirePlumber's real CLI (which this app shells out to), and the `pw-*` prefix
+# belongs to PipeWire's own tools. `pwcc` collides with neither.
+pwcc = "pwctl.app:main"
 
 [dependency-groups]
 # Dev-only tooling. `uv sync` installs these; none are needed to run the app.

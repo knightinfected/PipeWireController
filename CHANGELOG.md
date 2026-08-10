@@ -23,6 +23,32 @@ and commit log.
 
 ---
 
+## [v0.5.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.5.0) — 2026-08-10
+
+**Renamed the package, the command and the desktop entry — the app is still
+PipeWire Controller**
+
+An unrelated project has held `pipewire-controller` on PyPI since February
+2026. Nothing about the two is related, but they install the same
+`/usr/bin/pipewire-controller` and the same `pipewire-controller.desktop`, and
+because a desktop entry in your home directory outranks the system one, having
+both could make this app's launcher entry silently disappear. Rather than
+contest a name that was there first, this release moves out of the way:
+
+- The package and the command are now **`pipewire-control-center`**, with
+  **`pwcc`** as a short alias — quicker to type, and unlike `pwctl` it cannot
+  be mistaken for `wpctl`, WirePlumber's own CLI.
+- The desktop entry is now `io.github.knightinfected.PipeWireControlCenter.desktop`,
+  matching the application ID so the window and its launcher icon are properly
+  associated (and so it is ready for the planned Flatpak).
+- On Arch, `pipewire-controller` stays on the AUR as a transitional package, so
+  an ordinary upgrade moves you across — nothing to uninstall by hand.
+- **Your settings are untouched.** `~/.config/pipewire-controller/` and the
+  `99-pipewire-controller.conf` drop-ins keep their names, so every chain,
+  signal path, equalizer and preference carries over as-is.
+
+---
+
 ## [v0.4.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.4.0) — 2026-08-04
 
 **Signal Paths — decide where audio comes in, what happens to it, and where it

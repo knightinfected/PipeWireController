@@ -428,8 +428,11 @@ class Window(Adw.ApplicationWindow):
 
 class App(Adw.Application):
     def __init__(self):
-        super().__init__(application_id='io.github.pwctl.PipeWireController',
-                         flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        # Matches the desktop entry filename, so the shell can associate the
+        # window with its launcher icon, and is the id the Flatpak will use.
+        super().__init__(
+            application_id='io.github.knightinfected.PipeWireControlCenter',
+            flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
 
     def do_startup(self):
         Adw.Application.do_startup(self)

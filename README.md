@@ -313,6 +313,20 @@ Available on the [AUR](https://aur.archlinux.org/packages/pipewire-controller):
 paru -S pipewire-controller   # or: yay -S pipewire-controller
 ```
 
+> [!IMPORTANT]
+> **The AUR is not accepting package uploads at the moment**, so the package
+> there is still **0.3.6** and cannot be updated until that lifts. For the
+> current release, install from a git checkout (see [Run](#run) below) or
+> grab the [latest release](https://github.com/knightinfected/PipeWireController/releases).
+>
+> **The package is also being renamed to `pipewire-control-center`** — an
+> unrelated project already holds `pipewire-controller` on PyPI, and the two
+> collide over `/usr/bin` and the desktop entry. The rename lands with the
+> next AUR push; `pipewire-controller` will stay as a transitional package, so
+> an ordinary upgrade will move you across. **The app itself is still
+> PipeWire Controller** — only the package, the command and the desktop entry
+> change.
+
 This installs everything (app, dependencies, desktop entry) — skip the
 Run section below. To run from a git checkout instead, install the
 dependencies manually:
@@ -357,16 +371,19 @@ chains), PipeWire built with libmysofa (SOFA spatializer templates).
 ```bash
 git clone https://github.com/knightinfected/PipeWireController.git
 cd PipeWireController
-./pipewire-controller
+./pipewire-control-center
 ```
 
-Optional app-menu entry (the desktop file expects `pipewire-controller`
-on your `PATH`, which the symlink provides):
+Optional app-menu entry (the desktop file expects `pipewire-control-center`
+on your `PATH`, which the symlink provides). The second symlink is a short
+alias — `pwcc` is quicker to type and collides with nothing:
 
 ```bash
 mkdir -p ~/.local/bin ~/.local/share/applications
-ln -sf "$PWD/pipewire-controller" ~/.local/bin/
-cp pipewire-controller.desktop ~/.local/share/applications/
+ln -sf "$PWD/pipewire-control-center" ~/.local/bin/
+ln -sf "$PWD/pipewire-control-center" ~/.local/bin/pwcc
+cp io.github.knightinfected.PipeWireControlCenter.desktop \
+    ~/.local/share/applications/
 ```
 
 ## What it does

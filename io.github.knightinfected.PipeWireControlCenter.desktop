@@ -2,8 +2,9 @@
 Type=Application
 Name=PipeWire Controller
 Comment=Configure PipeWire, filter chains and HRIR virtual surround without editing files
-Exec=pipewire-controller
+Exec=pipewire-control-center
 Icon=audio-card
 Terminal=false
 Categories=AudioVideo;Audio;Settings;
-Keywords=pipewire;audio;surround;hrir;equalizer;filter;
+Keywords=pipewire;audio;surround;hrir;equalizer;filter;pwcc;
+StartupWMClass=io.github.knightinfected.PipeWireControlCenter
