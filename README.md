@@ -1,6 +1,6 @@
 # PipeWire Controller
 
-[![AUR version](https://img.shields.io/aur/version/pipewire-controller?logo=archlinux&label=AUR)](https://aur.archlinux.org/packages/pipewire-controller)
+[![AUR version](https://img.shields.io/aur/version/pipewire-control-center?logo=archlinux&label=AUR)](https://aur.archlinux.org/packages/pipewire-control-center)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 [![Sponsor on GitHub](https://img.shields.io/badge/GitHub-sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/knightinfected)
 [![Donate via PayPal](https://img.shields.io/badge/PayPal-support%20this%20project-00457C?logo=paypal&logoColor=white)](https://paypal.me/hmzknight)
@@ -307,25 +307,28 @@ libadwaita 1.9.
 
 ### Arch / CachyOS / EndeavourOS / Manjaro
 
-Available on the [AUR](https://aur.archlinux.org/packages/pipewire-controller):
+Available on the [AUR](https://aur.archlinux.org/packages/pipewire-control-center):
 
 ```bash
-paru -S pipewire-controller   # or: yay -S pipewire-controller
+paru -S pipewire-control-center   # or: yay -S pipewire-control-center
 ```
 
-> [!IMPORTANT]
-> **The AUR is not accepting package uploads at the moment**, so the package
-> there is still **0.3.6** and cannot be updated until that lifts. For the
-> current release, install from a git checkout (see [Run](#run) below) or
-> grab the [latest release](https://github.com/knightinfected/PipeWireController/releases).
+> [!NOTE]
+> **Upgrading from 0.4.x or earlier?** The package was renamed to
+> `pipewire-control-center` in v0.5.0, because an unrelated project holds
+> `pipewire-controller` on PyPI and the two collide over `/usr/bin` and the
+> desktop entry. `pipewire-controller` stays on the AUR as a transitional
+> package, so an ordinary `paru -Syu` moves you across automatically.
 >
-> **The package is also being renamed to `pipewire-control-center`** — an
-> unrelated project already holds `pipewire-controller` on PyPI, and the two
-> collide over `/usr/bin` and the desktop entry. The rename lands with the
-> next AUR push; `pipewire-controller` will stay as a transitional package, so
-> an ordinary upgrade will move you across. **The app itself is still
-> PipeWire Controller** — only the package, the command and the desktop entry
-> change.
+> **The app itself is still PipeWire Controller.** Only the package, the
+> command and the desktop entry changed — the command is now
+> `pipewire-control-center`, or `pwcc` for short. Your settings are untouched:
+> `~/.config/pipewire-controller/` deliberately keeps its old name, so chains,
+> signal paths and equalizers all carry over.
+>
+> If you previously installed by hand rather than from the AUR, delete the
+> leftover `~/.local/bin/pipewire-controller` symlink and any stale
+> `pipewire-controller.desktop` in `~/.local/share/applications/`.
 
 This installs everything (app, dependencies, desktop entry) — skip the
 Run section below. To run from a git checkout instead, install the
