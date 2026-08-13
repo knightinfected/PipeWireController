@@ -245,6 +245,22 @@ def _value_matches(pattern: str, actual) -> bool:
     return hit != negate
 
 
+def split_pattern(value: str) -> tuple[bool, bool, str]:
+    """A stored match value taken apart: (negate, is_regex, text)."""
+    negate = value.startswith('!')
+    if negate:
+        value = value[1:]
+    is_regex = value.startswith('~')
+    if is_regex:
+        value = value[1:]
+    return negate, is_regex, value
+
+
+def join_pattern(negate: bool, is_regex: bool, text: str) -> str:
+    """The inverse of split_pattern — prefixes in the order PipeWire reads."""
+    return ('!' if negate else '') + ('~' if is_regex else '') + text
+
+
 def rule_matches(rule: dict, props: dict) -> bool:
     """True when every key of the rule's match object matches (they are ANDed)."""
     match = rule.get('match') or {}

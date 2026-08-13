@@ -7,6 +7,8 @@ priorities and the clock master become WirePlumber node rules.
 
 from __future__ import annotations
 
+import re
+
 import gi
 
 gi.require_version('Gtk', '4.0')
@@ -150,6 +152,8 @@ class PolicyPage:
         props = rule.get('props') or {}
         direction = match.pop('media.class', '')
         key, value = next(iter(match.items()), ('?', '?'))
+        _neg, _rx, plain = rules.split_pattern(str(value))
+        value = plain if plain else value
         # The dialog calls this "Process binary"; the row said
         # application.process.binary. Same vocabulary in both places.
         key_label = next((t for k, t in MATCH_KEYS if k == key), key)
@@ -167,6 +171,10 @@ class PolicyPage:
             bits.append('no auto-connect')
         if props.get('node.dont-reconnect'):
             bits.append('never moved automatically')
+        if _rx:
+            bits.insert(0, 'pattern')
+        elif _neg:
+            bits.insert(0, 'inverted')
         # Direction leads the subtitle: with one rule per direction, two rows
         # can carry the same app name and that is the only thing telling them
         # apart.
@@ -330,6 +338,20 @@ class AppRuleDialog(Adw.Dialog):
         g.add(self.key_row)
         self.value_row = Adw.EntryRow(title='Value (exact match)')
         g.add(self.value_row)
+
+        # PipeWire's own match grammar: '~' makes the value a regex, '!'
+        # inverts it. Both are always constructed and always read back, so a
+        # rule that already uses them keeps them even when the rows are
+        # hidden — hiding a control must never rewrite what it holds.
+        self.regex_row = Adw.SwitchRow(
+            title='Match as a pattern',
+            subtitle='Treat the value as a regular expression, e.g. '
+                     '^(firefox|chromium)$')
+        self.regex_row.connect('notify::active',
+                               lambda *_: self._retitle_value())
+        self.invert_row = Adw.SwitchRow(
+            title='Invert the match',
+            subtitle='Apply to every app except this one.')
         self.direction_row = Adw.ComboRow(
             title='Applies to',
             subtitle=DIRECTIONS[1][2],
@@ -340,8 +362,10 @@ class AppRuleDialog(Adw.Dialog):
         g.add(self.direction_row)
 
         direction = match.pop('media.class', '')
+        negate = is_regex = False
         if match:
             key, value = next(iter(match.items()))
+            negate, is_regex, value = rules.split_pattern(str(value))
             idx = next((i for i, (k, _t) in enumerate(MATCH_KEYS)
                         if k == key), 0)
             self.key_row.set_selected(idx)
@@ -353,6 +377,18 @@ class AppRuleDialog(Adw.Dialog):
                 next((i for i, d in enumerate(DIRECTIONS)
                       if d[0] == direction), 0))
         self.direction_row.connect('notify::selected', self._direction_changed)
+
+        self.regex_row.set_active(is_regex)
+        self.invert_row.set_active(negate)
+        self._retitle_value()
+        # Shown when the user runs with Advanced on, and always for a rule
+        # that already uses them — otherwise editing such a rule would offer
+        # no way to see, let alone undo, what it does. Gated statically
+        # because this is a modal dialog: register_advanced() would leak the
+        # widget into the window's list and outlive it.
+        if getattr(window, 'advanced', False) or is_regex or negate:
+            g.add(self.regex_row)
+            g.add(self.invert_row)
 
         self.running_row = Adw.ComboRow(
             title='…or pick a running app',
@@ -416,6 +452,11 @@ class AppRuleDialog(Adw.Dialog):
         self.running_row.set_model(Gtk.StringList.new(
             ['—'] + [s.name for s in streams]))
 
+    def _retitle_value(self):
+        self.value_row.set_title('Value (regular expression)'
+                                 if self.regex_row.get_active()
+                                 else 'Value (exact match)')
+
     # ------------------------------------------------------------ direction --
     def _direction(self) -> str:
         return DIRECTIONS[self.direction_row.get_selected()][0]
@@ -477,6 +518,10 @@ class AppRuleDialog(Adw.Dialog):
             key_idx, value = 2, s.props.get('node.name', '')
         self.key_row.set_selected(key_idx)
         self.value_row.set_text(value or '')
+        # Picking a concrete running app means an exact match on that name;
+        # leaving a stale pattern flag on would silently change what it hits.
+        self.regex_row.set_active(False)
+        self.invert_row.set_active(False)
         # A live stream knows its own direction, so the rule starts on the
         # right one instead of the default.
         self.direction_row.set_selected(1 if s.is_playback else 2)
@@ -487,7 +532,14 @@ class AppRuleDialog(Adw.Dialog):
         if not value:
             self.window.toast('Enter a match value')
             return
-        match = {key: value}
+        if self.regex_row.get_active():
+            try:
+                re.compile(value)
+            except re.error as e:
+                self.window.toast(f'Not a valid pattern: {e}')
+                return
+        match = {key: rules.join_pattern(self.invert_row.get_active(),
+                                         self.regex_row.get_active(), value)}
         if self._direction():
             match['media.class'] = self._direction()
         props = {}
