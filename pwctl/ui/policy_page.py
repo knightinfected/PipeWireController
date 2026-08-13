@@ -63,6 +63,17 @@ class PolicyPage:
         add_row.set_activatable_widget(add_btn)
         self.apps.add(add_row)
         self._app_rows = []
+        # Rules are read by an app when it opens a stream, so anything
+        # already playing predates them. Saving or enabling a rule applies it
+        # for you; this is the escape hatch for everything else (an app that
+        # started before its rule, or a device that has just come back).
+        apply_all = Gtk.Button(label='Apply now', valign=Gtk.Align.CENTER,
+                               tooltip_text='Move apps that are already '
+                                            'playing to match their rules')
+        apply_all.add_css_class('flat')
+        apply_all.connect('clicked', lambda *_: self._apply_all_now())
+        self.apps.set_header_suffix(apply_all)
+        self._streams = []
 
         self.priorities = group(
             'Default device selection',
@@ -88,14 +99,15 @@ class PolicyPage:
     # -------------------------------------------------------------- refresh --
     def refresh(self):
         def collect():
-            return pw.list_audio_nodes(), rules.load()
+            return pw.list_audio_nodes(), rules.load(), pw.list_streams()
         async_call(collect, self._apply)
 
     def _apply(self, result, error):
         if error or result is None:
             return
-        nodes, data = result
+        nodes, data, streams = result
         self._nodes = nodes
+        self._streams = streams
 
         for row in self._app_rows:
             self.apps.remove(row)
@@ -169,6 +181,25 @@ class PolicyPage:
             'user-trash-symbolic', 'Delete rule',
             lambda *_, i=index: self._delete_rule(i)))
         return row
+
+    def _apply_all_now(self):
+        """Move everything already playing onto whatever its rule says."""
+        def work():
+            data = rules.load()
+            return sum(rules.apply_rule_to_streams(r, self._streams,
+                                                   self._nodes)
+                       for r in data['apps'])
+
+        def done(moved, error):
+            if error:
+                self.window.toast(f'Failed: {error}')
+            elif moved:
+                self.window.toast(f'Moved {moved} playing '
+                                  f'{"app" if moved == 1 else "apps"}')
+            else:
+                self.window.toast('Nothing playing needed moving')
+            self.refresh()
+        async_call(work, done)
 
     def _delete_rule(self, index):
         def work():
@@ -424,10 +455,22 @@ class AppRuleDialog(Adw.Dialog):
 
         def work():
             rules.upsert_app_rule(match, props, self._old_match)
-            return True
+            # A saved rule that visibly does nothing until you restart the
+            # app is the main reason this page reads as broken, so apply it
+            # to whatever that app is already playing.
+            return rules.apply_rule_to_streams(
+                {'match': match, 'props': props},
+                pw.list_streams(), pw.list_audio_nodes())
+
+        def done(moved, error):
+            if error:
+                self.window.toast(f'Failed: {error}')
+            elif moved:
+                self.window.toast(f'Rule saved — moved {moved} playing '
+                                  f'{"app" if moved == 1 else "apps"}')
+            else:
+                self.window.toast('Rule saved — applies to new streams')
+            self.window.flag_restart('pulse')
+            self.page.refresh()
         self.close()
-        async_call(work, lambda r, e: (
-            self.window.toast('Rule saved — applies to new streams'
-                              if not e else f'Failed: {e}'),
-            self.window.flag_restart('pulse'),
-            self.page.refresh()))
+        async_call(work, done)

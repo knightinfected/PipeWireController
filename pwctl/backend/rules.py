@@ -14,8 +14,9 @@ Everything follows the app's core rule: drop-ins only, never base files.
 from __future__ import annotations
 
 import json
+import re
 
-from . import config
+from . import config, pw
 from .system import atomic_write
 
 RULES_PATH = config.XDG_CONFIG / 'pipewire-controller' / 'rules.json'
@@ -197,6 +198,76 @@ def app_rules() -> list[dict]:
 def rule_direction(rule: dict) -> str:
     """'Stream/Output/Audio', 'Stream/Input/Audio' or '' for either."""
     return (rule.get('match') or {}).get('media.class', '')
+
+
+# ------------------------------------------------------- matching, locally --
+#
+# The same matching PipeWire does, so the app can answer "which streams does
+# this rule cover *right now*" without waiting for them to be recreated.
+# All three branches were verified against pipewire 1.6.8 with a probe
+# drop-in rather than read off the documentation, because the doc line
+# ("all keys must match the value. ! negates. ~ starts regex") does not say
+# where the prefixes go or what happens when the property is missing.
+
+def _value_matches(pattern: str, actual) -> bool:
+    """One key of a match object.
+
+    Grammar, in this order: a leading '!' negates, then a leading '~' makes
+    the rest a regex; anything else compares literally. A property that is
+    absent never matches on its own — but negation still flips that, so
+    '!foo' matches a stream that has no such property at all. That last one
+    is measured behaviour, not an assumption.
+    """
+    negate = pattern.startswith('!')
+    if negate:
+        pattern = pattern[1:]
+    if actual is None:
+        hit = False
+    elif pattern.startswith('~'):
+        try:
+            hit = re.search(pattern[1:], str(actual)) is not None
+        except re.error:          # a half-typed regex must not raise here
+            hit = False
+    else:
+        hit = str(actual) == pattern
+    return hit != negate
+
+
+def rule_matches(rule: dict, props: dict) -> bool:
+    """True when every key of the rule's match object matches (they are ANDed)."""
+    match = rule.get('match') or {}
+    if not match:
+        return False
+    return all(_value_matches(str(v), props.get(k)) for k, v in match.items())
+
+
+def matching_streams(rule: dict, streams: list) -> list:
+    """The live streams a rule covers, in the order they were reported."""
+    return [s for s in streams if rule_matches(rule, s.props)]
+
+
+def apply_rule_to_streams(rule: dict, streams: list, nodes: list) -> int:
+    """Move every already-running stream the rule matches onto its target.
+
+    stream.rules are read by a client when it *creates* a stream, so a new
+    or edited rule otherwise does nothing until the app is restarted — the
+    single most common "it didn't work". Applying it to what is already
+    playing is the same move the Dashboard's device dropdown performs.
+    Returns how many streams were actually moved.
+    """
+    target = (rule.get('props') or {}).get('target.object')
+    if not target:
+        return 0
+    node = next((n for n in nodes if n.name == target), None)
+    if node is None:                      # target unplugged — nothing to do
+        return 0
+    moved = 0
+    for s in matching_streams(rule, streams):
+        if s.target_id == node.id:        # already there
+            continue
+        if pw.move_stream(s.id, node.serial):
+            moved += 1
+    return moved
 
 
 def upsert_app_rule(match: dict, props: dict, old_match: dict | None = None):
