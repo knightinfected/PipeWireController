@@ -13,6 +13,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from . import graph, pw
 from .config import XDG_CONFIG
@@ -98,6 +99,24 @@ def save(name: str) -> dict:
     return snap
 
 
+def update(snap: dict) -> dict:
+    """Re-capture the live graph over an existing snapshot, in place.
+
+    Deliberately writes `snap['_path']` rather than re-deriving the filename
+    from the name: `_slug` is lossy, so a snapshot whose stored name has since
+    drifted from its filename would be *duplicated* by save() instead of
+    updated. Falls back to the slug path only when the snapshot has no `_path`
+    (i.e. it never came off disk).
+    """
+    ensure_dirs()
+    name = snap.get('name') or 'snapshot'
+    fresh = capture(name)
+    dest = Path(snap.get('_path') or (ROUTING_DIR / f'{_slug(name)}.json'))
+    atomic_write(dest, json.dumps(fresh, indent=2) + '\n')
+    fresh['_path'] = str(dest)
+    return fresh
+
+
 def list_snapshots() -> list[dict]:
     ensure_dirs()
     out = []
@@ -113,7 +132,6 @@ def list_snapshots() -> list[dict]:
 
 
 def delete(snap: dict):
-    from pathlib import Path
     p = Path(snap.get('_path', ''))
     if p.is_file():
         p.unlink()
@@ -125,7 +143,6 @@ def export(snap: dict, dest_path):
 
 
 def import_file(path) -> dict:
-    from pathlib import Path
     data = json.loads(Path(path).read_text())
     if data.get('format') != FORMAT:
         raise ValueError('not a PipeWire Controller routing snapshot')
