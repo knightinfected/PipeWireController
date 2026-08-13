@@ -44,6 +44,7 @@ class PolicyPage:
     def __init__(self, window):
         self.window = window
         self._nodes = []
+        self._updating = False
 
         self.apps = group(
             'Per-application rules',
@@ -174,13 +175,54 @@ class PolicyPage:
                                               'no actions'),
                             title_lines=1, subtitle_lines=1)
         row.add_prefix(Gtk.Image.new_from_icon_name(icon))
+
+        # Off keeps the rule but stops generating it — the way to find out
+        # whether a rule is what is misbehaving, without losing it.
+        sw = Gtk.Switch(valign=Gtk.Align.CENTER,
+                        active=rules.rule_enabled(rule),
+                        tooltip_text='Turn this rule off without deleting it')
+        sw.connect('notify::active',
+                   lambda s, _p, i=index: self._toggle_rule(i, s))
+        row.add_suffix(sw)
+
         row.add_suffix(icon_button(
             'document-edit-symbolic', 'Edit rule',
             lambda *_: self._open_rule_dialog(rule)))
         row.add_suffix(icon_button(
             'user-trash-symbolic', 'Delete rule',
             lambda *_, i=index: self._delete_rule(i)))
+        if not rules.rule_enabled(rule):
+            row.add_css_class('dim-label')
         return row
+
+    def _toggle_rule(self, index, switch):
+        if self._updating:
+            return
+        on = switch.get_active()
+
+        def work():
+            rules.set_app_rule_enabled(index, on)
+            # Turning a rule back on should do something visible, for the
+            # same reason saving one does.
+            if not on:
+                return 0
+            data = rules.load()
+            if not (0 <= index < len(data['apps'])):
+                return 0
+            return rules.apply_rule_to_streams(
+                data['apps'][index], self._streams, self._nodes)
+
+        def done(moved, error):
+            if error:
+                self.window.toast(f'Failed: {error}')
+            else:
+                self.window.toast(
+                    f'Rule enabled — moved {moved} playing '
+                    f'{"app" if moved == 1 else "apps"}' if moved else
+                    ('Rule enabled' if on else 'Rule disabled'))
+            self.window.flag_restart('pulse')
+            self.refresh()
+        async_call(work, done)
 
     def _apply_all_now(self):
         """Move everything already playing onto whatever its rule says."""
@@ -272,6 +314,8 @@ class AppRuleDialog(Adw.Dialog):
         # name or the direction replaces the rule instead of leaving the old
         # one behind next to the new one.
         self._old_match = dict(match) or None
+        # Editing a rule that is switched off must not silently switch it on.
+        self._enabled = rules.rule_enabled(rule or {})
         self._updating = False
 
         g = Adw.PreferencesGroup(title='Match')
@@ -454,10 +498,13 @@ class AppRuleDialog(Adw.Dialog):
             return
 
         def work():
-            rules.upsert_app_rule(match, props, self._old_match)
+            rules.upsert_app_rule(match, props, self._old_match,
+                                  enabled=self._enabled)
             # A saved rule that visibly does nothing until you restart the
             # app is the main reason this page reads as broken, so apply it
             # to whatever that app is already playing.
+            if not self._enabled:
+                return 0
             return rules.apply_rule_to_streams(
                 {'match': match, 'props': props},
                 pw.list_streams(), pw.list_audio_nodes())

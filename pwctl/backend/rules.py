@@ -200,6 +200,18 @@ def rule_direction(rule: dict) -> str:
     return (rule.get('match') or {}).get('media.class', '')
 
 
+def rule_enabled(rule: dict) -> bool:
+    """Absent means on, so every rule written before this existed stays on."""
+    return rule.get('enabled', True)
+
+
+def set_app_rule_enabled(index: int, on: bool):
+    data = load()
+    if 0 <= index < len(data['apps']):
+        data['apps'][index]['enabled'] = bool(on)
+        save(data)
+
+
 # ------------------------------------------------------- matching, locally --
 #
 # The same matching PipeWire does, so the app can answer "which streams does
@@ -256,7 +268,7 @@ def apply_rule_to_streams(rule: dict, streams: list, nodes: list) -> int:
     Returns how many streams were actually moved.
     """
     target = (rule.get('props') or {}).get('target.object')
-    if not target:
+    if not target or not rule_enabled(rule):
         return 0
     node = next((n for n in nodes if n.name == target), None)
     if node is None:                      # target unplugged — nothing to do
@@ -270,7 +282,8 @@ def apply_rule_to_streams(rule: dict, streams: list, nodes: list) -> int:
     return moved
 
 
-def upsert_app_rule(match: dict, props: dict, old_match: dict | None = None):
+def upsert_app_rule(match: dict, props: dict, old_match: dict | None = None,
+                    enabled: bool = True):
     """Add or replace one application rule.
 
     `match` is a whole match object, not a single key: PipeWire requires
@@ -287,7 +300,12 @@ def upsert_app_rule(match: dict, props: dict, old_match: dict | None = None):
     stale = [m for m in (match, old_match) if m]
     data['apps'] = [r for r in data['apps'] if r.get('match') not in stale]
     if props and match:
-        data['apps'].append({'match': match, 'props': props})
+        entry = {'match': match, 'props': props}
+        # Only written when off, so an untouched rules.json keeps its shape
+        # and a rule that predates the switch is still read as enabled.
+        if not enabled:
+            entry['enabled'] = False
+        data['apps'].append(entry)
     save(data)
 
 
@@ -381,7 +399,7 @@ def stream_rules() -> list[dict]:
     for rule in app_rules():
         match = rule.get('match') or {}
         props = dict(rule.get('props') or {})
-        if not match or not props:
+        if not match or not props or not rule_enabled(rule):
             continue
         out.append({'matches': [match],
                     'actions': {'update-props': props}})
