@@ -358,7 +358,7 @@ Older releases ship a libadwaita before 1.4 and won't work.
 ### Other distros
 
 Install GTK 4 + libadwaita (≥ 1.4) with GObject introspection and
-PyGObject from your package manager, then grab the Python audio bits via
+PyGObject and pycairo from your package manager, then grab the Python audio bits via
 pip if your distro doesn't package them:
 
 ```bash
