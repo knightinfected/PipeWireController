@@ -25,21 +25,38 @@ and commit log.
 
 ## Unreleased
 
-**Snapshot updates and a launch fix**
+**App Policy bug fixes and additions- rules now have a direction, plus snapshot
+updates and a launch fix**
 
-- **Added Update for patchbay snapshots** — each snapshot row now has an Update
-  button that saves the current patchbay over it. Before, updating one meant
-  deleting it and typing the name again
-  ([#5](https://github.com/knightinfected/PipeWireController/issues/5)).
-- **Saving over an existing snapshot now asks first** — it used to replace it
-  silently. Snapshots match by file, so "My Setup" and "my setup" are the same
-  one.
-- **Fixed the app not starting on a clean Arch install** —
-  `ModuleNotFoundError: No module named 'cairo'`. pycairo is required for the
-  patchbay, meters and signal-path wires, but it's only an optional dependency
-  of python-gobject, so it could be missing. It's now a dependency of the AUR
-  package (0.5.0-2) and listed in the README. Affected every release since
-  v0.4.0.
+- **Bug: an app can now have an output *and* an input rule.** Adding the second
+  one used to silently replace the first. Rules carry a direction, so a VoIP app
+  can be sent to your speakers *and* told which microphone to use, and the
+  dialog says which direction it is setting instead of listing every endpoint
+  and leaving you to guess
+  ([#7](https://github.com/knightinfected/PipeWireController/issues/7)).
+  Existing rules keep working, covering both directions.
+- **Rules now apply to apps that are already playing** — saving one moves what
+  is playing to match, and **Apply now** does the same for every rule at once.
+  Before, a new rule did nothing until you restarted the app.
+- **Added a switch to turn a rule off** without deleting it, for finding out
+  whether a rule is the one misbehaving.
+- **Rules that cannot do anything now say so** — an unplugged device, or a rule
+  sitting under an identical one that already wins, is flagged in the list.
+- **Added pinning for apps sent to a signal path or an equalizer**, so they come
+  back on their own after a restart. Right-click the app on a Signal Paths card,
+  or press the pin on the Equalizer page.
+- **Added pattern and inverted matching** for application rules, shown when
+  Advanced is on — match a regular expression like `^(firefox|chromium)$`, or
+  invert a rule to mean "every app except this one".
+- **Added Update for patchbay snapshots** — save the current patchbay over an
+  existing one, instead of deleting it and typing the name again
+  ([#5](https://github.com/knightinfected/PipeWireController/issues/5)). Saving
+  over one by name now asks first; it used to replace it silently.
+- **Bug: the app would not start on a clean install** —
+  `ModuleNotFoundError: No module named 'cairo'`. pycairo is needed for the
+  patchbay, meters and signal-path wires, but it is only an optional dependency
+  of python-gobject. Now a dependency of the AUR package (0.5.0-2) and listed in
+  the README. Affected every release since v0.4.0.
 
 ---
 
