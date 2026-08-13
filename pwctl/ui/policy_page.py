@@ -136,11 +136,19 @@ class PolicyPage:
         props = rule.get('props') or {}
         direction = match.pop('media.class', '')
         key, value = next(iter(match.items()), ('?', '?'))
+        # The dialog calls this "Process binary"; the row said
+        # application.process.binary. Same vocabulary in both places.
+        key_label = next((t for k, t in MATCH_KEYS if k == key), key)
         _mc, dir_label, _sub, icon = next(
             (d for d in DIRECTIONS if d[0] == direction), DIRECTIONS[0])
         bits = []
         if props.get('target.object'):
-            bits.append(f'→ {props["target.object"]}')
+            # Stored as a node name; show the description the rest of the app
+            # uses, falling back to the raw name if the device is unplugged.
+            target = props['target.object']
+            bits.append('→ ' + esc(next(
+                (n.description for n in self._nodes if n.name == target),
+                target)))
         if props.get('node.autoconnect') is False:
             bits.append('no auto-connect')
         if props.get('node.dont-reconnect'):
@@ -149,8 +157,9 @@ class PolicyPage:
         # can carry the same app name and that is the only thing telling them
         # apart.
         row = Adw.ActionRow(title=esc(value),
-                            subtitle=dir_label + ' · ' + esc(key) + ' · ' +
-                                     (' · '.join(bits) or 'no actions'),
+                            subtitle=dir_label + ' · ' + esc(key_label) +
+                                     ' · ' + (' · '.join(bits) or
+                                              'no actions'),
                             title_lines=1, subtitle_lines=1)
         row.add_prefix(Gtk.Image.new_from_icon_name(icon))
         row.add_suffix(icon_button(
