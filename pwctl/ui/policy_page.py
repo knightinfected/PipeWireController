@@ -14,7 +14,8 @@ gi.require_version('Adw', '1')
 from gi.repository import Adw, Gtk  # noqa: E402
 
 from ..backend import pw, rules
-from .widgets import async_call, esc, group, icon_button, page_scroller
+from .widgets import (async_call, esc, group, icon_button, page_scroller,
+                      pill)
 
 MATCH_KEYS = [
     ('application.name', 'Application name'),
@@ -114,7 +115,7 @@ class PolicyPage:
             self.apps.remove(row)
         self._app_rows = []
         for i, rule in enumerate(data['apps']):
-            row = self._rule_row(i, rule)
+            row = self._rule_row(i, rule, data['apps'])
             self.apps.add(row)
             self._app_rows.append(row)
 
@@ -144,7 +145,7 @@ class PolicyPage:
             self._clock_updating = False
 
     # ------------------------------------------------------------ app rules --
-    def _rule_row(self, index, rule):
+    def _rule_row(self, index, rule, all_rules=None):
         match = dict(rule.get('match') or {})
         props = rule.get('props') or {}
         direction = match.pop('media.class', '')
@@ -175,6 +176,10 @@ class PolicyPage:
                                               'no actions'),
                             title_lines=1, subtitle_lines=1)
         row.add_prefix(Gtk.Image.new_from_icon_name(icon))
+
+        problem = rules.rule_problem(index, all_rules or [rule], self._nodes)
+        if problem:
+            row.add_suffix(pill(problem, 'warning'))
 
         # Off keeps the rule but stops generating it — the way to find out
         # whether a rule is what is misbehaving, without losing it.

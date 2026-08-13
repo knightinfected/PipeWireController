@@ -282,6 +282,26 @@ def apply_rule_to_streams(rule: dict, streams: list, nodes: list) -> int:
     return moved
 
 
+def rule_problem(index: int, rules_list: list, nodes: list) -> str:
+    """Why a rule will not do anything, in a few words, or '' if it is fine.
+
+    Deliberately reports rather than repairs: silently dropping a rule whose
+    device is unplugged would throw the user's routing away the first time
+    they undocked a laptop.
+    """
+    rule = rules_list[index]
+    if not rule_enabled(rule):
+        return ''                          # the switch already says so
+    match = rule.get('match') or {}
+    for earlier in rules_list[:index]:
+        if rule_enabled(earlier) and (earlier.get('match') or {}) == match:
+            return 'overridden by an identical rule above'
+    target = (rule.get('props') or {}).get('target.object')
+    if target and not any(n.name == target for n in nodes):
+        return 'target device not connected'
+    return ''
+
+
 def upsert_app_rule(match: dict, props: dict, old_match: dict | None = None,
                     enabled: bool = True):
     """Add or replace one application rule.
