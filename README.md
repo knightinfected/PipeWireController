@@ -336,7 +336,7 @@ dependencies manually:
 
 ```bash
 sudo pacman -S --needed pipewire wireplumber pipewire-pulse gtk4 libadwaita \
-    python-gobject python-numpy python-soundfile
+    python-gobject python-cairo python-numpy python-soundfile
 ```
 
 ### Fedora
