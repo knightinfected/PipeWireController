@@ -183,18 +183,40 @@ def hidden_entries() -> list[dict]:
 
 # ---------------------------------------------------------------- app rules --
 
+# A stream's direction, as the media.class every client sets on its node.
+# Adding this to a match makes "speakers for Teams" and "this mic for Teams"
+# two distinct rules instead of one that overwrites the other (issue #7).
+DIR_PLAYBACK = 'Stream/Output/Audio'
+DIR_RECORDING = 'Stream/Input/Audio'
+
+
 def app_rules() -> list[dict]:
     return load()['apps']
 
 
-def upsert_app_rule(match_key: str, match_value: str, props: dict):
-    """Add or replace the rule matching one application."""
+def rule_direction(rule: dict) -> str:
+    """'Stream/Output/Audio', 'Stream/Input/Audio' or '' for either."""
+    return (rule.get('match') or {}).get('media.class', '')
+
+
+def upsert_app_rule(match: dict, props: dict, old_match: dict | None = None):
+    """Add or replace one application rule.
+
+    `match` is a whole match object, not a single key: PipeWire requires
+    *all* of its keys to match, so an app key plus media.class addresses one
+    direction of one app. Two such rules coexist, which is the point.
+
+    `old_match` is the match the rule had before an edit. Pass it whenever
+    the dialog could have changed the match itself — otherwise editing a
+    rule's app name or direction appends a second rule and leaves the
+    original behind.
+    """
+    match = {k: v for k, v in match.items() if v}
     data = load()
-    data['apps'] = [r for r in data['apps']
-                    if r.get('match') != {match_key: match_value}]
-    if props:
-        data['apps'].append({'match': {match_key: match_value},
-                             'props': props})
+    stale = [m for m in (match, old_match) if m]
+    data['apps'] = [r for r in data['apps'] if r.get('match') not in stale]
+    if props and match:
+        data['apps'].append({'match': match, 'props': props})
     save(data)
 
 
