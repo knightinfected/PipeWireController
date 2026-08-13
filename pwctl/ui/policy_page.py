@@ -171,13 +171,13 @@ class PolicyPage:
             bits.append('no auto-connect')
         if props.get('node.dont-reconnect'):
             bits.append('never moved automatically')
+        # Direction leads the subtitle: with one rule per direction, two rows
+        # can carry the same app name and that is the only thing telling them
+        # apart.
         if _rx:
             bits.insert(0, 'pattern')
         elif _neg:
             bits.insert(0, 'inverted')
-        # Direction leads the subtitle: with one rule per direction, two rows
-        # can carry the same app name and that is the only thing telling them
-        # apart.
         row = Adw.ActionRow(title=esc(value),
                             subtitle=dir_label + ' · ' + esc(key_label) +
                                      ' · ' + (' · '.join(bits) or

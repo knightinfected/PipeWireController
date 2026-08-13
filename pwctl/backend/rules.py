@@ -318,6 +318,65 @@ def rule_problem(index: int, rules_list: list, nodes: list) -> str:
     return ''
 
 
+def stream_match(stream) -> dict:
+    """The match object identifying one running stream's application.
+
+    Same preference order the rule dialog uses when you pick a running app:
+    the friendly application name, else the binary, else the node name.
+    """
+    props = getattr(stream, 'props', {}) or {}
+    for key in ('application.name', 'application.process.binary', 'node.name'):
+        value = props.get(key)
+        if value:
+            return {key: value,
+                    'media.class': getattr(stream, 'media_class', '')}
+    return {}
+
+
+def bind_stream_to_node(stream, node_name: str) -> dict:
+    """Persist "this app plays into that node" as an application rule.
+
+    Sending an app somewhere is otherwise a live `target.object` write that
+    is gone at the next restart — this is what makes it stick. Any other
+    actions already set for the same app (auto-connect, pin) are preserved.
+    """
+    match = stream_match(stream)
+    if not match or not match.get('media.class'):
+        return {}
+    existing = next((r for r in app_rules() if r.get('match') == match), None)
+    props = dict((existing or {}).get('props') or {})
+    props['target.object'] = node_name
+    upsert_app_rule(match, props, old_match=match,
+                    enabled=rule_enabled(existing or {}))
+    return match
+
+
+def stream_is_bound(stream, node_name: str) -> bool:
+    """True when a live rule already sends this app to that node."""
+    props = getattr(stream, 'props', {}) or {}
+    return any(rule_enabled(r) and rule_matches(r, props) and
+               (r.get('props') or {}).get('target.object') == node_name
+               for r in app_rules())
+
+
+def unbind_stream(stream) -> bool:
+    """Drop the persistent destination for this app, keeping its other actions.
+
+    The rule goes away entirely if the destination was all it had, so
+    un-keeping an app leaves nothing behind to puzzle over later.
+    """
+    match = stream_match(stream)
+    rule = next((r for r in app_rules() if r.get('match') == match), None)
+    if rule is None:
+        return False
+    props = dict(rule.get('props') or {})
+    if props.pop('target.object', None) is None:
+        return False
+    upsert_app_rule(match, props, old_match=match,
+                    enabled=rule_enabled(rule))
+    return True
+
+
 def upsert_app_rule(match: dict, props: dict, old_match: dict | None = None,
                     enabled: bool = True):
     """Add or replace one application rule.

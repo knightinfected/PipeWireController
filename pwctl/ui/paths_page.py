@@ -45,7 +45,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from ..backend import levels, path_templates, paths, plugins, prefs, pw, \
-    virtual
+    rules, virtual
 from .volume import make_volume
 from .widgets import async_call, confirm, esc, group, icon_button, \
     pick_file, pick_folder, pill, state_style
@@ -134,13 +134,16 @@ def avatar(icon_name: str, kind: str) -> Gtk.Image:
 
 
 def chip(label: str, tooltip: str = '', on_click=None, icon: str = '',
-         active: bool = False, toggle: bool = False) -> Gtk.Widget:
+         active: bool = False, toggle: bool = False,
+         lead_icon: str = '') -> Gtk.Widget:
     btn = Gtk.ToggleButton() if toggle else Gtk.Button()
     btn.add_css_class('path-chip')
     btn.set_valign(Gtk.Align.CENTER)
     if tooltip:
         btn.set_tooltip_text(tooltip)
     box = Gtk.Box(spacing=5)
+    if lead_icon:
+        box.append(Gtk.Image.new_from_icon_name(lead_icon))
     # A dot in front of the label, shown only while the chip is live.  It
     # takes the chip's own colour, so "this send carries audio" is legible at
     # a glance instead of resting entirely on a tinted background.
@@ -1773,15 +1776,30 @@ class PathsPage:
         here = [s for s in self._streams
                 if node is not None and s.target_id == node.id]
         chips = []
+        node_name = node.name if node is not None else ''
         for s in here:
+            # Moving an app here is a live relink that dies with the session.
+            # A kept app additionally carries an application rule, so it lands
+            # here again on its own next time it starts.
+            kept = bool(node_name) and rules.stream_is_bound(s, node_name)
             c = chip(s.name,
-                     f'{s.media or "playing"}\nClick to send it back to the '
-                     'default output, or drag it onto another strip',
+                     f'{s.media or "playing"}\n' +
+                     ('Kept here — it will come back to this strip on its own.'
+                      if kept else
+                      'Right-click to keep it here for next time.') +
+                     '\nClick to send it back to the default output, or drag '
+                     'it onto another strip',
                      lambda _b, st=s: self._release_app(st),
-                     icon='window-close-symbolic', active=True)
+                     icon='window-close-symbolic', active=True,
+                     lead_icon='view-pin-symbolic' if kept else '')
             drag_source(c, lambda st=s: StreamDrag(st.id, st.name),
                         on_begin=lambda: self._begin_drag('stream', strip),
                         on_end=self._end_drag)
+            menu = Gtk.GestureClick(button=3)
+            menu.connect('pressed',
+                         lambda _g, _n, x, y, st=s, w=c, k=kept, nn=node_name:
+                         context_menu(w, self._app_chip_menu(st, nn, k), x, y))
+            c.add_controller(menu)
             chips.append(c)
         if not here:
             chips.append(Gtk.Label(label='Nothing playing here yet',
@@ -2106,6 +2124,42 @@ class PathsPage:
         search_picker(self.window, 'Send an app here',
                       'The app keeps playing; it is just relinked.',
                       items, picked)
+
+    def _app_chip_menu(self, stream, node_name, kept):
+        if kept:
+            return [('view-pin-symbolic', 'Stop keeping it here',
+                     lambda: self._keep_app(stream, node_name, False)),
+                    ('window-close-symbolic', 'Send back to default output',
+                     lambda: self._release_app(stream))]
+        return [('view-pin-symbolic', 'Keep this app here',
+                 lambda: self._keep_app(stream, node_name, True)),
+                ('window-close-symbolic', 'Send back to default output',
+                 lambda: self._release_app(stream))]
+
+    def _keep_app(self, stream, node_name, keep):
+        """Make (or undo) a persistent binding for an app already sent here.
+
+        The live move is untouched — this only decides whether it survives a
+        restart, so nothing about the existing behaviour changes for anyone
+        who never opens this menu.
+        """
+        def work():
+            if keep:
+                return bool(rules.bind_stream_to_node(stream, node_name))
+            return rules.unbind_stream(stream)
+
+        def done(done_ok, error):
+            if error:
+                self.window.toast(f'Failed: {error}')
+            elif keep:
+                self.window.toast(f'“{stream.name}” will come back here'
+                                  if done_ok else
+                                  'Could not identify that app to remember it')
+            else:
+                self.window.toast(f'“{stream.name}” is no longer kept here')
+            self.window.flag_restart('pulse')
+            self.refresh()
+        async_call(work, done)
 
     def _release_app(self, stream):
         """Put an app back on the default output."""
