@@ -25,22 +25,21 @@ and commit log.
 
 ## Unreleased
 
-**Update a patchbay snapshot in place, and a launch fix for clean Arch
-installs**
+**Snapshot updates and a launch fix**
 
-- **Patchbay snapshots can now be updated.** Each saved snapshot gained an
-  **Update** button that re-captures the patchbay as it is right now and writes
-  it back over that snapshot. Previously the only way to change one was to
-  delete it, retype the name and save again. The update asks for confirmation
-  first, since it discards the links the snapshot was holding
+- **Added Update for patchbay snapshots** — each snapshot row now has an Update
+  button that saves the current patchbay over it. Before, updating one meant
+  deleting it and typing the name again
   ([#5](https://github.com/knightinfected/PipeWireController/issues/5)).
-- **Fixed: the app would not start on a clean Arch install**, failing with
-  `ModuleNotFoundError: No module named 'cairo'`. pycairo is required — the
-  patchbay, the meters and the signal-path wires are all drawn with it — but it
-  is only an *optional* dependency of python-gobject, so it was missing on
-  systems that did not already have it for something else. It is now a proper
-  dependency of the AUR package (0.5.0-2) and is listed in the README's
-  install instructions for every distro. Affected every release since v0.4.0.
+- **Saving over an existing snapshot now asks first** — it used to replace it
+  silently. Snapshots match by file, so "My Setup" and "my setup" are the same
+  one.
+- **Fixed the app not starting on a clean Arch install** —
+  `ModuleNotFoundError: No module named 'cairo'`. pycairo is required for the
+  patchbay, meters and signal-path wires, but it's only an optional dependency
+  of python-gobject, so it could be missing. It's now a dependency of the AUR
+  package (0.5.0-2) and listed in the README. Affected every release since
+  v0.4.0.
 
 ---
 

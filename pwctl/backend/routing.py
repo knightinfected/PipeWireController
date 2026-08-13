@@ -117,6 +117,27 @@ def update(snap: dict) -> dict:
     return fresh
 
 
+def find_by_name(name: str) -> dict | None:
+    """The snapshot that saving under `name` would overwrite, or None.
+
+    Matched on the filename first, because that is what actually collides:
+    `_slug` is lossy, so "My Setup" and "my setup" are the same file and one
+    would silently replace the other. The second pass catches a snapshot whose
+    stored name matches but whose file has drifted from it — saving would not
+    destroy that one, but it would leave two entries with the same name in the
+    list, so it is worth offering to replace it in place instead.
+    """
+    dest = str(ROUTING_DIR / f'{_slug(name)}.json')
+    snaps = list_snapshots()
+    for s in snaps:
+        if s.get('_path') == dest:
+            return s
+    for s in snaps:
+        if _slug(s.get('name') or '') == _slug(name):
+            return s
+    return None
+
+
 def list_snapshots() -> list[dict]:
     ensure_dirs()
     out = []

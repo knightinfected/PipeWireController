@@ -785,10 +785,28 @@ class GraphPage:
         def do_save(*_a):
             name = entry.get_text().strip() or time.strftime('%Y-%m-%d %H:%M')
             self._snap_popover.popdown()
-            async_call(lambda: routing.save(name),
-                       lambda r, e: self.window.toast(
-                           f'Snapshot “{name}” saved' if not e
-                           else f'Save failed: {e}'))
+
+            def write(existing=None):
+                # Replacing goes through update() so it rewrites the file the
+                # snapshot came from; save() would re-derive the path from the
+                # name and could leave a duplicate behind (see routing.update).
+                shown = existing.get('name', name) if existing else name
+                async_call(
+                    lambda: routing.update(existing) if existing
+                    else routing.save(name),
+                    lambda r, e: self.window.toast(
+                        f'Snapshot “{shown}” saved' if not e
+                        else f'Save failed: {e}'))
+
+            clash = routing.find_by_name(name)
+            if clash is None:
+                write()
+                return
+            confirm(self.window, f'Replace “{clash.get("name", name)}”?',
+                    f'A snapshot with that name already exists, holding '
+                    f'{len(clash.get("links", []))} links. It is replaced by '
+                    'the patchbay as it is right now. This cannot be undone.',
+                    'Replace', lambda: write(clash))
         save.connect('clicked', do_save)
         entry.connect('activate', do_save)
         row.append(entry)
