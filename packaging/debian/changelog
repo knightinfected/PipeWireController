@@ -1,0 +1,7 @@
+pipewire-control-center (0.5.0) unstable; urgency=medium
+
+  * Initial Debian packaging.
+  * Renamed from pipewire-controller: an unrelated project holds that name on
+    PyPI and installs the same /usr/bin binary and .desktop filename.
+
+ -- knightinfected <hmzmahmood5@gmail.com>  Wed, 12 Aug 2026 15:53:49 -0400

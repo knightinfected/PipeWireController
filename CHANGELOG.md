@@ -57,6 +57,11 @@ updates and a launch fix**
   patchbay, meters and signal-path wires, but it is only an optional dependency
   of python-gobject. Now a dependency of the AUR package (0.5.0-2) and listed in
   the README. Affected every release since v0.4.0.
+- **Added Debian and RPM packaging** in [`packaging/`](packaging/), so the app
+  can be built as a `.deb` or an RPM instead of only run from a checkout. Every
+  distro installs the same layout as the AUR package. Neither has been built on
+  Debian or Fedora themselves yet — see
+  [`packaging/README.md`](packaging/README.md).
 
 ---
 
