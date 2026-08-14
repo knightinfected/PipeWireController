@@ -28,9 +28,9 @@ and commit log.
 **App Policy bug fixes and additions- rules now have a direction, plus snapshot
 updates and a launch fix**
 
-- **Bug: an app can now have an output *and* an input rule.** Adding the second
-  one used to silently replace the first. Rules carry a direction, so a VoIP app
-  can be sent to your speakers *and* told which microphone to use, and the
+- **Bug: an app can now have an output *and* an input rule.** Previously, adding the second
+  one used to silently replace the first. Rules now have a direction, so a VoIP app
+  can be routed to your speakers while also being assigned a microphone, and the
   dialog says which direction it is setting instead of listing every endpoint
   and leaving you to guess
   ([#7](https://github.com/knightinfected/PipeWireController/issues/7)).
