@@ -11,7 +11,9 @@ Ubuntu/Debian and others below).
 Everything under PipeWire's *Configuration* documentation — clock/quantum
 tuning, stream processing, session policy, filter chains, HRIR virtual
 surround — exposed as toggles and dropdowns, plus **Signal Paths** for building
-the route your audio actually takes ([new in v0.4.0](#new-in-v040)), **live
+the route your audio actually takes ([new in v0.4.0](#new-in-v040)) with
+**crossovers** that split the audio by frequency and send each band to its own
+speakers, **live
 level meters** on every volume control, a parametric **equalizer** and
 **microphone cleanup** ([new in v0.3.6](#new-in-v036)), a live **patchbay**,
 performance **monitoring**, **virtual devices**, routing snapshots,

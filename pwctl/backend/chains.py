@@ -271,11 +271,15 @@ def pick_targets(node_name: str, sinks: list, edges: dict[str, str]) -> list:
     """The sinks `node_name` may feed, in the order given.
 
     Other managed sinks stay in the list — chaining them is the point.  What
-    is dropped is this object itself and any target whose own chain leads back
-    here.  Pass an empty `node_name` for an object that does not exist yet.
+    is dropped is this object itself, any target whose own chain leads back
+    here, and any smart-filter insert: an insert is not a destination but a
+    stage in one, and pointing at it would put audio into a device's path
+    behind that device's back.  Pass an empty `node_name` for an object that
+    does not exist yet.
     """
     return [n for n in sinks
             if n.name != node_name
+            and not getattr(n, 'is_insert', False)
             and not would_loop(node_name, n.name, edges)]
 
 

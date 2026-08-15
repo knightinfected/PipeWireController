@@ -83,6 +83,18 @@ class AudioNode:
         # Filter-chain / loopback nodes have no device.api
         return 'device.api' not in self.props
 
+    @property
+    def is_insert(self):
+        """A smart filter: a sink only so that audio can pass through it.
+
+        The session manager splices it into a device's path and never offers
+        it as an output, so it must not appear anywhere the user is choosing
+        an endpoint.  It still has to be *findable* — Signal Paths reads its
+        volume and its level meter — which is why this is a flag rather than
+        an omission from the list.
+        """
+        return str(self.props.get('filter.smart', '')).lower() in ('true', '1')
+
 
 def _device_routes(dump) -> dict:
     """device object id -> (EnumRoute list, active Route list)."""
@@ -119,7 +131,14 @@ def _attach_ports(node: AudioNode, routes: dict):
                              and r.get('direction') == want), None)
 
 
-def list_audio_nodes(dump=None) -> list[AudioNode]:
+def list_audio_nodes(dump=None, inserts: bool = False) -> list[AudioNode]:
+    """Every audio endpoint.
+
+    Smart-filter inserts are left out unless `inserts` is set: they are sinks
+    only so that audio can pass through them, and every page that lists
+    endpoints is asking "what can the user pick?".  Signal Paths asks for
+    them because it draws the strips themselves.
+    """
     dump = dump if dump is not None else pw_dump()
     defaults = read_default_names()
     def_sink = defaults.get('default.audio.sink')
@@ -141,6 +160,8 @@ def list_audio_nodes(dump=None) -> list[AudioNode]:
             serial=props.get('object.serial', -1),
             is_default=(name == def_sink if mclass == 'Audio/Sink'
                         else name == def_source))
+        if node.is_insert and not inserts:
+            continue
         _attach_ports(node, routes)
         vol = get_volume(node.id)
         if vol:
