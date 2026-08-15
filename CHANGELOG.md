@@ -23,7 +23,7 @@ and commit log.
 
 ---
 
-## Unreleased
+## [v0.5.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.5.1) — 2026-08-16
 
 **App Policy bug fixes and additions- rules now have a direction, plus snapshot
 updates and a launch fix**
