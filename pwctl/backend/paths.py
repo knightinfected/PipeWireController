@@ -253,9 +253,15 @@ def list_strips() -> list[Strip]:
     for f in sorted(PATH_DIR.glob('*.json')):
         try:
             data = json.loads(f.read_text())
-            out.append(Strip(**{k: v for k, v in data.items() if k in known}))
+            strip = Strip(**{k: v for k, v in data.items() if k in known})
         except (ValueError, TypeError):
             continue
+        # Also on the way in, so a crossover written before the rows were
+        # ordered reads back in spectrum order instead of waiting for its
+        # next edit to straighten itself out.
+        if strip.role == 'xover':
+            sort_bands(strip)
+        out.append(strip)
     out.sort(key=lambda s: s.order)
     return out
 
@@ -275,8 +281,27 @@ def mixes(strips=None) -> list[Strip]:
             if s.role == 'mix']
 
 
+def sort_bands(strip: Strip):
+    """Put the rows in the order the spectrum runs, lowest band first.
+
+    A crossover is read as a picture of the spectrum, so the rows have to
+    follow it: a band added later but sitting between two existing ones
+    belongs between them, not at the bottom of the list.  Sorting on save
+    rather than only on screen means the stored file, the generated config
+    and the card all agree.
+
+    An edge of 0 means "no limit on that side", so it is the bottom of the
+    range when it is the low edge and the top of it when it is the high one —
+    which is why the high edge cannot simply be compared as a number.
+    """
+    strip.bands.sort(key=lambda b: (float(b.get('lo') or 0.0),
+                                    float(b.get('hi') or 0.0) or float('inf')))
+
+
 def save_meta(strip: Strip):
     ensure_dirs()
+    if strip.role == 'xover':
+        sort_bands(strip)
     system.atomic_write(strip.meta_path, json.dumps(asdict(strip), indent=2))
 
 
@@ -1029,7 +1054,7 @@ def output_targets(strip: Strip, sinks: list, edges: dict | None = None) -> list
 __all__ = [
     'Strip', 'ROLES', 'MODES', 'insertable', 'SOURCE_KINDS', 'STAGE_KINDS',
     'BAND_FILTERS',
-    'XOVER_MODES', 'XOVER_SLOPES', 'DEFAULT_SLOPE',
+    'XOVER_MODES', 'XOVER_SLOPES', 'DEFAULT_SLOPE', 'sort_bands',
     'PATH_DIR', 'list_strips', 'sources', 'mixes', 'save_meta', 'new_strip',
     'new_stage', 'clone_stage', 'build_graph', 'generate', 'resolve_target',
     'sync_fan', 'apply', 'set_enabled', 'status', 'delete', 'target_edges',
