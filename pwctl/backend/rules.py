@@ -14,8 +14,9 @@ Everything follows the app's core rule: drop-ins only, never base files.
 from __future__ import annotations
 
 import json
+import re
 
-from . import config
+from . import config, pw
 from .system import atomic_write
 
 RULES_PATH = config.XDG_CONFIG / 'pipewire-controller' / 'rules.json'
@@ -183,18 +184,223 @@ def hidden_entries() -> list[dict]:
 
 # ---------------------------------------------------------------- app rules --
 
+# A stream's direction, as the media.class every client sets on its node.
+# Adding this to a match makes "speakers for Teams" and "this mic for Teams"
+# two distinct rules instead of one that overwrites the other (issue #7).
+DIR_PLAYBACK = 'Stream/Output/Audio'
+DIR_RECORDING = 'Stream/Input/Audio'
+
+
 def app_rules() -> list[dict]:
     return load()['apps']
 
 
-def upsert_app_rule(match_key: str, match_value: str, props: dict):
-    """Add or replace the rule matching one application."""
+def rule_direction(rule: dict) -> str:
+    """'Stream/Output/Audio', 'Stream/Input/Audio' or '' for either."""
+    return (rule.get('match') or {}).get('media.class', '')
+
+
+def rule_enabled(rule: dict) -> bool:
+    """Absent means on, so every rule written before this existed stays on."""
+    return rule.get('enabled', True)
+
+
+def set_app_rule_enabled(index: int, on: bool):
     data = load()
-    data['apps'] = [r for r in data['apps']
-                    if r.get('match') != {match_key: match_value}]
-    if props:
-        data['apps'].append({'match': {match_key: match_value},
-                             'props': props})
+    if 0 <= index < len(data['apps']):
+        data['apps'][index]['enabled'] = bool(on)
+        save(data)
+
+
+# ------------------------------------------------------- matching, locally --
+#
+# The same matching PipeWire does, so the app can answer "which streams does
+# this rule cover *right now*" without waiting for them to be recreated.
+# All three branches were verified against pipewire 1.6.8 with a probe
+# drop-in rather than read off the documentation, because the doc line
+# ("all keys must match the value. ! negates. ~ starts regex") does not say
+# where the prefixes go or what happens when the property is missing.
+
+def _value_matches(pattern: str, actual) -> bool:
+    """One key of a match object.
+
+    Grammar, in this order: a leading '!' negates, then a leading '~' makes
+    the rest a regex; anything else compares literally. A property that is
+    absent never matches on its own — but negation still flips that, so
+    '!foo' matches a stream that has no such property at all. That last one
+    is measured behaviour, not an assumption.
+    """
+    negate = pattern.startswith('!')
+    if negate:
+        pattern = pattern[1:]
+    if actual is None:
+        hit = False
+    elif pattern.startswith('~'):
+        try:
+            hit = re.search(pattern[1:], str(actual)) is not None
+        except re.error:          # a half-typed regex must not raise here
+            hit = False
+    else:
+        hit = str(actual) == pattern
+    return hit != negate
+
+
+def split_pattern(value: str) -> tuple[bool, bool, str]:
+    """A stored match value taken apart: (negate, is_regex, text)."""
+    negate = value.startswith('!')
+    if negate:
+        value = value[1:]
+    is_regex = value.startswith('~')
+    if is_regex:
+        value = value[1:]
+    return negate, is_regex, value
+
+
+def join_pattern(negate: bool, is_regex: bool, text: str) -> str:
+    """The inverse of split_pattern — prefixes in the order PipeWire reads."""
+    return ('!' if negate else '') + ('~' if is_regex else '') + text
+
+
+def rule_matches(rule: dict, props: dict) -> bool:
+    """True when every key of the rule's match object matches (they are ANDed)."""
+    match = rule.get('match') or {}
+    if not match:
+        return False
+    return all(_value_matches(str(v), props.get(k)) for k, v in match.items())
+
+
+def matching_streams(rule: dict, streams: list) -> list:
+    """The live streams a rule covers, in the order they were reported."""
+    return [s for s in streams if rule_matches(rule, s.props)]
+
+
+def apply_rule_to_streams(rule: dict, streams: list, nodes: list) -> int:
+    """Move every already-running stream the rule matches onto its target.
+
+    stream.rules are read by a client when it *creates* a stream, so a new
+    or edited rule otherwise does nothing until the app is restarted — the
+    single most common "it didn't work". Applying it to what is already
+    playing is the same move the Dashboard's device dropdown performs.
+    Returns how many streams were actually moved.
+    """
+    target = (rule.get('props') or {}).get('target.object')
+    if not target or not rule_enabled(rule):
+        return 0
+    node = next((n for n in nodes if n.name == target), None)
+    if node is None:                      # target unplugged — nothing to do
+        return 0
+    moved = 0
+    for s in matching_streams(rule, streams):
+        if s.target_id == node.id:        # already there
+            continue
+        if pw.move_stream(s.id, node.serial):
+            moved += 1
+    return moved
+
+
+def rule_problem(index: int, rules_list: list, nodes: list) -> str:
+    """Why a rule will not do anything, in a few words, or '' if it is fine.
+
+    Deliberately reports rather than repairs: silently dropping a rule whose
+    device is unplugged would throw the user's routing away the first time
+    they undocked a laptop.
+    """
+    rule = rules_list[index]
+    if not rule_enabled(rule):
+        return ''                          # the switch already says so
+    match = rule.get('match') or {}
+    for earlier in rules_list[:index]:
+        if rule_enabled(earlier) and (earlier.get('match') or {}) == match:
+            return 'overridden by an identical rule above'
+    target = (rule.get('props') or {}).get('target.object')
+    if target and not any(n.name == target for n in nodes):
+        return 'target device not connected'
+    return ''
+
+
+def stream_match(stream) -> dict:
+    """The match object identifying one running stream's application.
+
+    Same preference order the rule dialog uses when you pick a running app:
+    the friendly application name, else the binary, else the node name.
+    """
+    props = getattr(stream, 'props', {}) or {}
+    for key in ('application.name', 'application.process.binary', 'node.name'):
+        value = props.get(key)
+        if value:
+            return {key: value,
+                    'media.class': getattr(stream, 'media_class', '')}
+    return {}
+
+
+def bind_stream_to_node(stream, node_name: str) -> dict:
+    """Persist "this app plays into that node" as an application rule.
+
+    Sending an app somewhere is otherwise a live `target.object` write that
+    is gone at the next restart — this is what makes it stick. Any other
+    actions already set for the same app (auto-connect, pin) are preserved.
+    """
+    match = stream_match(stream)
+    if not match or not match.get('media.class'):
+        return {}
+    existing = next((r for r in app_rules() if r.get('match') == match), None)
+    props = dict((existing or {}).get('props') or {})
+    props['target.object'] = node_name
+    upsert_app_rule(match, props, old_match=match,
+                    enabled=rule_enabled(existing or {}))
+    return match
+
+
+def stream_is_bound(stream, node_name: str) -> bool:
+    """True when a live rule already sends this app to that node."""
+    props = getattr(stream, 'props', {}) or {}
+    return any(rule_enabled(r) and rule_matches(r, props) and
+               (r.get('props') or {}).get('target.object') == node_name
+               for r in app_rules())
+
+
+def unbind_stream(stream) -> bool:
+    """Drop the persistent destination for this app, keeping its other actions.
+
+    The rule goes away entirely if the destination was all it had, so
+    un-keeping an app leaves nothing behind to puzzle over later.
+    """
+    match = stream_match(stream)
+    rule = next((r for r in app_rules() if r.get('match') == match), None)
+    if rule is None:
+        return False
+    props = dict(rule.get('props') or {})
+    if props.pop('target.object', None) is None:
+        return False
+    upsert_app_rule(match, props, old_match=match,
+                    enabled=rule_enabled(rule))
+    return True
+
+
+def upsert_app_rule(match: dict, props: dict, old_match: dict | None = None,
+                    enabled: bool = True):
+    """Add or replace one application rule.
+
+    `match` is a whole match object, not a single key: PipeWire requires
+    *all* of its keys to match, so an app key plus media.class addresses one
+    direction of one app. Two such rules coexist, which is the point.
+
+    `old_match` is the match the rule had before an edit. Pass it whenever
+    the dialog could have changed the match itself — otherwise editing a
+    rule's app name or direction appends a second rule and leaves the
+    original behind.
+    """
+    match = {k: v for k, v in match.items() if v}
+    data = load()
+    stale = [m for m in (match, old_match) if m]
+    data['apps'] = [r for r in data['apps'] if r.get('match') not in stale]
+    if props and match:
+        entry = {'match': match, 'props': props}
+        # Only written when off, so an untouched rules.json keeps its shape
+        # and a rule that predates the switch is still read as enabled.
+        if not enabled:
+            entry['enabled'] = False
+        data['apps'].append(entry)
     save(data)
 
 
@@ -288,7 +494,7 @@ def stream_rules() -> list[dict]:
     for rule in app_rules():
         match = rule.get('match') or {}
         props = dict(rule.get('props') or {})
-        if not match or not props:
+        if not match or not props or not rule_enabled(rule):
             continue
         out.append({'matches': [match],
                     'actions': {'update-props': props}})

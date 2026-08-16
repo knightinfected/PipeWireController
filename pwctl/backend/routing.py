@@ -13,6 +13,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from . import graph, pw
 from .config import XDG_CONFIG
@@ -98,6 +99,45 @@ def save(name: str) -> dict:
     return snap
 
 
+def update(snap: dict) -> dict:
+    """Re-capture the live graph over an existing snapshot, in place.
+
+    Deliberately writes `snap['_path']` rather than re-deriving the filename
+    from the name: `_slug` is lossy, so a snapshot whose stored name has since
+    drifted from its filename would be *duplicated* by save() instead of
+    updated. Falls back to the slug path only when the snapshot has no `_path`
+    (i.e. it never came off disk).
+    """
+    ensure_dirs()
+    name = snap.get('name') or 'snapshot'
+    fresh = capture(name)
+    dest = Path(snap.get('_path') or (ROUTING_DIR / f'{_slug(name)}.json'))
+    atomic_write(dest, json.dumps(fresh, indent=2) + '\n')
+    fresh['_path'] = str(dest)
+    return fresh
+
+
+def find_by_name(name: str) -> dict | None:
+    """The snapshot that saving under `name` would overwrite, or None.
+
+    Matched on the filename first, because that is what actually collides:
+    `_slug` is lossy, so "My Setup" and "my setup" are the same file and one
+    would silently replace the other. The second pass catches a snapshot whose
+    stored name matches but whose file has drifted from it — saving would not
+    destroy that one, but it would leave two entries with the same name in the
+    list, so it is worth offering to replace it in place instead.
+    """
+    dest = str(ROUTING_DIR / f'{_slug(name)}.json')
+    snaps = list_snapshots()
+    for s in snaps:
+        if s.get('_path') == dest:
+            return s
+    for s in snaps:
+        if _slug(s.get('name') or '') == _slug(name):
+            return s
+    return None
+
+
 def list_snapshots() -> list[dict]:
     ensure_dirs()
     out = []
@@ -113,7 +153,6 @@ def list_snapshots() -> list[dict]:
 
 
 def delete(snap: dict):
-    from pathlib import Path
     p = Path(snap.get('_path', ''))
     if p.is_file():
         p.unlink()
@@ -125,7 +164,6 @@ def export(snap: dict, dest_path):
 
 
 def import_file(path) -> dict:
-    from pathlib import Path
     data = json.loads(Path(path).read_text())
     if data.get('format') != FORMAT:
         raise ValueError('not a PipeWire Controller routing snapshot')

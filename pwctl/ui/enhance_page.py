@@ -13,7 +13,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
-from ..backend import chains, enhance, prefs, pw
+from ..backend import chains, enhance, prefs, pw, rules
 from ..backend.surround import LAYOUTS as _SPEAKER_LAYOUTS
 from .volume import make_volume
 from .widgets import async_call, combine_devices, confirm, esc, group, \
@@ -316,6 +316,19 @@ class EnhancePage:
             row.add_prefix(self._stream_icon(s))
             if bypassed:
                 row.add_suffix(pill('bypassed', 'dim'))
+            # Routing an app here is a live relink and dies with the session.
+            # This pins it with an application rule so it comes back on its
+            # own; off by default, so nothing changes unless it is pressed.
+            kept = rules.stream_is_bound(s, node.name)
+            keep = Gtk.ToggleButton(icon_name='view-pin-symbolic',
+                                    active=kept, valign=Gtk.Align.CENTER,
+                                    css_classes=['flat'],
+                                    tooltip_text='Keep sending this app here, '
+                                                 'including after a restart')
+            keep.connect('toggled',
+                         lambda b, st=s, nn=node.name: self._keep_app(st, nn,
+                                                                      b))
+            row.add_suffix(keep)
             row.add_suffix(icon_button(
                 'window-close-symbolic', 'Stop sending this app here',
                 lambda *_, st=s: self._unroute(enh, st)))
@@ -367,6 +380,28 @@ class EnhancePage:
                               else 'Could not route that app')
             GLib.timeout_add(500, lambda: (self.refresh(), False)[1])
         async_call(lambda: pw.move_stream(s.id, node.serial), done)
+
+    def _keep_app(self, s, node_name, button):
+        # No `updating` guard needed: the button's initial state is set as a
+        # construct property, before 'toggled' is connected, and nothing sets
+        # it programmatically afterwards — the row is rebuilt instead.
+        keep = button.get_active()
+
+        def work():
+            if keep:
+                return bool(rules.bind_stream_to_node(s, node_name))
+            return rules.unbind_stream(s)
+
+        def done(done_ok, error):
+            if error:
+                self.window.toast(f'Failed: {error}')
+            elif keep:
+                self.window.toast(f'{s.name} will come back here' if done_ok
+                                  else 'Could not identify that app')
+            else:
+                self.window.toast(f'{s.name} is no longer kept here')
+            self.window.flag_restart('pulse')
+        async_call(work, done)
 
     def _unroute(self, enh, s):
         """Send one app back to the equalizer's output device."""

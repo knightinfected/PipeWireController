@@ -80,6 +80,41 @@ picker, because nobody can usefully select one. Signal Paths still shows them
 “Equalize everything” and “Subwoofer and satellites” are both built this way
 now, so neither adds anything to your device list.
 
+**App Policy bug fixes and additions- rules now have a direction, plus snapshot
+updates and a launch fix**
+
+- **Bug: an app can now have an output *and* an input rule.** Previously, adding the second
+  one used to silently replace the first. Rules now have a direction, so a VoIP app
+  can be routed to your speakers while also being assigned a microphone, and the
+  dialog says which direction it is setting instead of listing every endpoint
+  and leaving you to guess
+  ([#7](https://github.com/knightinfected/PipeWireController/issues/7)).
+  Existing rules keep working, covering both directions.
+- **Rules now apply to apps that are already playing** — saving one moves what
+  is playing to match, and **Apply now** does the same for every rule at once.
+  Before, a new rule did nothing until you restarted the app.
+- **Added a switch to turn a rule off** without deleting it, for finding out
+  whether a rule is the one misbehaving.
+- **Rules that cannot do anything now say so** — an unplugged device, or a rule
+  sitting under an identical one that already wins, is flagged in the list.
+- **Added pinning for apps sent to a signal path or an equalizer**, so they come
+  back on their own after a restart. Right-click the app on a Signal Paths card,
+  or press the pin on the Equalizer page.
+- **Added pattern and inverted matching** for application rules, shown when
+  Advanced is on — match a regular expression like `^(firefox|chromium)$`, or
+  invert a rule to mean "every app except this one".
+- **Added Update for patchbay snapshots** — save the current patchbay over an
+  existing one, instead of deleting it and typing the name again
+  ([#5](https://github.com/knightinfected/PipeWireController/issues/5)). Saving
+  over one by name now asks first; it used to replace it silently.
+- **Bug: the app would not start on a clean install** —
+  `ModuleNotFoundError: No module named 'cairo'`. pycairo is needed for the
+  patchbay, meters and signal-path wires, but it is only an optional dependency
+  of python-gobject. Now a dependency of the AUR package (0.5.0-2) and listed in
+  the README. Affected every release since v0.4.0.
+
+---
+
 ## [v0.5.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.5.0) — 2026-08-10
 
 **Renamed the package, the command and the desktop entry — the app is still

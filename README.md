@@ -338,7 +338,7 @@ dependencies manually:
 
 ```bash
 sudo pacman -S --needed pipewire wireplumber pipewire-pulse gtk4 libadwaita \
-    python-gobject python-numpy python-soundfile
+    python-gobject python-cairo python-numpy python-soundfile
 ```
 
 ### Fedora
@@ -360,7 +360,7 @@ Older releases ship a libadwaita before 1.4 and won't work.
 ### Other distros
 
 Install GTK 4 + libadwaita (≥ 1.4) with GObject introspection and
-PyGObject from your package manager, then grab the Python audio bits via
+PyGObject and pycairo from your package manager, then grab the Python audio bits via
 pip if your distro doesn't package them:
 
 ```bash

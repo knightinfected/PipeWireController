@@ -19,7 +19,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 
 from ..backend import graph, prefs, pw, routing, rules
-from .widgets import async_call, esc, icon_button, pick_file
+from .widgets import async_call, confirm, esc, icon_button, pick_file
 
 NODE_W = 200.0
 ROW_H = 18.0
@@ -785,10 +785,28 @@ class GraphPage:
         def do_save(*_a):
             name = entry.get_text().strip() or time.strftime('%Y-%m-%d %H:%M')
             self._snap_popover.popdown()
-            async_call(lambda: routing.save(name),
-                       lambda r, e: self.window.toast(
-                           f'Snapshot “{name}” saved' if not e
-                           else f'Save failed: {e}'))
+
+            def write(existing=None):
+                # Replacing goes through update() so it rewrites the file the
+                # snapshot came from; save() would re-derive the path from the
+                # name and could leave a duplicate behind (see routing.update).
+                shown = existing.get('name', name) if existing else name
+                async_call(
+                    lambda: routing.update(existing) if existing
+                    else routing.save(name),
+                    lambda r, e: self.window.toast(
+                        f'Snapshot “{shown}” saved' if not e
+                        else f'Save failed: {e}'))
+
+            clash = routing.find_by_name(name)
+            if clash is None:
+                write()
+                return
+            confirm(self.window, f'Replace “{clash.get("name", name)}”?',
+                    f'A snapshot with that name already exists, holding '
+                    f'{len(clash.get("links", []))} links. It is replaced by '
+                    'the patchbay as it is right now. This cannot be undone.',
+                    'Replace', lambda: write(clash))
         save.connect('clicked', do_save)
         entry.connect('activate', do_save)
         row.append(entry)
@@ -837,6 +855,27 @@ class GraphPage:
                                'Apply strictly (also removes links not in '
                                'the snapshot — app streams are kept)',
                                lambda *_: apply(True)))
+
+        def do_update(*_a):
+            name = snap.get('name', '?')
+            # Down first: presenting the dialog takes focus, which autohides
+            # the popover anyway — doing it explicitly keeps the order fixed
+            # whether the user confirms or cancels.
+            self._snap_popover.popdown()
+
+            def go():
+                async_call(lambda: routing.update(snap),
+                           lambda r, e: self.window.toast(
+                               f'Snapshot “{name}” updated' if not e
+                               else f'Update failed: {e}'))
+            confirm(self.window, f'Update “{name}”?',
+                    f'The {len(snap.get("links", []))} links stored in this '
+                    'snapshot are replaced by the patchbay as it is right '
+                    'now. This cannot be undone.',
+                    'Update', go)
+        row.append(icon_button('document-save-symbolic',
+                               'Update to match the current patchbay',
+                               do_update))
 
         def do_export(*_a):
             self._snap_popover.popdown()
