@@ -23,7 +23,7 @@ and commit log.
 
 ---
 
-## [v0.5.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.5.1) — 2026-08-16
+## Unreleased
 
 **Crossovers — send each band of the audio to a destination of its own**
 
@@ -79,6 +79,14 @@ picker, because nobody can usefully select one. Signal Paths still shows them
 — it draws the strips themselves, with their volume and level meter.
 “Equalize everything” and “Subwoofer and satellites” are both built this way
 now, so neither adds anything to your device list.
+
+Inserting needs **WirePlumber 0.5 or later**. Where it is older — Ubuntu 24.04
+LTS ships 0.4.17 — strips publish their own output as they always did, and the
+mode is not offered.
+
+---
+
+## [v0.5.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.5.1) — 2026-08-16
 
 **App Policy bug fixes and additions- rules now have a direction, plus snapshot
 updates and a launch fix**

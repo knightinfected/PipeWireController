@@ -45,7 +45,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 from .. import spa_json
-from . import system, virtual
+from . import pw, system, virtual
 from .chains import GEN_DIR, ensure_unit, pick_targets, would_loop
 from .config import XDG_CONFIG
 
@@ -338,6 +338,13 @@ def insertable(strip: Strip, strips=None) -> bool:
     the name has to keep meaning something selectable.
     """
     if strip.mode == 'tap' or not strip.can_insert():
+        return False
+    # An insert is a `filter.smart` one, and that is WirePlumber 0.5 and later.
+    # On 0.4 the pair is still built but never attaches to its target: the
+    # strip does nothing at all while the app claims it is in the path, which
+    # is the kind of silence nobody thinks to go looking for.  Publish a sink
+    # there instead — audible, selectable, and what the strip did before.
+    if not pw.smart_filters_supported():
         return False
     if strip.role == 'mix':
         others = strips if strips is not None else list_strips()

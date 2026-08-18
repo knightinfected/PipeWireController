@@ -35,6 +35,27 @@ def set_setting(key: str, value) -> bool:
     return rc == 0
 
 
+_SMART_FILTERS = None
+
+
+def smart_filters_supported(refresh: bool = False) -> bool:
+    """Whether WirePlumber understands `filter.smart` (0.5 and later).
+
+    Probed rather than parsed out of a version string: WirePlumber 0.5 ships a
+    `filters` metadata object unconditionally — three of its linking scripts
+    require it — so the object is there even when no smart filter is running,
+    and it is absent on 0.4.  0.4 does read `node.link-group`, so a strip built
+    for an insert still pairs up there; it just never attaches to its target,
+    which makes it a silent no-op rather than a visible failure.  Worth one
+    probe to avoid offering the mode at all.
+    """
+    global _SMART_FILTERS
+    if _SMART_FILTERS is None or refresh:
+        rc, out, _ = run(['pw-metadata', '-n', 'filters'])
+        _SMART_FILTERS = rc == 0 and 'metadata' in out
+    return _SMART_FILTERS
+
+
 def read_default_names() -> dict:
     """Default sink/source node names from the `default` metadata."""
     rc, out, _ = run(['pw-metadata', '-n', 'default'])
