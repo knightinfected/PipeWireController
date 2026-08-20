@@ -31,7 +31,7 @@ where the second half starts for the empty-state board, and is not a category.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from . import paths
 
@@ -88,14 +88,15 @@ def find_plugin(installed, patterns):
 class Step:
     """One stage a template wants, before it is matched against this machine.
 
-    An `eq` step is always buildable; an `effect` step is a wish, and
-    `patterns` is how it is granted.
+    An `eq` or `xover` step is always buildable; an `effect` step is a wish,
+    and `patterns` is how it is granted.
     """
-    kind: str                      # 'eq' | 'effect'
+    kind: str                      # 'eq' | 'xover' | 'effect'
     name: str
     preamp: float = 0.0
     bands: tuple = ()              # (type, freq, gain, q)
     patterns: tuple = ()           # effect only, most specific first
+    params: dict = field(default_factory=dict)   # xover only, see paths
 
 
 @dataclass
@@ -107,6 +108,7 @@ class Template:
     role: str                      # the strip it builds: 'source' | 'mix'
     kind: str = 'app'              # source flavour, see paths.SOURCE_KINDS
     positions: tuple = ('FL', 'FR')
+    out_positions: tuple = ()      # set only when a band leaves on its own lane
     advanced: bool = False
     steps: tuple = ()
     detail: str = ''               # the longer line, shown in the dialog
@@ -134,6 +136,9 @@ def build_stages(template: Template, installed) -> tuple[list, list]:
     for step in template.steps:
         if step.kind == 'eq':
             stages.append(_eq_stage(step))
+            continue
+        if step.kind == 'xover':
+            stages.append(paths.new_stage('xover', step.name, **step.params))
             continue
         hit = find_plugin(installed, step.patterns)
         if hit is None:
@@ -320,6 +325,23 @@ CATALOG: list = [
         steps=(Step('effect', 'Crossfeed', patterns=P_CROSSFEED),
                Step('eq', 'Tilt back', preamp=-1.0, bands=(
                    ('HSC', 8000, 1.0, 0.7),)))),
+    Template(
+        id='bass-management', title='Bass management', role='mix',
+        advanced=True, icon='view-list-symbolic',
+        positions=('FL', 'FR'), out_positions=('FL', 'FR', 'LFE'),
+        blurb='Takes the bass off your speakers and gives it to the sub.',
+        detail='A stereo mix that comes out as 2.1: everything under 80 Hz is '
+               'summed to mono and sent to the subwoofer lane, everything '
+               'above it stays on the front pair. Point this at a card with a '
+               'subwoofer output — or at a 5.1 profile — and the two bands '
+               'arrive on separate speakers. Both cross at the same frequency '
+               'with the same slope, so they add back up flat.',
+        steps=(Step('xover', 'Low band to sub',
+                    params={'mode': 'lowpass', 'freq': 80.0,
+                            'channels': ['FL', 'FR'], 'route': ['LFE']}),
+               Step('xover', 'High band to fronts',
+                    params={'mode': 'highpass', 'freq': 80.0,
+                            'channels': ['FL', 'FR']}))),
     Template(
         id='small-speakers', title='Small speakers', role='mix',
         advanced=True, icon='computer-symbolic',

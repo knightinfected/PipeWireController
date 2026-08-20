@@ -66,8 +66,13 @@ STAGE_ICON = {
     'eq': 'audio-x-generic-symbolic',
     'effect': 'applications-multimedia-symbolic',
     'convolver': 'audio-headphones-symbolic',
+    'xover': 'view-list-symbolic',
 }
 BAND_TYPES = [('PK', 'Peak'), ('LSC', 'Low shelf'), ('HSC', 'High shelf')]
+XOVER_MODES = [('lowpass', 'Low band'), ('highpass', 'High band'),
+               ('bandpass', 'Middle band')]
+XOVER_SLOPES = [(12, '12 dB/oct (LR2)'), (24, '24 dB/oct (LR4)'),
+                (48, '48 dB/oct (LR8)')]
 
 # Rewriting the graph restarts the unit, so audio stops for an instant.  A
 # short delay after the last edit turns "bypass three stages" into one
@@ -700,6 +705,8 @@ class StageDialog(Adw.Window):
             g.add(self.plug_row)
             self._refresh_plugin_row()
             return g
+        if kind == 'xover':
+            return self._xover_group(p)
         if kind == 'convolver':
             g = group('Impulse response',
                       'A WAV or SOFA file. Convolution is the most expensive '
@@ -717,6 +724,124 @@ class StageDialog(Adw.Window):
             self._refresh_ir_row()
             return g
         return None
+
+    # -- crossover --------------------------------------------------------
+    # A band is two decisions, so it is two groups: what it keeps, and where
+    # it goes.  The second one is what makes this more than an equalizer —
+    # a band can leave on lanes the audio did not come in on, which is how
+    # one strip feeds a subwoofer and a pair of satellites at once.
+
+    def _xover_group(self, p):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+
+        g = group('Band', 'Linkwitz-Riley filters: two bands crossing at the '
+                          'same frequency add back up to a flat response.')
+        self.mode_row = Adw.ComboRow(
+            title='Keep', model=Gtk.StringList.new([m[1] for m in XOVER_MODES]))
+        self.mode_row.set_selected(next(
+            (i for i, m in enumerate(XOVER_MODES)
+             if m[0] == (p.get('mode') or 'lowpass')), 0))
+        g.add(self.mode_row)
+
+        self.freq_row = Adw.SpinRow(
+            title='Crossover (Hz)',
+            adjustment=_adj(20, 20000, float(p.get('freq') or 80.0), 10, 100),
+            digits=0)
+        g.add(self.freq_row)
+        self.freq_hi_row = Adw.SpinRow(
+            title='Upper crossover (Hz)',
+            subtitle='The top of the band.',
+            adjustment=_adj(20, 20000, float(p.get('freq_hi') or 2000.0),
+                            10, 100), digits=0)
+        g.add(self.freq_hi_row)
+
+        self.slope_row = Adw.ComboRow(
+            title='Slope',
+            subtitle='How sharply the band stops. Steeper keeps the bands out '
+                     'of each other’s way; gentler sounds more natural through '
+                     'the crossover.',
+            model=Gtk.StringList.new([s[1] for s in XOVER_SLOPES]))
+        self.slope_row.set_selected(next(
+            (i for i, s in enumerate(XOVER_SLOPES)
+             if s[0] == int(p.get('slope') or paths.DEFAULT_SLOPE)), 1))
+        g.add(self.slope_row)
+        box.append(g)
+
+        a = group('Alignment', 'Drivers are rarely the same distance away or '
+                               'wired the same way round — this is where that '
+                               'is corrected.')
+        self.xgain_row = Adw.SpinRow(
+            title='Level (dB)',
+            adjustment=_adj(-24, 12, float(p.get('gain') or 0.0), 0.5, 3),
+            digits=1)
+        a.add(self.xgain_row)
+        self.xdelay_row = Adw.SpinRow(
+            title='Delay (ms)',
+            subtitle='1 ms ≈ 34 cm. Delay the closer driver, not the far one.',
+            adjustment=_adj(0, paths.MAX_DELAY_S * 1000,
+                            float(p.get('delay') or 0.0), 0.1, 1), digits=2)
+        a.add(self.xdelay_row)
+        self.xinvert_row = Adw.SwitchRow(
+            title='Invert polarity',
+            subtitle='Flips this band over. Try it if the crossover region '
+                     'sounds hollow.')
+        self.xinvert_row.set_active(bool(p.get('invert')))
+        a.add(self.xinvert_row)
+        box.append(a)
+
+        layout = self.strip.out_layout
+        c = group('Channels',
+                  'Which lanes this band listens to, and which lanes it comes '
+                  'out on. Sending it somewhere else leaves the lanes it came '
+                  'from carrying the full range, so another band can take '
+                  'them. To gain lanes the strip hasn’t got, widen its output '
+                  'layout from the card menu.')
+        self.read_chips = self._lane_chips(
+            c, 'Listens to', layout, p.get('channels') or [])
+        self.route_chips = self._lane_chips(
+            c, 'Comes out on', layout, p.get('route') or [])
+        box.append(c)
+
+        def retitle(*_a):
+            mode = XOVER_MODES[self.mode_row.get_selected()][0]
+            self.freq_hi_row.set_visible(mode == 'bandpass')
+            self.freq_row.set_title(
+                'Lower crossover (Hz)' if mode == 'bandpass'
+                else 'Crossover (Hz)')
+            self.freq_row.set_subtitle(
+                {'lowpass': 'Everything above this is cut.',
+                 'highpass': 'Everything below this is cut.',
+                 'bandpass': 'The bottom of the band.'}[mode])
+        self.mode_row.connect('notify::selected', retitle)
+        retitle()
+        return box
+
+    def _lane_chips(self, grp, title, layout, chosen):
+        """A row of channel toggles; nothing ticked means "all of them"."""
+        from ..backend.surround import SPEAKER_NAMES
+        row = Adw.ActionRow(title=title, subtitle='')
+        wrap = Adw.WrapBox(child_spacing=6, line_spacing=6,
+                           valign=Gtk.Align.CENTER, margin_top=8,
+                           margin_bottom=8)
+        chips = {}
+        for pos in layout:
+            b = chip(pos, SPEAKER_NAMES.get(pos, pos), None,
+                     active=pos in chosen, toggle=True)
+            chips[pos] = b
+            wrap.append(b)
+
+        def note(*_a):
+            on = [p for p, b in chips.items() if b.get_active()]
+            row.set_subtitle('Every channel' if not on else ' · '.join(on))
+        for b in chips.values():
+            b.connect('toggled', note)
+        note()
+        row.add_suffix(wrap)
+        grp.add(row)
+        return chips
+
+    def _collect_lanes(self, chips):
+        return [p for p, b in chips.items() if b.get_active()]
 
     # -- eq bands ---------------------------------------------------------
     def _add_band(self, band=None):
@@ -853,6 +978,22 @@ class StageDialog(Adw.Window):
         if kind == 'eq':
             p['preamp'] = round(self.preamp.get_value(), 2)
             p['bands'] = self._collect_bands()
+        elif kind == 'xover':
+            mode = XOVER_MODES[self.mode_row.get_selected()][0]
+            freq = round(self.freq_row.get_value(), 1)
+            freq_hi = round(self.freq_hi_row.get_value(), 1)
+            if mode == 'bandpass' and freq_hi <= freq:
+                self.window.toast('The upper crossover has to sit above the '
+                                  'lower one')
+                return
+            p.update({
+                'mode': mode, 'freq': freq, 'freq_hi': freq_hi,
+                'slope': XOVER_SLOPES[self.slope_row.get_selected()][0],
+                'gain': round(self.xgain_row.get_value(), 2),
+                'delay': round(self.xdelay_row.get_value(), 3),
+                'invert': self.xinvert_row.get_active(),
+                'channels': self._collect_lanes(self.read_chips),
+                'route': self._collect_lanes(self.route_chips)})
         elif kind == 'convolver':
             p['gain'] = round(self.gain_row.get_value(), 3)
             if not p.get('filename'):
@@ -914,6 +1055,13 @@ class PathsPage:
         add_mix.set_child(Adw.ButtonContent(icon_name='list-add-symbolic',
                                             label='Mix', can_shrink=True))
         add_mix.connect('clicked', lambda *_: self._new_strip('mix'))
+        add_xov = Gtk.Button(
+            tooltip_text='A crossover splits the audio by frequency and '
+                         'sends each band to its own destination')
+        add_xov.set_child(Adw.ButtonContent(icon_name='view-list-symbolic',
+                                            label='Crossover',
+                                            can_shrink=True))
+        add_xov.connect('clicked', lambda *_: self._new_xover())
         # Its own colour, because it does something of a different order from
         # the two beside it: those add an empty strip, this one arrives with a
         # chain already in it.
@@ -934,6 +1082,7 @@ class PathsPage:
         toolbar = Gtk.Box(spacing=8, css_classes=['path-toolbar'])
         toolbar.append(self.summary)
         toolbar.append(tpl)
+        toolbar.append(add_xov)
         toolbar.append(add_mix)
         toolbar.append(add_src)
         toolbar.append(more)
@@ -965,8 +1114,16 @@ class PathsPage:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
                       margin_top=18, margin_bottom=36,
                       margin_start=16, margin_end=16)
+        # Crossovers sit above the two columns, full width, because that is
+        # what they are: not a source and not a mix, but the thing in between
+        # that takes what plays and hands each band of it to a destination.
+        # They connect to devices rather than to strips, so drawing them as a
+        # third column with no wires reaching it would say the wrong thing.
+        self.xover_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                  spacing=12)
         box.append(toolbar)
         box.append(self.quick)
+        box.append(self.xover_body)
         box.append(self.board)
         # 1600 let each column grow past 700px on a wide screen, which a card
         # has nothing to do with: the name sits in the first third and the
@@ -1050,6 +1207,10 @@ class PathsPage:
         ('camera-video-symbolic', 'Speakers and a stream mix',
          'One chain into your speakers, a second into a virtual output that '
          'OBS or Discord can capture.', '_quick_stream'),
+        ('view-list-symbolic', 'Subwoofer and satellites',
+         'A crossover: the low band goes to one output, everything above it '
+         'to another. Your output stays what it is — nothing new to select.',
+         '_quick_crossover'),
         ('audio-headphones-symbolic', 'Headphones and speakers',
          'A speaker mix carrying the audio and a headphone mix with its own '
          'tilt waiting beside it. Switch with one click.',
@@ -1197,7 +1358,9 @@ class PathsPage:
 
         def collect():
             dump = pw.pw_dump()
-            nodes = pw.list_audio_nodes(dump)
+            # Inserts included: this page draws the strips themselves, and an
+            # inserted strip still has a volume and a level meter to show.
+            nodes = pw.list_audio_nodes(dump, inserts=True)
             streams = [s for s in pw.list_streams(dump) if s.is_playback
                        and not s.props.get('node.name', '').startswith('pwctl.')]
             strips = paths.list_strips()
@@ -1215,7 +1378,12 @@ class PathsPage:
         """
         return (
             tuple((s.id, s.role, s.order, s.name, s.kind, s.enabled,
-                   s.channels, tuple(s.sends), tuple(s.outputs),
+                   s.channels, s.out_channels, tuple(s.sends),
+                   tuple(s.outputs), s.mode, s.insert_into,
+                   tuple((b.get('id'), b.get('name'), b.get('lo'),
+                          b.get('hi'), b.get('mute'), tuple(b.get('outputs')
+                                                            or ()))
+                         for b in s.bands),
                    tuple((st.get('id'), st.get('name'), st.get('kind'),
                           bool(st.get('bypass'))) for st in s.stages))
                   for s in self._strips),
@@ -1253,7 +1421,7 @@ class PathsPage:
         self._cards = {}
         self._chips = {}
         self._rails = {}
-        for body in (self.src_body, self.mix_body):
+        for body in (self.src_body, self.mix_body, self.xover_body):
             child = body.get_first_child()
             while child is not None:
                 nxt = child.get_next_sibling()
@@ -1262,6 +1430,11 @@ class PathsPage:
 
         srcs = paths.sources(self._strips)
         mixes = paths.mixes(self._strips)
+        xovers = paths.crossovers(self._strips)
+        for x in xovers:
+            card = self._xover_card(x)
+            self._cards[x.id] = card
+            self.xover_body.append(card)
         empty = not self._strips
         self.quick.set_visible(empty)
         self.board.set_visible(not empty)
@@ -1467,10 +1640,18 @@ class PathsPage:
                           css_classes=['heading'],
                           ellipsize=Pango.EllipsizeMode.END)
         line.append(title)
-        tag = Gtk.Label(label=_layout_name(strip.channels),
-                        css_classes=['path-tag'], valign=Gtk.Align.CENTER)
-        tag.set_tooltip_text(f'{strip.channels} channels: '
-                             + ' '.join(strip.positions))
+        # A split strip carries two layouts, and which one it comes out as is
+        # the more surprising of the two, so both are on the tag.
+        split = strip.out_channels != strip.channels
+        tag = Gtk.Label(
+            label=(f'{_layout_name(strip.channels)} → '
+                   f'{_layout_name(strip.out_channels)}') if split
+            else _layout_name(strip.channels),
+            css_classes=['path-tag'], valign=Gtk.Align.CENTER)
+        tag.set_tooltip_text(
+            f'In: {" ".join(strip.positions)}\n'
+            f'Out: {" ".join(strip.out_layout)}' if split
+            else f'{strip.channels} channels: ' + ' '.join(strip.positions))
         line.append(tag)
         if strip.enabled and state == 'failed':
             line.append(pill('failed', state_style(state)))
@@ -1526,6 +1707,10 @@ class PathsPage:
              lambda s=strip: self._rename(s)),
             ('media-playlist-repeat-symbolic', 'Channel layout…',
              lambda s=strip: self._pick_layout(s)),
+            ('object-flip-horizontal-symbolic', 'Output layout…',
+             lambda s=strip: self._pick_out_layout(s)),
+            ('insert-link-symbolic', 'How it connects…',
+             lambda s=strip: self._pick_mode(s)),
             None,
             ('edit-copy-symbolic', 'Duplicate',
              lambda s=strip: self._duplicate(s)),
@@ -1543,10 +1728,282 @@ class PathsPage:
             base = KIND_BLURB.get(strip.kind, 'A source')
             return f'{base} → {dest}' if dest \
                 else f'{base} → the default output'
+        # An inserted mix has no feeder and never will: it sits inside the
+        # device's own path.  Saying "nothing feeds this" would read as a
+        # fault, so each mode states what it is instead.
+        if strip.mode == 'insert':
+            dev = strip.insert_device()
+            return ('Inside ' + self._device_label(dev)) if dev \
+                else 'Inside the default output'
+        if strip.mode == 'tap':
+            src = next((s.name for s in self._strips
+                        if s.node_name == strip.tap_source), '')
+            dev = strip.insert_device()
+            out = self._device_label(dev) if dev else 'the default output'
+            return f'Copy of {src} → {out}' if src else f'A copy → {out}'
         feeders = [s.name for s in paths.sources(self._strips)
                    if strip.id in s.sends]
         return ('Fed by ' + ', '.join(feeders)) if feeders \
             else 'Nothing feeds this yet'
+
+    # ------------------------------------------------------ crossover card --
+    # One card, one table: a row per band, each row saying what it keeps and
+    # where that goes.  The whole point of the object is that those two facts
+    # sit side by side and can be changed independently, so the card refuses
+    # to hide either of them behind a dialog.
+
+    def _xover_card(self, strip):
+        state = self._states.get(strip.id, 'inactive')
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                       css_classes=['path-card', 'k-xover'])
+
+        head = Gtk.Box(spacing=10)
+        head.append(avatar('view-list-symbolic', 'xover'))
+        names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1,
+                        hexpand=True, valign=Gtk.Align.CENTER)
+        line = Gtk.Box(spacing=6)
+        line.append(Gtk.Label(label=esc(strip.name), xalign=0,
+                              css_classes=['heading']))
+        line.append(Gtk.Label(label=f'{len(strip.bands)} bands',
+                              css_classes=['path-tag'],
+                              valign=Gtk.Align.CENTER))
+        if strip.enabled and state == 'failed':
+            line.append(pill('failed', state_style(state)))
+        names.append(line)
+        dev = strip.insert_into
+        names.append(Gtk.Label(
+            label=esc('In front of ' + (self._device_label(dev) if dev
+                                        else 'the default output')),
+            xalign=0, css_classes=['dim-label', 'caption'],
+            ellipsize=Pango.EllipsizeMode.END))
+        head.append(names)
+
+        dot = Gtk.Box(css_classes=['path-dot'], valign=Gtk.Align.CENTER)
+        if strip.enabled and state == 'active':
+            dot.add_css_class('on')
+        elif strip.enabled and state == 'failed':
+            dot.add_css_class('err')
+        elif strip.enabled:
+            dot.add_css_class('busy')
+        head.append(dot)
+        sw = Gtk.Switch(active=strip.enabled, valign=Gtk.Align.CENTER,
+                        tooltip_text='Turn this crossover on or off')
+        sw.connect('state-set', self._toggle, strip)
+        head.append(sw)
+        more = Gtk.MenuButton(icon_name='view-more-symbolic',
+                              css_classes=['flat'], valign=Gtk.Align.CENTER)
+        more.set_popover(menu_popover([
+            ('document-edit-symbolic', 'Rename…',
+             lambda s=strip: self._rename(s)),
+            ('audio-speakers-symbolic', 'Sits in front of…',
+             lambda s=strip: self._pick_insert_into(s)),
+            None,
+            ('user-trash-symbolic', 'Delete',
+             lambda s=strip: self._delete(s), 'destructive-flat'),
+        ]))
+        head.append(more)
+        card.append(head)
+
+        for band in strip.bands:
+            card.append(self._band_row(strip, band))
+
+        add = Gtk.Button(css_classes=['flat', 'path-ghost'])
+        inner = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER)
+        inner.append(Gtk.Image.new_from_icon_name('list-add-symbolic'))
+        inner.append(Gtk.Label(label='Add a band'))
+        add.set_child(inner)
+        add.connect('clicked', lambda *_: self._add_band_row(strip))
+        card.append(add)
+        return card
+
+    def _band_row(self, strip, band):
+        row = Gtk.Box(spacing=8, css_classes=['path-band'])
+
+        edit = Gtk.Button(css_classes=['path-stage', 'k-xover'],
+                          valign=Gtk.Align.CENTER,
+                          tooltip_text='Change what this band keeps')
+        inner = Gtk.Box(spacing=6)
+        inner.append(Gtk.Image.new_from_icon_name('view-list-symbolic'))
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        text.append(Gtk.Label(label=esc(band.get('name') or 'Band'), xalign=0))
+        text.append(Gtk.Label(label=paths.band_label(band), xalign=0,
+                              css_classes=['dim-label', 'caption']))
+        inner.append(text)
+        edit.set_child(inner)
+        if band.get('mute'):
+            edit.add_css_class('path-stage-off')
+        edit.connect('clicked', lambda *_: self._edit_band(strip, band))
+        row.append(edit)
+
+        row.append(Gtk.Image.new_from_icon_name('go-next-symbolic'))
+
+        chips = []
+        for dev in band.get('outputs') or []:
+            chips.append(chip(self._device_label(dev),
+                              'Stop sending this band here',
+                              lambda _b, s=strip, bd=band, d=dev:
+                              self._drop_band_dest(s, bd, d),
+                              icon='window-close-symbolic', active=True))
+        chips.append(chip('Add a destination', 'Where this band is played',
+                          lambda _b, s=strip, bd=band:
+                          self._add_band_dest(s, bd),
+                          icon='list-add-symbolic'))
+        wrap = Adw.WrapBox(child_spacing=6, line_spacing=6, hexpand=True,
+                           valign=Gtk.Align.CENTER)
+        for c in chips:
+            wrap.append(c)
+        row.append(wrap)
+
+        rm = icon_button('user-trash-symbolic', 'Remove this band',
+                         lambda *_: self._drop_band(strip, band))
+        rm.set_valign(Gtk.Align.CENTER)
+        row.append(rm)
+        return row
+
+    # -- crossover editing -------------------------------------------------
+    def _new_xover(self):
+        def make(name):
+            if not name:
+                return
+            dev = self._default_sink_name()
+            x = paths.new_strip(name, 'xover', insert_into=dev)
+            x.enabled = False
+            paths.save_meta(x)
+            self.refresh()
+            self.window.toast(f'“{name}” added — give each band a destination, '
+                              'then turn it on')
+        prompt_text(self.window, 'New crossover',
+                    'It sits in front of an output and hands each band of the '
+                    'audio to a destination of your choosing.',
+                    'Crossover', make, action='Add')
+
+    def _add_band_row(self, strip):
+        # A new band starts where the last one ended, so adding rows walks up
+        # the spectrum instead of stacking bands on top of each other.
+        top = max([float(b.get('hi') or 0) for b in strip.bands] or [0.0])
+        edge = max([float(b.get('lo') or 0) for b in strip.bands] + [top])
+        strip.bands = [*strip.bands,
+                       paths.new_band(f'Band {len(strip.bands) + 1}',
+                                      lo=edge or 80.0)]
+        self._save_and_apply(strip)
+
+    def _drop_band(self, strip, band):
+        strip.bands = [b for b in strip.bands if b['id'] != band['id']]
+        self._save_and_apply(strip)
+
+    def _drop_band_dest(self, strip, band, dev):
+        band['outputs'] = [d for d in band.get('outputs') or [] if d != dev]
+        self._save_and_apply(strip)
+
+    def _add_band_dest(self, strip, band):
+        taken = set(band.get('outputs') or [])
+        items = [(n.name, n.description, n.name) for n in self._nodes
+                 if n.is_sink and n.name not in taken
+                 and not n.name.startswith('pwctl.')]
+
+        def picked(dev):
+            band['outputs'] = [*(band.get('outputs') or []), dev]
+            self._save_and_apply(strip)
+        search_picker(self.window, f"Where does “{band.get('name')}” play?",
+                      'The band is sent here. Give a band several '
+                      'destinations and it plays on all of them; give two '
+                      'bands the same one and they are summed.',
+                      items, picked, empty='No output devices found')
+
+    def _pick_insert_into(self, strip):
+        """The output the crossover stands in front of.
+
+        Everything heading for that device goes through the crossover first,
+        which is what makes it intermediate: the device stays the output apps
+        play to, and the bands decide where the audio actually ends up.
+        """
+        items = [('', 'The default output',
+                  'Follows whatever output is current')]
+        items += [(n.name, n.description, n.name) for n in self._nodes
+                  if n.is_sink and not n.name.startswith('pwctl.')]
+
+        def picked(dev):
+            strip.insert_into = dev
+            self._save_and_apply(strip)
+        search_picker(self.window, 'Sits in front of',
+                      'Audio on its way to this output is split by the '
+                      'crossover before it gets there.', items, picked)
+
+    def _edit_band(self, strip, band):
+        dlg = Adw.Window(title=band.get('name') or 'Band',
+                         transient_for=self.window, modal=True,
+                         default_width=520, default_height=620)
+        g = group('Band', 'Leave an edge at 0 for "no limit on that side": '
+                          '0 to 80 is a subwoofer band, 80 to 0 is everything '
+                          'above it.')
+        name = Adw.EntryRow(title='Name')
+        name.set_text(band.get('name') or '')
+        g.add(name)
+        lo = Adw.SpinRow(title='From (Hz)', subtitle='0 = no lower limit',
+                         adjustment=_adj(0, 20000, float(band.get('lo') or 0),
+                                         10, 100), digits=0)
+        hi = Adw.SpinRow(title='To (Hz)', subtitle='0 = no upper limit',
+                         adjustment=_adj(0, 20000, float(band.get('hi') or 0),
+                                         10, 100), digits=0)
+        g.add(lo)
+        g.add(hi)
+        slope = Adw.ComboRow(
+            title='Slope', subtitle='How sharply the band stops.',
+            model=Gtk.StringList.new([s[1] for s in XOVER_SLOPES]))
+        slope.set_selected(next((i for i, s in enumerate(XOVER_SLOPES)
+                                 if s[0] == int(band.get('slope') or 24)), 1))
+        g.add(slope)
+
+        a = group('Alignment', 'Drivers are rarely the same distance away or '
+                               'wired the same way round.')
+        gain = Adw.SpinRow(title='Level (dB)',
+                           adjustment=_adj(-24, 12, float(band.get('gain') or 0),
+                                           0.5, 3), digits=1)
+        delay = Adw.SpinRow(
+            title='Delay (ms)', subtitle='1 ms ≈ 34 cm.',
+            adjustment=_adj(0, paths.MAX_DELAY_S * 1000,
+                            float(band.get('delay') or 0), 0.1, 1), digits=2)
+        invert = Adw.SwitchRow(title='Invert polarity')
+        invert.set_active(bool(band.get('invert')))
+        mute = Adw.SwitchRow(title='Mute this band',
+                             subtitle='Keeps the row, takes it out of the '
+                                      'signal.')
+        mute.set_active(bool(band.get('mute')))
+        for r in (gain, delay, invert, mute):
+            a.add(r)
+
+        def save(_b):
+            lov, hiv = round(lo.get_value()), round(hi.get_value())
+            if lov and hiv and hiv <= lov:
+                self.window.toast('“To” has to sit above “From”')
+                return
+            band.update({'name': name.get_text().strip() or 'Band',
+                         'lo': float(lov), 'hi': float(hiv),
+                         'slope': XOVER_SLOPES[slope.get_selected()][0],
+                         'gain': round(gain.get_value(), 2),
+                         'delay': round(delay.get_value(), 3),
+                         'invert': invert.get_active(),
+                         'mute': mute.get_active()})
+            dlg.close()
+            self._save_and_apply(strip)
+
+        ok = Gtk.Button(label='Save', halign=Gtk.Align.END, margin_top=12,
+                        css_classes=['suggested-action', 'pill'])
+        ok.connect('clicked', save)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
+                      margin_top=12, margin_bottom=24,
+                      margin_start=18, margin_end=18)
+        box.append(g)
+        box.append(a)
+        box.append(ok)
+        sw = Gtk.ScrolledWindow(vexpand=True,
+                                hscrollbar_policy=Gtk.PolicyType.NEVER)
+        sw.set_child(Adw.Clamp(maximum_size=520, child=box))
+        view = Adw.ToolbarView()
+        view.add_top_bar(Adw.HeaderBar())
+        view.set_content(sw)
+        dlg.set_content(view)
+        dlg.present()
 
     # -- chain rail --------------------------------------------------------
     def _rail(self, strip):
@@ -1726,6 +2183,8 @@ class PathsPage:
                       margin_start=6, margin_end=6)
         for kind, label, sub in (
             ('eq', 'Equalizer', 'Bands you can move while it plays'),
+            ('xover', 'Crossover', 'Split the audio by frequency and send '
+                                   'each band its own way'),
             ('effect', 'Plugin', 'Any LADSPA or LV2 on this system'),
             ('convolver', 'Convolver', 'An impulse response file'),
         ):
@@ -2177,7 +2636,8 @@ class PathsPage:
 
     def _add_stage(self, strip, kind):
         stage = paths.new_stage(kind, {'eq': 'Equalizer', 'effect': 'Plugin',
-                                       'convolver': 'Convolver'}[kind])
+                                       'convolver': 'Convolver',
+                                       'xover': 'Crossover'}[kind])
         if kind == 'eq':
             stage['params'] = {'preamp': 0.0, 'bands': [
                 {'on': True, 'type': 'PK', 'freq': f, 'gain': 0.0, 'q': 1.0}
@@ -2251,6 +2711,66 @@ class PathsPage:
         search_picker(self.window, 'Channel layout',
                       'How many channels this strip carries. Every stage is '
                       'built across all of them.', items, picked)
+
+    def _pick_out_layout(self, strip):
+        """What comes out, when that is not what went in.
+
+        Only a crossover has a reason to change this: routing the low band to
+        lanes of its own needs lanes of its own to exist.  Everything else is
+        happier with the two layouts kept the same, which is why "same as the
+        input" sits at the top and is what every strip starts as.
+        """
+        from ..backend import surround
+        layouts = [('mono', 'Mono 1.0', ['FL'])] + list(surround.LAYOUTS)
+        items = [([], 'Same as the input', ' '.join(strip.positions))]
+        items += [(pos, label, ' '.join(pos)) for _k, label, pos in layouts]
+
+        def picked(positions):
+            positions = list(positions)
+            if positions == list(strip.positions):
+                positions = []          # not a split, just the same thing
+            if positions == list(strip.out_positions):
+                return
+            strip.out_positions = positions
+            self._save_and_apply(
+                strip, f'“{strip.name}” now comes out as '
+                f'{_layout_name(strip.out_channels)}')
+        search_picker(self.window, 'Output layout',
+                      'The channels leaving this strip. Widen it to give a '
+                      'crossover band somewhere of its own to go — a stereo '
+                      'strip coming out as 2.1 can put its low band on the '
+                      'subwoofer lane.', items, picked)
+
+    def _pick_mode(self, strip):
+        """Insert into a device, or publish an output of its own.
+
+        Inserting is the quiet option and the default: the device stays the
+        thing people select, and nothing new turns up in anyone's list.  A
+        strip only needs its own output when something has to *choose* it —
+        the capture sink OBS records from, or a mix fed by a source strip.
+        """
+        items = []
+        if paths.insertable(strip, self._strips) or strip.mode == 'insert':
+            dev = strip.insert_device()
+            items.append(('insert', 'Inside the output',
+                          'Nothing new appears — it corrects '
+                          + (self._device_label(dev) if dev
+                             else 'whatever the default output is')))
+        items.append(('sink', 'Its own output',
+                      'Publishes a device others can select and play into'))
+        if strip.mode == 'tap':
+            items.append(('tap', 'A copy of another strip',
+                          'Reads what another strip is fed, plays it '
+                          'elsewhere. Set up by the crossover recipe.'))
+
+        def picked(mode):
+            if mode == strip.mode:
+                return
+            strip.mode = mode
+            self._save_and_apply(strip)
+        search_picker(self.window, 'How it connects', 'Whether this strip '
+                      'becomes part of a device’s path or an output of its '
+                      'own.', items, picked)
 
     def _delete(self, strip):
         def go():
@@ -2483,15 +3003,82 @@ class PathsPage:
         async_call(build, done)
 
     def _quick_eq_all(self):
+        """One equalizer, inside the output that is already selected.
+
+        This used to be a source and a mix, which meant two new sinks and a
+        trip to the sound settings to pick one of them.  Inserted, it is the
+        same equalizer with nothing to choose: the device stays the output
+        and every app keeps playing to it.
+        """
         stage = paths.new_stage('eq', 'Equalizer')
         stage['params'] = {'preamp': 0.0, 'bands': [
             {'on': True, 'type': 'PK', 'freq': f, 'gain': 0.0, 'q': 1.0}
             for f in (60, 250, 1000, 4000, 12000)]}
-        self._quick_pair('Everything', 'Speakers', [stage],
-                         kind='everything')
+        dev = self._default_sink_name()
+        mix = paths.new_strip('Equalizer', 'mix', mode='insert',
+                              outputs=[dev] if dev else [], stages=[stage])
+        mix.enabled = True
+
+        def done(result, e):
+            ok, err = result if result else (False, str(e or ''))
+            self.window.toast('Equalizer added to your output — nothing to '
+                              'select' if ok
+                              else f'Failed: {err or "unknown error"}')
+            self.refresh()
+        async_call(lambda: paths.apply(mix, [mix]), done)
 
     def _quick_app_fx(self):
         self._quick_pair('App', 'Speakers', [], kind='app')
+
+    def _quick_crossover(self):
+        """Two mixes crossing at 80 Hz, one per output device.
+
+        The two bands are built as a matched pair — same frequency, same
+        slope, complementary filters — because that is the part that is easy
+        to get wrong by hand and the part that has to stay true afterwards:
+        move one and the crossover region either sags or doubles up.  Which
+        device carries the low band is the only thing that cannot be guessed,
+        so it is the only thing asked.
+        """
+        dev = self._default_sink_name()
+        items = [(n.name, n.description, n.name) for n in self._nodes
+                 if n.is_sink and not n.name.startswith('pwctl.')]
+
+        def picked(sub_dev):
+            # One crossover, two bands, one destination each.  It stands in
+            # front of the output that is already selected, so no app moves
+            # and nothing new turns up to be chosen.
+            x = paths.new_strip('Crossover', 'xover', insert_into=dev,
+                                bands=[paths.new_band('Low', hi=80.0,
+                                                      outputs=[sub_dev]),
+                                       paths.new_band('High', lo=80.0,
+                                                      outputs=[dev] if dev
+                                                      else [])])
+            x.enabled = True
+            made = [x]
+
+            def build():
+                for s in made:
+                    ok, err = paths.apply(s, made)
+                    if not ok:
+                        return ok, err
+                return True, ''
+
+            def done(result, e):
+                ok, err = result if result else (False, str(e or ''))
+                self.window.toast(
+                    'Crossing at 80 Hz — your output is unchanged, open '
+                    'either band to move it'
+                    if ok else f'Failed: {err or "unknown error"}')
+                self.refresh()
+            async_call(build, done)
+
+        search_picker(self.window, 'Which output carries the low band?',
+                      'Everything below 80 Hz goes there; everything above it '
+                      'goes to your current output. Both bands are ordinary '
+                      'stages afterwards — change the frequency, the slope or '
+                      'the alignment on either one.',
+                      items, picked, empty='No output devices found')
 
     def _quick_two_outputs(self):
         """Speakers now, headphones ready beside them.
@@ -2606,6 +3193,7 @@ class PathsPage:
             stages, missing = path_templates.build_stages(tpl, installed)
             strip = paths.new_strip(tpl.title, tpl.role, kind=tpl.kind,
                                     positions=list(tpl.positions),
+                                    out_positions=list(tpl.out_positions),
                                     stages=stages)
             strip.enabled = True
             made = [strip]

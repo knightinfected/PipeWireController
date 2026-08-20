@@ -23,6 +23,69 @@ and commit log.
 
 ---
 
+## Unreleased
+
+**Crossovers — send each band of the audio to a destination of its own**
+
+A **crossover** is a new kind of object on the Signal Paths board, and it sits
+where it belongs: between what plays and what it comes out of. It stands in
+front of an output, so apps keep playing exactly where they always played, and
+it hands each band of that audio to the destinations you choose.
+
+The card is a table. One row per band, and each row says two things:
+
+| band | goes to |
+|---|---|
+| 80 Hz and below | Internal audio |
+| 80 Hz – 2 kHz | Focusrite Scarlett 2i2 |
+| 2 kHz and above | Internal audio |
+
+Add a band, drag its edges, give it as many destinations as you like. Two
+bands naming the same destination are summed. Bands use Linkwitz-Riley filters
+at 12, 24 or 48 dB/oct, so two bands meeting at one frequency add back up flat
+— and each one carries its own level, delay and polarity, because drivers are
+rarely the same distance away or wired the same way round.
+
+**Your inputs and outputs are untouched.** The crossover publishes nothing
+selectable: it attaches to the output as a `filter.smart` insert and reaches
+its other destinations through capture streams. Nothing new appears in the
+sound settings, and no app has to be repointed. One crossover is one unit,
+whatever the number of bands.
+
+The **“Subwoofer and satellites”** recipe builds a two-band crossover in one
+click. For a single card that carries the bands on different channels — a 2.1
+or 5.1 output — the **Crossover stage** and the **“Bass management”** template
+do that inside one strip instead.
+
+**Strips insert themselves into an output instead of becoming one**
+
+A strip used to publish a sink, which meant every equalizer and every
+crossover added entries to the sound settings and asked you to go and select
+one of them. A strip now has a **mode**:
+
+- **inside the output** (the new default): it attaches to a device as a
+  `filter.smart` insert. WirePlumber routes everything heading for that device
+  through the strip first. Your inputs and outputs are untouched, nothing new
+  appears anywhere, and no app is repointed.
+- **its own output**: the previous behaviour, kept for the case that needs it
+  — a bus something else has to *choose*, like the capture sink OBS records
+  from. A mix that a source strip sends to falls back to this automatically.
+- **a copy of another strip**: a capture stream, not a sink. It is how one
+  band of a crossover reaches a *second* card without an output being
+  published to carry it.
+
+Inserts are hidden from the Devices page, the dashboard and every target
+picker, because nobody can usefully select one. Signal Paths still shows them
+— it draws the strips themselves, with their volume and level meter.
+“Equalize everything” and “Subwoofer and satellites” are both built this way
+now, so neither adds anything to your device list.
+
+Inserting needs **WirePlumber 0.5 or later**. Where it is older — Ubuntu 24.04
+LTS ships 0.4.17 — strips publish their own output as they always did, and the
+mode is not offered.
+
+---
+
 ## [v0.5.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.5.1) — 2026-08-16
 
 **App Policy bug fixes and additions- rules now have a direction, plus snapshot
