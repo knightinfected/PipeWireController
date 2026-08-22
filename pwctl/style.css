@@ -811,23 +811,71 @@ button.path-tpl-btn:hover {
     border-right: 1px solid alpha(currentColor, 0.13);
 }
 
-/* The sidebar's own header and footer keep the pane's tone rather than the
-   header-bar colour, so the pane is one surface top to bottom; each gets the
-   hairline the mockup has. */
+/* The sidebar's own header keeps the pane's tone rather than the header-bar
+   colour, so the pane is one surface top to bottom.  Its hairline is NOT
+   written here: both header bars get it from AdwToolbarView's RAISED_BORDER
+   style, which is the only way to be sure the two land on the same y (see
+   .pwctl-header below).  Only the footer still draws its own, because no
+   libadwaita style covers a bottom bar that has to keep this background. */
 .pwctl-sidebar headerbar.pwctl-sidebar-header {
     background: transparent;
-    box-shadow: none;
-    border-bottom: 1px solid alpha(currentColor, 0.13);
 }
 
 .pwctl-sidebar .pwctl-sidebar-footer {
     border-top: 1px solid alpha(currentColor, 0.13);
 }
 
-/* The app name in the sidebar header.  AdwWindowTitle's two labels carry the
-   .title / .subtitle classes; the subtitle comes down a little so the taller
-   title does not push the header bar past the content header's height and
-   leave the two panes starting at different y. */
+/* -------------------------------------------------- C3 / C14 header bars --
+   The sidebar header and the content header are one band of chrome across the
+   top of the window, so their bottom hairlines have to be one line.  Left to
+   themselves they are not: measured 46px and 40px, because the sidebar's is
+   sized by the two-line brand block and the content's by the view switcher —
+   a 6px step exactly where the eye is most likely to follow a horizontal.
+   One declared height for both is the fix, and it has to be a real height
+   rather than a nudge to one side, or the next widget added to either header
+   moves the line again.
+
+   The padding is deliberately lopsided.  Centred content in a 62px bar leaves
+   14px above and below; the switcher then floats, and the line reads as
+   unrelated to it.  Sitting the content low keeps the switcher tight to its
+   line — which is what makes the pairing read — and spends the rest of the
+   height as air under the window edge, where the app needs it.
+
+   Three measured facts hold this together, all taken with
+   `compute_bounds(window)` on the real window and checked against a render.
+   None of them is guessable, so change the numbers only with the same
+   measurement in hand — `test_header_align.local.py` asserts the result.
+
+   1. The two header bars' inner boxes carry **different padding**: 6px top
+      and bottom in the sidebar, 3px in the content pane.  That alone is a 6px
+      step, and it is why the paddings below are not the same on both sides.
+   2. The content pane's top-bar area is a further **3px taller than its
+      header bar**, because it stacks two top bars (the header and the restart
+      banner) and libadwaita wraps them in a `.collapse-spacing` box.  The
+      hairline is drawn at the bottom of *that* box.  The sidebar has one top
+      bar and no such box.
+   3. The inner box is pinned to `min-height: 34px` — the view switcher's own
+      height, and the tallest thing in either header today — so the sidebar's
+      shorter brand block cannot make its header the shorter one.
+
+   Net: sidebar 16 + 46 = 62, content 19 + 40 + 3 = 62.  Both hairlines land
+   on 62, and the switcher keeps the 3px gap to its line that it has now. */
+headerbar.pwctl-header > windowhandle > box {
+    min-height: 34px;
+}
+
+headerbar.pwctl-header.pwctl-sidebar-header > windowhandle {
+    padding-top: 16px;
+    padding-bottom: 0;
+}
+
+headerbar.pwctl-header:not(.pwctl-sidebar-header) > windowhandle {
+    padding-top: 19px;
+    padding-bottom: 0;
+}
+
+/* The app name in the sidebar header (C4/C5).  AdwWindowTitle's two labels
+   carry the .title / .subtitle classes. */
 .app-title .title {
     font-size: 1.15em;
     font-weight: 800;
@@ -835,6 +883,16 @@ button.path-tpl-btn:hover {
 
 .app-title .subtitle {
     font-size: 0.72em;
+}
+
+/* The page name in the content header.  At the default .title size it was the
+   smallest text in a band that also holds a 1.15em brand and two bold button
+   labels, so the one word naming the whole page read as the least important
+   thing on the row.  It matches the brand now: the two ends of the band are
+   the same weight, and the header has the height to carry it. */
+.page-title .title {
+    font-size: 1.15em;
+    font-weight: 800;
 }
 
 .dash-card {

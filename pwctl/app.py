@@ -103,16 +103,24 @@ class Window(Adw.ApplicationWindow):
         side_view = Adw.ToolbarView()
         # The sidebar is a slightly lifted surface, the way the Overview's
         # cards are, so the two panes read as foreground and background rather
-        # than one flat field.  The tone and both hairlines are in style.css;
-        # this is only where the classes go on.
+        # than one flat field.  The tone and the footer hairline are in
+        # style.css; this is only where the classes go on.
         side_view.add_css_class('pwctl-sidebar')
         side_header = Adw.HeaderBar()
         side_header.add_css_class('pwctl-sidebar-header')
+        side_header.add_css_class('pwctl-header')
         app_title = Adw.WindowTitle(title='PipeWire Controller',
                                     subtitle='audio control center')
         app_title.add_css_class('app-title')
         side_header.set_title_widget(app_title)
         side_view.add_top_bar(side_header)
+        # C3 and C14 are one line of chrome, so their hairlines must land on
+        # one y.  Both are now drawn by the same libadwaita style rather than
+        # by a hand-written border on one side and a toolbar style on the
+        # other — that pairing is what put them 6px apart (the sidebar header
+        # measured 46, the content header 40).  Equal heights come from
+        # `.pwctl-header` in style.css.
+        side_view.set_top_bar_style(Adw.ToolbarStyle.RAISED_BORDER)
         side_sw = Gtk.ScrolledWindow(
             hscrollbar_policy=Gtk.PolicyType.NEVER)
         side_sw.set_child(self.listbox)
@@ -138,7 +146,9 @@ class Window(Adw.ApplicationWindow):
         self.banner = Adw.Banner(revealed=False, button_label='Restart now')
         self.banner.connect('button-clicked', self._restart_pending)
         self.content_title = Adw.WindowTitle(title='Dashboard')
+        self.content_title.add_css_class('page-title')
         content_header = Adw.HeaderBar()
+        content_header.add_css_class('pwctl-header')
         self.content_header = content_header
         content_header.set_title_widget(self.content_title)
         content_header.pack_end(self._build_presets_button())
