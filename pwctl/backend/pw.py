@@ -152,6 +152,36 @@ def _attach_ports(node: AudioNode, routes: dict):
                              and r.get('direction') == want), None)
 
 
+def dump_volume(obj) -> tuple[float, bool] | None:
+    """(volume, muted) straight out of a pw-dump object, or None.
+
+    The values are already in the dump we just fetched — every node's
+    `info.params.Props` carries them — so reading them here replaces one
+    `wpctl get-volume` subprocess *per node and per stream, per poll*.  On a
+    16-endpoint system that measured 463 ms -> 63 ms for a dashboard refresh.
+
+    Two things about the payload, both established by measurement against
+    `wpctl get-volume` on PipeWire 1.6.8 rather than read anywhere:
+
+    * Use **`channelVolumes`, not `volume`** — `volume` reads 1.0 on every node
+      regardless of the actual level (it is a separate master prop), so it would
+      silently report 100% for everything.
+    * wpctl reports the **cube root of the first channel**.  Checked against an
+      unbalanced pair: `channelVolumes = [0.027, 0.216]` reads back as 0.30,
+      i.e. cbrt of `[0]`, *not* of the loudest channel.  Writes need no
+      conversion — `wpctl set-volume` already takes the cubic value.
+    """
+    params = (obj.get('info') or {}).get('params') or {}
+    props = params.get('Props') or []
+    if not props:
+        return None
+    entry = props[0] or {}
+    chans = entry.get('channelVolumes')
+    if not chans:
+        return None
+    return chans[0] ** (1 / 3), bool(entry.get('mute'))
+
+
 def list_audio_nodes(dump=None, inserts: bool = False) -> list[AudioNode]:
     """Every audio endpoint.
 
@@ -184,7 +214,7 @@ def list_audio_nodes(dump=None, inserts: bool = False) -> list[AudioNode]:
         if node.is_insert and not inserts:
             continue
         _attach_ports(node, routes)
-        vol = get_volume(node.id)
+        vol = dump_volume(obj)
         if vol:
             node.volume, node.muted = vol
         nodes.append(node)
@@ -282,7 +312,7 @@ def list_streams(dump=None) -> list[Stream]:
                                 if dst == s.id
                                 and classes.get(src) in ('Audio/Sink',
                                                          'Audio/Source')), None)
-        vol = get_volume(s.id)
+        vol = dump_volume(obj)
         if vol:
             s.volume, s.muted = vol
         streams.append(s)
@@ -320,6 +350,12 @@ _VOL_RE = re.compile(r'Volume:\s*([\d.]+)\s*(\[MUTED\])?')
 
 
 def get_volume(node_id):
+    """One node's (volume, muted), by subprocess.
+
+    No longer used by the list builders — they read the same values out of the
+    dump via `dump_volume()`, which is why a poll no longer spawns a process per
+    node.  Kept for the one-off case where there is no dump in hand.
+    """
     rc, out, _ = run(['wpctl', 'get-volume', str(node_id)])
     if rc != 0:
         return None
