@@ -223,12 +223,39 @@ class Stream:
     def is_playback(self):
         return self.media_class == 'Stream/Output/Audio'
 
+    @property
+    def is_app(self):
+        """Is this something a person started, or is it our own plumbing?
 
-def list_streams(dump=None) -> list[Stream]:
+        A filter chain, a loopback and a virtual device are all built from a
+        capture node and a *playback stream*, so the graph reports each of
+        them as `Stream/Output/Audio` — indistinguishable, by media class,
+        from Firefox.  On this machine that put eight rows of infrastructure
+        ("Everything output output", "Stream Mix (discarded) output") into a
+        mixer holding three real apps.
+
+        `node.link-group` is the discriminator, and it is the same one
+        WirePlumber's own linking scripts use: PipeWire's filter-chain and
+        loopback modules stamp it on both legs so the pair reads as one
+        object, and nothing an application creates carries it.  Testing it
+        rather than our `pwctl.` prefix also covers hand-written chains in
+        `filter-chain.conf.d`, which are just as much not-an-app.
+        """
+        p = self.props
+        return not (p.get('node.link-group')
+                    or (p.get('node.name') or '').startswith('pwctl.'))
+
+
+def list_streams(dump=None, apps_only=False) -> list[Stream]:
     """Application playback/recording streams with their current device.
 
     The connected device is derived from the live Link objects (ground
     truth), not from target.* metadata which may be stale or absent.
+
+    `apps_only` drops the filter/loopback legs — see `Stream.is_app`.  It
+    defaults to off because two callers want the plumbing: `enhance` finds an
+    equalizer's own `.out` stream this way, and it is how the Patchbay-side
+    code reasons about the whole graph.
     """
     dump = dump if dump is not None else pw_dump()
     classes = {}
@@ -260,6 +287,8 @@ def list_streams(dump=None) -> list[Stream]:
                    icon=props.get('application.icon-name'),
                    binary=props.get('application.process.binary'),
                    props=props)
+        if apps_only and not s.is_app:
+            continue
         if s.is_playback:
             s.target_id = next((dst for src, dst in links
                                 if src == s.id
