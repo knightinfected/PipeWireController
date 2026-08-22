@@ -1379,7 +1379,7 @@ class PathsPage:
         return (
             tuple((s.id, s.role, s.order, s.name, s.kind, s.enabled,
                    s.channels, s.out_channels, tuple(s.sends),
-                   tuple(s.outputs), s.mode, s.insert_into,
+                   tuple(s.outputs), s.mode, s.insert_into, s.capture_from,
                    tuple((b.get('id'), b.get('name'), b.get('lo'),
                           b.get('hi'), b.get('mute'), tuple(b.get('outputs')
                                                             or ()))
@@ -1544,7 +1544,11 @@ class PathsPage:
         card.append(self._rail(strip))
         if strip.role == 'source':
             card.append(self._sends_box(strip, mixes))
-            card.append(self._apps_box(strip))
+            # A microphone is captured *from*, not played into, so the row
+            # that asks "what is playing here?" is the wrong question — an app
+            # can never appear in it.  It gets the device it reads instead.
+            card.append(self._capture_box(strip) if strip.captures()
+                        else self._apps_box(strip))
         else:
             card.append(self._outputs_box(strip))
 
@@ -1725,6 +1729,17 @@ class PathsPage:
         if strip.role == 'source':
             by_id = {m.id: m for m in paths.mixes(self._strips)}
             dest = ', '.join(by_id[m].name for m in strip.sends if m in by_id)
+            if strip.captures():
+                # Two things worth saying and no room for more: which device it
+                # reads, and that an unwired one goes nowhere.  It really does
+                # go nowhere — the conf sets `node.autoconnect = false` rather
+                # than let a microphone land on the speakers and howl — so
+                # saying "the default output" here would be a lie with a noise
+                # attached.
+                dev = self._device_label(strip.capture_from) \
+                    if strip.capture_from else 'the default input'
+                return f'From {dev} → {dest}' if dest \
+                    else f'From {dev} → not going anywhere yet'
             base = KIND_BLURB.get(strip.kind, 'A source')
             return f'{base} → {dest}' if dest \
                 else f'{base} → the default output'
@@ -2268,8 +2283,65 @@ class PathsPage:
                                 lambda *_: self._send_app(strip)))
         return chip_row('Playing', *chips)
 
+    def _capture_box(self, strip):
+        """Which microphone a capture source reads.
+
+        Named devices are kept even when they are not plugged in: a USB
+        microphone that is unplugged has not been *unchosen*, and the strip
+        reconnects to it on its own when it comes back (`node.dont-reconnect`
+        is false in the generated conf).  Dropping the choice the first time
+        the device went away would be the same mistake as forgetting a
+        favourite the first time a dock comes off.
+        """
+        chips = []
+        if strip.capture_from:
+            node = next((n for n in self._nodes
+                         if n.name == strip.capture_from), None)
+            here = node is not None
+            chips.append(chip(
+                node.description if here else strip.capture_from,
+                ('Reading from this device.' if here else
+                 'Not connected right now — the strip picks it up again when '
+                 'it comes back.') + '\nClick to follow the default input '
+                'instead',
+                lambda _b: self._set_capture(strip, ''),
+                icon='window-close-symbolic', active=here,
+                lead_icon='audio-input-microphone-symbolic'))
+        else:
+            chips.append(Gtk.Label(label='Following the default input',
+                                   css_classes=['dim-label', 'caption'],
+                                   valign=Gtk.Align.CENTER))
+        chips.append(add_button('Choose a microphone',
+                                lambda *_: self._pick_capture(strip)))
+        return chip_row('Capturing', *chips)
+
+    def _pick_capture(self, strip):
+        items = [('', 'The default input',
+                  'Follows whatever you set as the default microphone')]
+        items += [(n.name, n.description,
+                   'Already the default' if n.is_default else n.name)
+                  for n in self._nodes if not n.is_sink]
+        if len(items) == 1:
+            self.window.toast('No microphones or other inputs are available')
+            return
+
+        def picked(name):
+            if name != strip.capture_from:
+                self._set_capture(strip, name)
+        search_picker(self.window, 'Capture from',
+                      'The device this strip reads. It reconnects on its own '
+                      'if the device is unplugged and comes back.',
+                      items, picked)
+
+    def _set_capture(self, strip, name):
+        strip.capture_from = name
+        label = self._device_label(name) if name else 'the default input'
+        self._save_and_apply(strip, f'“{strip.name}” now reads {label}')
+
     def _volume_box(self, strip):
         node = self._node_for(strip)
+        if node is None and strip.captures():
+            return self._capture_volume_box(strip)
         if node is None:
             return None
         box = Gtk.Box(spacing=8)
@@ -2285,6 +2357,44 @@ class PathsPage:
         ctl.set_value(node.volume if node.volume is not None else 1.0)
         if node.serial and node.serial > 0 and not levels.at_capacity():
             ctl.set_meter(node.serial)
+        self._vols[strip.id] = ctl
+        ctl.widget.set_hexpand(True)
+        box.append(ctl.widget)
+        return box
+
+    def _capture_volume_box(self, strip):
+        """Volume for a strip whose own node is a capture stream.
+
+        `list_audio_nodes` rightly does not carry it — it is not an endpoint
+        anyone can select — so the control drives the *stream*, which is where
+        a capture gain belongs anyway.  The meter is taken from the device
+        being read rather than from the stream, because a capture stream
+        cannot itself be recorded from: `pw-record --target` needs something
+        that produces audio.
+        """
+        stream = next((s for s in self._streams
+                       if (s.props or {}).get('node.name') == strip.node_name),
+                      None)
+        if stream is None:
+            return None
+        box = Gtk.Box(spacing=8)
+        mute = Gtk.ToggleButton(icon_name='microphone-sensitivity-muted-symbolic',
+                                active=stream.muted, valign=Gtk.Align.CENTER,
+                                css_classes=['flat', 'circular'],
+                                tooltip_text='Mute this microphone')
+        mute.connect('toggled',
+                     lambda b, s=stream: pw.set_mute(s.id, b.get_active()))
+        box.append(mute)
+        ctl = make_volume(self.volume_style,
+                          lambda v, s=stream: pw.set_volume(s.id, v))
+        ctl.set_value(stream.volume if stream.volume is not None else 1.0)
+        dev = next((n for n in self._nodes
+                    if n.name == strip.capture_from), None) \
+            if strip.capture_from else \
+            next((n for n in self._nodes if not n.is_sink and n.is_default),
+                 None)
+        if dev is not None and dev.serial > 0 and not levels.at_capacity():
+            ctl.set_meter(dev.serial)
         self._vols[strip.id] = ctl
         ctl.widget.set_hexpand(True)
         box.append(ctl.widget)
@@ -3184,6 +3294,13 @@ class PathsPage:
         A source stands on its own — with no send it simply plays into the
         default output — but a mix with nothing feeding it is a sink no audio
         ever reaches, so an empty board gets a plain source to go with it.
+
+        A **microphone** source is the exception at both ends: it captures a
+        device rather than being played into, and an unwired one deliberately
+        goes nowhere rather than landing on the speakers and howling.  It is
+        not given a mix for the same reason — "somewhere" would mean the
+        default output, which is the one destination a microphone must not
+        have by default — so the toast says it needs wiring instead.
         Everything is created switched on, like the quick-setup recipes: a
         template that leaves you one more click away from hearing it is not
         much of a head start.
@@ -3226,6 +3343,9 @@ class PathsPage:
                     self.window.toast(
                         f'“{tpl.title}” ready, without ' + ', '.join(missing)
                         + ' — no plugin for that on this machine')
+                elif strip.captures() and not strip.sends:
+                    self.window.toast(
+                        f'“{tpl.title}” added — send it to a mix to hear it')
                 else:
                     self.window.toast(f'“{tpl.title}” ready')
                 self.refresh()

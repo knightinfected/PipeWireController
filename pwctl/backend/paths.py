@@ -6,6 +6,11 @@ A path is not one object but two kinds of strip:
     carrying its own chain of stages, sending its result to one or more mixes;
   * a **mix** — a chain of its own, feeding one or more output devices.
 
+A source is normally a sink that something else plays into.  A **microphone**
+source is the exception and the one that reads rather than being read: it
+captures from the device and carries that into its mixes (see `Strip.captures`
+and `SOURCE_KINDS`).
+
 Sources on the left, mixes on the right, sends between them.  With one source
 and one mix that is just a straight line, which is what most people want; the
 arrangement only earns its second dimension when a chain has to split (a
@@ -92,6 +97,14 @@ DEFAULT_BAND_SLOPE = 24
 # `sink` is the dataclass default so that strips written before this existed
 # keep the behaviour they were built with; `new_strip` prefers `insert`.
 MODES = ('sink', 'insert', 'tap')
+
+# What a source strip is fed by.  This is not decoration: `app` and
+# `everything` are things that *play into* the strip, so the strip is a sink
+# and something else points at it, while `mic` is a device the strip has to go
+# and **capture from**.  A microphone published as a sink is a strip nothing
+# ever feeds — which is exactly what it used to be (issue #8): the mic had to
+# be patched in by hand in the Patchbay, and the patch did not survive a
+# reboot, because a `pw-link` link is not something WirePlumber remembers.
 SOURCE_KINDS = {
     'app': 'An application',
     'mic': 'A microphone',
@@ -148,6 +161,11 @@ class Strip:
     #                                           of; '' follows the default
     mode: str = 'sink'                        # see MODES
     tap_source: str = ''                      # tap mode: node.name to copy
+    capture_from: str = ''                    # kind 'mic': device node.name
+    #                                           to capture; '' follows the
+    #                                           default input.  A name, not a
+    #                                           serial, so it survives the
+    #                                           device being replugged.
     positions: list = field(default_factory=lambda: list(DEFAULT_POSITIONS))
     out_positions: list = field(default_factory=list)  # empty: same as above
     stages: list = field(default_factory=list)     # stage dicts, see _stage_*
@@ -213,6 +231,15 @@ class Strip:
         following it when the user changes their output.
         """
         return self.outputs[0] if self.outputs else ''
+
+    def captures(self) -> bool:
+        """Whether this strip reads a device rather than being played into.
+
+        Only a microphone source does.  Everything else on the board is a
+        destination for something: an app source is a sink the app plays into,
+        an `everything` source is the default output, a mix is fed by sends.
+        """
+        return self.role == 'source' and self.kind == 'mic'
 
     def can_insert(self) -> bool:
         """Whether this strip could attach itself to a device.
@@ -904,6 +931,42 @@ def _conf(strip: Strip, strips=None) -> dict:
         if dest:
             playback['target.object'] = dest
             playback['node.dont-reconnect'] = False
+    elif strip.captures():
+        # A microphone source captures from the device instead of publishing
+        # a sink.  Nothing plays *into* a microphone, so a sink here was a
+        # strip with nothing on its input, which is why the mic had to be
+        # linked in by hand in the Patchbay and why the link was gone again
+        # after a reboot (issue #8).
+        #
+        # `stream.capture.sink` is deliberately absent — that flag means
+        # "capture this sink's monitor", and a microphone is a source.  With
+        # no `target.object` the stream lands on the default input and keeps
+        # following it, which is what an unset device should mean.
+        if strip.capture_from:
+            capture['target.object'] = strip.capture_from
+            # Reconnect rather than die when the device is not there yet:
+            # a USB microphone that is plugged in after login, or a card that
+            # comes back after a suspend, then rejoins the strip on its own.
+            # That is the persistence the hand-made link never had.
+            capture['node.dont-reconnect'] = False
+        # The playback side is what carries the microphone into the mix, so
+        # it is the reason the target has anything at all.  `node.passive`
+        # would let it be suspended along with an idle target — the same
+        # reasoning as a tap.
+        playback.pop('node.passive', None)
+        target = resolve_target(strip, strips)
+        if target:
+            playback['target.object'] = target
+            playback['node.dont-reconnect'] = False
+        else:
+            # A source with no destination follows the default output, and for
+            # every other kind that is right.  For a microphone it means the
+            # mic is played out of the speakers the moment the strip is turned
+            # on — the classic feedback howl, from a strip the user has not
+            # finished wiring up.  Stay silent instead, and let the card say
+            # so: `_card_subtitle` reads "Not going anywhere yet" rather than
+            # claiming a destination it does not have.
+            playback['node.autoconnect'] = False
     elif strip.mode == 'insert':
         # A sink, but one WirePlumber splices into the device's path instead
         # of offering as an output.  No `target.object` on the playback side:

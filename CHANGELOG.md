@@ -84,6 +84,29 @@ Inserting needs **WirePlumber 0.5 or later**. Where it is older — Ubuntu 24.04
 LTS ships 0.4.17 — strips publish their own output as they always did, and the
 mode is not offered.
 
+**Bug: a microphone source never captured from the microphone**
+
+A source strip set to *microphone* was built exactly like an app one — it
+published an output that nothing fed. The strip looked right and did nothing,
+so the only way to get audio into it was to draw the link by hand in the
+Patchbay, and that link was gone again after a reboot.
+
+A microphone source now captures from a device, which is what it always said
+it did. The card gained a **Capturing** row: pick the microphone there, or
+leave it on the default input and it follows whatever you set as your default.
+If the device is unplugged it is remembered rather than forgotten, and the
+strip picks it up again on its own when it comes back — including after a
+reboot or a suspend, which is the part that had to be redone by hand before.
+
+Two smaller things fall out of it. An unwired microphone strip stays **silent**
+instead of following the default output like other sources: a microphone on the
+speakers is a feedback howl, and it is not what anyone means by "not connected
+to anything yet" — the card says so rather than pretending it has a
+destination. And apps can no longer be dropped onto a microphone strip, because
+nothing plays *into* a microphone.
+
+Reported in [#8](https://github.com/knightinfected/PipeWireController/issues/8).
+
 ---
 
 ## [v0.5.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.5.1) — 2026-08-16
