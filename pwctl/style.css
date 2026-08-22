@@ -127,19 +127,9 @@ scale.vol-stepped trough {
     border-radius: 6px;
 }
 
-/* floating slider-style picker, bottom right */
-menubutton.style-picker > button {
-    border-radius: 99px;
-    padding: 8px 18px;
-    background: @headerbar_bg_color;
-    border: 1px solid alpha(currentColor, 0.12);
-    box-shadow: 0 3px 12px alpha(black, 0.35);
-}
-
-menubutton.style-picker > button:hover {
-    background: @card_bg_color;
-}
-
+/* The slider-style picker is an ordinary header-bar button now (it used to
+   float over the bottom right of the Dashboard), so it needs no chrome of its
+   own — only the popover list stays styled. */
 .style-picker-list {
     background: transparent;
 }
@@ -768,4 +758,164 @@ button.path-tpl-btn:hover {
 
 .path-wire-dst {
     color: mix(@green_4, @window_fg_color, 0.35);
+}
+
+/* ------------------------------------------------------------ Dashboard --
+   Cards on the Overview.  The surface is mixed *into* @card_bg_color rather
+   than layered with alpha() over it: the window is translucent under this
+   user's compositor, and an alpha-only card lets the wallpaper through.
+   Same reasoning as the Signal Paths cards. */
+
+.micro-heading {
+    font-size: 0.72em;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    opacity: 0.55;
+}
+
+/* Sidebar section headings.  They are ListBox headers, not rows, so they get
+   no selection styling of their own and need their own colour. */
+.sidebar-section {
+    color: alpha(currentColor, 0.55);
+}
+
+/* ----------------------------------------------------------- the sidebar --
+   A slightly lifted surface, so the navigation pane and the content pane read
+   as background and foreground rather than one flat field — the same idea the
+   Overview's cards use, one step smaller.
+
+   Mixed toward the theme's own foreground, never written raw: that darkens the
+   window colour on a light theme and lightens it on a dark one, so a single
+   declaration covers both.  0.06 lands on roughly #ebebeb / #303030 from the
+   two Adwaita window colours, which is where the mockup put it. */
+.pwctl-sidebar {
+    background: mix(@window_bg_color, @window_fg_color, 0.06);
+}
+
+/* C13 — the divider between the sidebar and the content pane. */
+.pwctl-sidebar {
+    border-right: 1px solid alpha(currentColor, 0.13);
+}
+
+/* The sidebar's own header and footer keep the pane's tone rather than the
+   header-bar colour, so the pane is one surface top to bottom; each gets the
+   hairline the mockup has. */
+.pwctl-sidebar headerbar.pwctl-sidebar-header {
+    background: transparent;
+    box-shadow: none;
+    border-bottom: 1px solid alpha(currentColor, 0.13);
+}
+
+.pwctl-sidebar .pwctl-sidebar-footer {
+    border-top: 1px solid alpha(currentColor, 0.13);
+}
+
+/* The app name in the sidebar header.  AdwWindowTitle's two labels carry the
+   .title / .subtitle classes; the subtitle comes down a little so the taller
+   title does not push the header bar past the content header's height and
+   leave the two panes starting at different y. */
+.app-title .title {
+    font-size: 1.15em;
+    font-weight: 800;
+}
+
+.app-title .subtitle {
+    font-size: 0.72em;
+}
+
+.dash-card {
+    background: @card_bg_color;
+    border: 1px solid alpha(currentColor, 0.09);
+    border-radius: 14px;
+    padding: 16px;
+}
+
+.dash-card-title {
+    font-weight: 700;
+    font-size: 0.95em;
+}
+
+/* Never dim a card's images wholesale — that catches the suffix buttons and
+   makes live controls read as disabled.  Only the heading icon fades. */
+.dash-card-icon {
+    opacity: 0.75;
+}
+
+.dash-link {
+    font-size: 0.85em;
+    font-weight: 600;
+    padding: 2px 8px;
+    min-height: 0;
+}
+
+.dash-kv {
+    padding: 3px 0;
+}
+
+/* The status hero.  One dot for the whole audio stack. */
+.dash-hero {
+    padding: 18px;
+}
+
+.dash-hero-title {
+    font-size: 1.15em;
+    font-weight: 800;
+}
+
+.dash-big {
+    font-size: 1.5em;
+    font-weight: 800;
+    font-feature-settings: "tnum";
+}
+
+.dash-dot {
+    min-width: 12px;
+    min-height: 12px;
+    border-radius: 99px;
+    background: alpha(currentColor, 0.25);
+}
+
+/* Semantic colour, and only semantic colour: green running, amber starting,
+   red failed.  @accent_color is deliberately absent — a third-party theme is
+   free to resolve it to grey, and the one this is developed against does. */
+.dash-dot.ok      { background: @success_color; }
+.dash-dot.warn    { background: @warning_color; }
+.dash-dot.err     { background: @error_color; }
+.dash-dot.dim     { background: alpha(currentColor, 0.25); }
+
+.dash-alert {
+    background: mix(@card_bg_color, @warning_color, 0.13);
+    border: 1px solid alpha(@warning_color, 0.45);
+}
+
+.dash-alert image {
+    color: @warning_color;
+}
+
+/* The two default endpoints.  Blue is an output, green an input — the same
+   two hues the Signal Paths board already uses for the two halves of a
+   route, so one idea covers both pages. */
+.dash-avatar {
+    min-width: 34px;
+    min-height: 34px;
+    border-radius: 10px;
+}
+
+.dash-avatar.out {
+    background: alpha(@blue_3, 0.18);
+    color: mix(@blue_3, @window_fg_color, 0.3);
+}
+
+.dash-avatar.in {
+    background: alpha(@green_4, 0.18);
+    color: mix(@green_4, @window_fg_color, 0.3);
+}
+
+.dash-endpoint-name {
+    font-size: 1.05em;
+    font-weight: 700;
+}
+
+.dash-qa {
+    padding: 9px 10px;
 }
