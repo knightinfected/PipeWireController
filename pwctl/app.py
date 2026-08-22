@@ -26,25 +26,35 @@ from .ui.settings_pages import ServerPage, StreamsPage, WirePlumberPage
 from .ui.surround_page import SurroundPage
 from .ui.tools_page import ToolsPage
 from .ui.virtual_page import VirtualPage
-from .ui.widgets import async_call
+from .ui.widgets import async_call, micro
 
+# (name, title, icon, section).  Sixteen rows in one flat list read as
+# "this is complicated" before a single click, so they are grouped — but every
+# page stays present and reachable; nothing is hidden behind Advanced.
+# Order within the list *is* the sidebar order; `goto()` and the startup
+# restore both look pages up by name, so regrouping is safe.
 PAGES = [
-    ('dashboard', 'Dashboard', 'utilities-system-monitor-symbolic'),
-    ('paths', 'Signal Paths', 'network-transmit-receive-symbolic'),
-    ('enhance', 'Equalizer', 'audio-x-generic-symbolic'),
-    ('graph', 'Patchbay', 'network-workgroup-symbolic'),
-    ('devices', 'Devices', 'audio-speakers-symbolic'),
-    ('virtual', 'Virtual Devices', 'insert-object-symbolic'),
-    ('surround', 'Surround Setup', 'audio-card-symbolic'),
-    ('server', 'Server', 'preferences-system-symbolic'),
-    ('streams', 'Streams', 'emblem-music-symbolic'),
-    ('policy', 'App Policies', 'system-users-symbolic'),
-    ('wireplumber', 'Session & Bluetooth', 'bluetooth-active-symbolic'),
-    ('chains', 'Filter Chains', 'audio-headphones-symbolic'),
-    ('effects', 'Effects', 'applications-multimedia-symbolic'),
-    ('hrir', 'HRIR Library', 'folder-music-symbolic'),
-    ('monitor', 'Monitor', 'utilities-system-monitor-symbolic'),
-    ('tools', 'Tools', 'applications-utilities-symbolic'),
+    ('dashboard', 'Dashboard', 'view-grid-symbolic', 'Mix'),
+    ('paths', 'Signal Paths', 'network-transmit-receive-symbolic', 'Mix'),
+    ('enhance', 'Equalizer', 'audio-x-generic-symbolic', 'Mix'),
+
+    ('graph', 'Patchbay', 'network-workgroup-symbolic', 'Route'),
+    ('devices', 'Devices', 'audio-speakers-symbolic', 'Route'),
+    ('virtual', 'Virtual Devices', 'insert-object-symbolic', 'Route'),
+    ('surround', 'Surround Setup', 'audio-card-symbolic', 'Route'),
+
+    ('chains', 'Filter Chains', 'audio-headphones-symbolic', 'Process'),
+    ('effects', 'Effects', 'applications-multimedia-symbolic', 'Process'),
+    ('hrir', 'HRIR Library', 'folder-music-symbolic', 'Process'),
+
+    ('server', 'Server', 'preferences-system-symbolic', 'Configure'),
+    ('streams', 'Streams', 'emblem-music-symbolic', 'Configure'),
+    ('policy', 'App Policies', 'system-users-symbolic', 'Configure'),
+    ('wireplumber', 'Session & Bluetooth', 'bluetooth-active-symbolic',
+     'Configure'),
+
+    ('monitor', 'Monitor', 'utilities-system-monitor-symbolic', 'System'),
+    ('tools', 'Tools', 'applications-utilities-symbolic', 'System'),
 ]
 
 RESTART_UNITS = {
@@ -75,7 +85,7 @@ class Window(Adw.ApplicationWindow):
         # sidebar
         self.listbox = Gtk.ListBox(css_classes=['navigation-sidebar'])
         self.listbox.connect('row-selected', self._on_select)
-        for name, title, icon in PAGES:
+        for name, title, icon, section in PAGES:
             row = Gtk.ListBoxRow()
             box = Gtk.Box(spacing=12, margin_top=10, margin_bottom=10,
                           margin_start=6, margin_end=6)
@@ -83,12 +93,25 @@ class Window(Adw.ApplicationWindow):
             box.append(Gtk.Label(label=title, xalign=0))
             row.set_child(box)
             row.page_name = name
+            row.section = section
             self.listbox.append(row)
+        # Section headings are ListBox *headers*, not rows: they carry no
+        # index, so `get_row_at_index()` in goto() keeps matching PAGES, and
+        # keyboard navigation skips straight over them.
+        self.listbox.set_header_func(self._sidebar_header)
 
         side_view = Adw.ToolbarView()
+        # The sidebar is a slightly lifted surface, the way the Overview's
+        # cards are, so the two panes read as foreground and background rather
+        # than one flat field.  The tone and both hairlines are in style.css;
+        # this is only where the classes go on.
+        side_view.add_css_class('pwctl-sidebar')
         side_header = Adw.HeaderBar()
-        side_header.set_title_widget(Adw.WindowTitle(
-            title='PipeWire Controller', subtitle='audio control center'))
+        side_header.add_css_class('pwctl-sidebar-header')
+        app_title = Adw.WindowTitle(title='PipeWire Controller',
+                                    subtitle='audio control center')
+        app_title.add_css_class('app-title')
+        side_header.set_title_widget(app_title)
         side_view.add_top_bar(side_header)
         side_sw = Gtk.ScrolledWindow(
             hscrollbar_policy=Gtk.PolicyType.NEVER)
@@ -108,6 +131,7 @@ class Window(Adw.ApplicationWindow):
                                                   'throughout the app')
         self.adv_switch.connect('notify::active', self._on_advanced)
         adv_box.append(self.adv_switch)
+        adv_box.add_css_class('pwctl-sidebar-footer')
         side_view.add_bottom_bar(adv_box)
 
         # content
@@ -115,12 +139,17 @@ class Window(Adw.ApplicationWindow):
         self.banner.connect('button-clicked', self._restart_pending)
         self.content_title = Adw.WindowTitle(title='Dashboard')
         content_header = Adw.HeaderBar()
+        self.content_header = content_header
         content_header.set_title_widget(self.content_title)
         content_header.pack_end(self._build_presets_button())
         content_view = Adw.ToolbarView()
         content_view.add_top_bar(content_header)
         content_view.add_top_bar(self.banner)
         content_view.set_content(self.stack)
+        # The hairline under the header bar (and under the restart banner when
+        # it is showing).  libadwaita's own top-bar style, so it follows the
+        # theme instead of guessing at a border colour.
+        content_view.set_top_bar_style(Adw.ToolbarStyle.RAISED_BORDER)
 
         split = Adw.NavigationSplitView(
             min_sidebar_width=210, max_sidebar_width=240)
@@ -150,12 +179,25 @@ class Window(Adw.ApplicationWindow):
         }
         for name, page in self.pages.items():
             self.stack.add_named(page.widget, name)
+
+        # Two Dashboard-owned controls that live in the window's header bar.
+        # The Overview/Mixer switcher is packed at the start, where the mockup
+        # puts it, and stays there on every page: on another page neither
+        # segment is lit and clicking one brings you back to the Dashboard
+        # showing that view, so the mixer is always one click away.  The
+        # volume-style picker is a global preference (it changes the sliders
+        # on Devices, the Equalizer and Signal Paths too), so it sits beside
+        # Device Presets rather than floating over the Dashboard.
+        dash = self.pages['dashboard']
+        content_header.pack_start(dash.view_switcher)
+        content_header.pack_end(dash.style_button)
+
         start = 0
         import os
         self._debug_page = bool(os.environ.get('PWCTL_PAGE'))
         want = os.environ.get('PWCTL_PAGE') or prefs.get('last_page')
         if want:
-            for i, (n, _t, _i2) in enumerate(PAGES):
+            for i, (n, _t, _i2, _s) in enumerate(PAGES):
                 if n == want:
                     start = i
         self.listbox.select_row(self.listbox.get_row_at_index(start))
@@ -297,13 +339,44 @@ class Window(Adw.ApplicationWindow):
         return True
 
     # ---------------------------------------------------------- navigation --
+    def _sidebar_header(self, row, before):
+        """One micro heading above the first row of each section."""
+        if before is not None and before.section == row.section:
+            row.set_header(None)
+            return
+        lbl = micro(row.section)
+        lbl.add_css_class('sidebar-section')
+        lbl.set_margin_top(4 if before is None else 14)
+        lbl.set_margin_bottom(2)
+        lbl.set_margin_start(14)
+        row.set_header(lbl)
+
     def _on_select(self, _lb, row):
         if row:
             self.stack.set_visible_child_name(row.page_name)
-            title = next(t for n, t, _i in PAGES if n == row.page_name)
-            self.content_title.set_title(title)
+            title = next(t for n, t, _i, _s in PAGES if n == row.page_name)
+            self._set_header_widget(row.page_name, title)
+            dash = getattr(self, 'pages', {}).get('dashboard')
+            if dash is not None:
+                dash.set_on_page(row.page_name == 'dashboard')
             if not self._debug_page:
                 prefs.save(last_page=row.page_name)
+
+    def _set_header_widget(self, page_name, title):
+        """A page may own the header bar's title slot.
+
+        Nothing claims it at the moment — the Dashboard's Overview/Mixer
+        switcher moved to `pack_start`, so it stays visible on every page —
+        but the hook is how a page gets a control into the header bar without
+        the window knowing anything about it, and it costs no page height.
+        """
+        page = self.pages.get(page_name) if hasattr(self, 'pages') else None
+        widget = getattr(page, 'header_widget', None)
+        if widget is not None:
+            self.content_header.set_title_widget(widget)
+        else:
+            self.content_title.set_title(title)
+            self.content_header.set_title_widget(self.content_title)
 
     def _save_window_state(self, *_a):
         prefs.save(win_width=self.get_width() or 1080,
@@ -312,7 +385,7 @@ class Window(Adw.ApplicationWindow):
         return False
 
     def goto(self, name):
-        for i, (n, _t, _i2) in enumerate(PAGES):
+        for i, (n, _t, _i2, _s) in enumerate(PAGES):
             if n == name:
                 self.listbox.select_row(self.listbox.get_row_at_index(i))
                 return

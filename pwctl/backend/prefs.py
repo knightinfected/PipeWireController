@@ -19,6 +19,15 @@ DEFAULTS = {
     'device_presets': {},        # node.name -> preset dict (backend/presets)
     'last_page': 'dashboard',    # restored on startup
     'dashboard_tab': 'overview',
+    # Dashboard → Overview → Favourites, as a list of `node.name`.  Names, not
+    # ids or serials: an id is recycled and a serial changes every time a node
+    # is recreated, so only the name survives a reboot or a chain restart —
+    # the same reasoning routing snapshots are built on.
+    'favorite_devices': [],
+    # node.name -> the description it had when last seen, so a device that is
+    # unplugged still reads as "Scarlett Solo" rather than as its ALSA node
+    # name.  Learned, never authoritative: the live description always wins.
+    'favorite_labels': {},
     'win_width': 1080,
     'win_height': 760,
     'win_maximized': False,

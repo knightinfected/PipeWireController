@@ -345,15 +345,48 @@ class ServerPage:
 
 # ----------------------------------------------------------- streams page --
 
+# Which group each stream setting belongs to.  Split by *prefix*, not by an
+# explicit key list, so a Setting added to schema.STREAM later still appears
+# somewhere instead of silently vanishing from the page.
+_UPMIX_KEYS = ('channelmix.upmix', 'channelmix.fc-cutoff',
+               'channelmix.rear-delay', 'channelmix.stereo-widen',
+               'channelmix.hilbert-taps')
+
+
+def _stream_split(settings):
+    resample, upmix, rest = [], [], []
+    for s in settings:
+        if s.key.startswith('resample.'):
+            resample.append(s)
+        elif s.key.startswith(_UPMIX_KEYS):
+            upmix.append(s)
+        else:
+            rest.append(s)
+    return resample, upmix, rest
+
+
 class StreamsPage:
     def __init__(self, window):
-        g = _schema_group(
-            'Stream processing defaults',
-            'Applied to every new native and PulseAudio stream (written to '
-            'client.conf.d and pipewire-pulse.conf.d drop-ins). Restart '
-            'PipeWire-Pulse and reopen apps to apply.',
-            schema.STREAM, window)
-        self.widget = page_scroller(g)
+        # One group of fourteen rows was 940px of unbroken list and, being a
+        # single child, the only page the column layout could not help.  These
+        # three are the divisions the settings already had.
+        resample, upmix, rest = _stream_split(schema.STREAM)
+        spec = [
+            ('Resampling',
+             'Applied to every new native and PulseAudio stream (written to '
+             'client.conf.d and pipewire-pulse.conf.d drop-ins). Restart '
+             'PipeWire-Pulse and reopen apps to apply.', resample),
+            ('Upmixing to surround',
+             'Only used when a stream has fewer channels than the output.',
+             upmix),
+            ('Downmixing, bass and monitoring',
+             'Used when a stream has more channels than the output can play.',
+             rest),
+        ]
+        # An empty list would draw a bare heading, and `_schema_group` would
+        # read it as advanced-only (`all()` of nothing is True) and hide it.
+        groups = [_schema_group(t, d, s, window) for t, d, s in spec if s]
+        self.widget = page_scroller(*groups)
 
 
 # ------------------------------------------------------- wireplumber page --
