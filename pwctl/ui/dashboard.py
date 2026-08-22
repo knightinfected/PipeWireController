@@ -1669,7 +1669,11 @@ class Dashboard:
             dump = pw.pw_dump()
             data['driver'] = pw.driver_clock(dump)
             data['nodes'] = pw.list_audio_nodes(dump)
-            data['streams'] = pw.list_streams(dump)
+            # Apps only: everything the Dashboard draws from this list — the
+            # two mixer lists and Playing now — is answering "what is playing
+            # and where is it going", and a chain's own output leg is not an
+            # answer to that.  The graph itself is the Patchbay's job.
+            data['streams'] = pw.list_streams(dump, apps_only=True)
             data['cards'] = surround.list_cards(dump, outputs_only=False)
             if want_slow:
                 data['states'] = {u: system.unit_state(u) for u, _ in SERVICES}
@@ -1770,16 +1774,12 @@ class Dashboard:
         self.fav.update(nodes)
 
         # -- playing now --------------------------------------------------
-        # The app's own helper streams (a signal path's output, a chain's tap)
-        # are real playback streams, but nobody thinks of them as "an app that
-        # is playing" — the Running audio objects card is where they belong.
-        # The mixer lists still show them: that is where you go to see
-        # everything, and hiding them there would lose a control.
-        def is_app(s2):
-            return not (s2.props.get('node.name') or '').startswith('pwctl.')
-        playing = [s2 for s2 in data['streams'] if s2.is_playback and is_app(s2)]
-        recording = [s2 for s2 in data['streams']
-                     if not s2.is_playback and is_app(s2)]
+        # `collect()` already dropped the filter and loopback legs, so both
+        # this card and the mixer lists below are apps only.  The Running
+        # audio objects card is where the plumbing is counted, and the
+        # Patchbay is where it can be seen one node at a time.
+        playing = [s2 for s2 in data['streams'] if s2.is_playback]
+        recording = [s2 for s2 in data['streams'] if not s2.is_playback]
         self._fill_playing(playing, recording)
 
         # -- inventory ----------------------------------------------------
