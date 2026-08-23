@@ -43,7 +43,7 @@ classifiers = [
 ]
 
 # IMPORTANT: these install from PyPI, but the app also needs SYSTEM libraries
-# that pip/uv CANNOT provide — GTK 4, libadwaita (>= 1.4), and the
+# that pip/uv CANNOT provide — GTK 4, libadwaita (>= 1.7), and the
 # GObject-Introspection typelibs PyGObject binds to. Install those from your
 # distro (see README > Requirements). At runtime the app also shells out to
 # PipeWire/WirePlumber CLI tools (pw-dump, wpctl, pw-metadata, …). So a bare

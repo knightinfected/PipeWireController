@@ -107,6 +107,19 @@ nothing plays *into* a microphone.
 
 Reported in [#8](https://github.com/knightinfected/PipeWireController/issues/8).
 
+**libadwaita 1.7 is now the minimum**
+
+The stated requirement was 1.4, and it had been wrong for some time — Signal
+Paths has needed 1.7 since v0.4.0. The dashboard rebuild made it matter: the
+view switcher in the window header is built before any page is, so on an older
+libadwaita the app no longer starts at all rather than losing one page.
+
+This drops **Ubuntu 24.04 LTS** (libadwaita 1.5.0), which was previously
+listed as supported. Debian 13 (1.7.6) and Ubuntu 26.04 LTS (1.9.1) are the
+floor; Fedora 42+, openSUSE Tumbleweed and Arch are all well above it. On
+24.04 the options are 26.04, a backport, or running from a checkout against a
+newer libadwaita.
+
 ---
 
 ## [v0.5.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.5.1) — 2026-08-16
