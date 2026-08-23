@@ -549,5 +549,9 @@ class App(Adw.Application):
 
 def main():
     import sys
+
+    from .compat import require
+    require()   # says so and exits if libadwaita is too old to build the window
+
     app = App()
     return app.run(sys.argv)
