@@ -344,20 +344,53 @@ sudo pacman -S --needed pipewire wireplumber pipewire-pulse gtk4 libadwaita \
 ### Fedora
 
 ```bash
-sudo dnf install pipewire wireplumber pipewire-pulseaudio gtk4 libadwaita \
-    python3-gobject python3-numpy python3-soundfile
+sudo dnf install pipewire pipewire-utils wireplumber pipewire-pulseaudio \
+    gtk4 libadwaita python3-gobject python3-cairo python3-numpy python3-soundfile
 ```
+
+Then run from a checkout (see [Run](#run)), or build an RPM — there is a spec
+in [`packaging/rpm/`](packaging/rpm/):
+
+```bash
+spectool -g -R packaging/rpm/pipewire-control-center.spec
+rpmbuild -ba packaging/rpm/pipewire-control-center.spec
+```
+
+> [!WARNING]
+> **The Debian and RPM packaging is work in progress.** It is developed on an
+> Arch machine, so neither has been through a real `rpmbuild` or
+> `dpkg-buildpackage` yet — only the install steps have been checked. Running
+> from a checkout is the reliable route until that changes. If you do build
+> one, [an issue](https://github.com/knightinfected/PipeWireController/issues)
+> saying what broke is genuinely useful.
 
 ### Debian 13+ / Ubuntu 26.04 LTS+
 
 ```bash
-sudo apt install pipewire wireplumber pipewire-pulse gir1.2-gtk-4.0 \
-    gir1.2-adw-1 python3-gi python3-numpy python3-soundfile
+sudo apt install pipewire pipewire-bin wireplumber pipewire-pulse \
+    gir1.2-gtk-4.0 gir1.2-adw-1 python3-gi python3-gi-cairo python3-numpy \
+    python3-soundfile
 ```
 
 Older releases ship a libadwaita before **1.7** and won't work: Debian 12
 (bookworm) has 1.2.2 and **Ubuntu 24.04 LTS has 1.5.0**. Debian 13 (1.7.6) and
 Ubuntu 26.04 LTS (1.9.1) are the floor.
+
+Then run from a checkout (see [Run](#run)), or build a `.deb` — the packaging
+lives in [`packaging/debian/`](packaging/debian/). It carries the same
+**work-in-progress** caveat as the RPM above:
+
+```bash
+sudo apt install devscripts debhelper
+cp -r packaging/debian debian && dpkg-buildpackage -us -uc -b
+sudo apt install ../pipewire-control-center_*_all.deb
+```
+
+### openSUSE
+
+The RPM spec carries openSUSE branches, but they haven't been built on a real
+openSUSE system yet — see [`packaging/README.md`](packaging/README.md). Until
+then, install the dependencies and run from a checkout.
 
 ### Other distros
 
