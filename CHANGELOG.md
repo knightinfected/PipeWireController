@@ -23,6 +23,90 @@ and commit log.
 
 ---
 
+## Unreleased
+
+**The dashboard is two views instead of five tabs**
+
+Overview and Mixer, picked from a switcher in the window header rather than
+from inside the page. The switcher stays in the header on every page, so the
+dashboard is one click away from wherever you are.
+
+Overview leads with your default output and default input, and a new
+**Favourites** card: pin any output or input, hardware or virtual, and its
+volume, mute and live meter stay on the dashboard. A favourite whose device is
+unplugged keeps its place and still reads as its own name rather than
+vanishing or turning into an ALSA device string, and its controls come back on
+their own when the device does.
+
+The sidebar's sixteen pages are now grouped under Mix, Route, Process,
+Configure and System. Nothing was dropped in the rebuild: all sixteen pages
+are still there, and so are the solo buttons, the card configuration row with
+its warning and Reset, the port and profile dropdowns, the default star and
+the latency calculator with its live Test.
+
+The volume-style picker moved out of a floating panel over the dashboard and
+into the header bar next to Device Presets. It changes the sliders on Devices,
+the Equalizer and Signal Paths too, so it was never really a dashboard
+setting.
+
+**The top of the window reads as one band**
+
+The sidebar header and the content header sit side by side, so the lines under
+them should look like a single line across the window. They did not: they were
+six pixels apart and two different colours, in the one place your eye is most
+likely to follow a horizontal.
+
+They meet now, and both are drawn by the same mechanism, so they match in
+colour as well as in position. The band is a little taller, and the extra room
+is spent above the view switcher rather than shared around it — centred in a
+taller bar, the switcher floats with nothing to sit against. The page title is
+now the same size as the app title, too: it names the whole page, and it was
+the smallest text in a row that also held the app name and two bold buttons.
+
+**Every page uses the width you give it**
+
+Pages painted one column of about 730px however wide the window was. A wider
+window now opens another column instead, so maximizing shows you more rather
+than the same amount with more space around it.
+
+**Bug: the Mixer listed the app's own plumbing as if it were applications**
+
+A filter chain, a loopback and a virtual device each look like a playing
+application to the audio graph, so the Mixer listed them all. On a machine
+with a few signal paths set up, that was seven rows of infrastructure —
+"Everything output output", "Stream Mix (discarded) output" — against two real
+applications, in the one list whose whole job is to tell you what is playing.
+
+Only real applications are listed now. The plumbing is still counted on the
+Running audio objects card and still shown one node at a time in the Patchbay,
+which are the two places that are actually asking about the graph.
+
+**The dashboard refreshes about six times faster**
+
+It was asking PipeWire for each endpoint's volume one command at a time, when
+the level was already there in the reply it had just been given. A refresh
+with 16 endpoints measured 463 ms before and 79 ms after.
+
+**libadwaita 1.7 is now the minimum**
+
+The stated requirement was 1.4, and it had been wrong for some time — Signal
+Paths has needed 1.7 since v0.4.0. The dashboard rebuild made it matter: the
+view switcher in the window header is built before any page is, so on an older
+libadwaita the app no longer starts at all rather than losing one page.
+
+This drops **Ubuntu 24.04 LTS** (libadwaita 1.5.0), which was previously
+listed as supported. Debian 13 (1.7.6) and Ubuntu 26.04 LTS (1.9.1) are the
+floor; Fedora 42+, openSUSE Tumbleweed and Arch are all well above it. On
+24.04 the options are 26.04, a backport, or running from a checkout against a
+newer libadwaita.
+
+Where libadwaita is too old, the app now **says so**: a window naming the
+version it found and the version it needs, and the same text in the terminal.
+Before this it crashed somewhere inside a widget, which showed nothing at all
+when it had been started from its desktop entry.
+
+---
+
 ## [v0.5.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.5.1) — 2026-08-16
 
 **App Policy bug fixes and additions- rules now have a direction, plus snapshot
