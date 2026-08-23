@@ -307,6 +307,48 @@ def list_streams(dump=None, apps_only=False) -> list[Stream]:
     return streams
 
 
+def virtual_outputs(dump=None, nodes=None, streams=None) -> dict:
+    """{virtual sink node.name -> (output stream id, destination node id)}.
+
+    A filter chain, a loopback and a virtual device are each a *pair* of nodes
+    carrying one `node.link-group`: the sink you play into, and the playback
+    stream that carries the result back out.  Pairing on that rather than on a
+    name convention like `<name>.out` is the whole point — it finds the output
+    leg of a hand-written chain in `filter-chain.conf.d` (`effect_input.x` /
+    `effect_output.x`) just as well as one we generated, and those are exactly
+    the ones no page of ours can otherwise re-point.
+
+    Two kinds of virtual sink are deliberately absent, because neither has an
+    output anyone could choose: a virtual **microphone**'s sink leg, which
+    feeds a source rather than a sink, and a leg whose output is discarded.
+    The destination is None when the pair exists but is not linked anywhere.
+
+    Pass `nodes`/`streams` when the caller already has them — the dashboard
+    poll does, and re-parsing one pw-dump three times is the cost otherwise.
+    `streams` must be the **unfiltered** list; `apps_only=True` drops exactly
+    the legs this needs.
+    """
+    dump = dump if dump is not None else pw_dump()
+    nodes = nodes if nodes is not None else list_audio_nodes(dump)
+    streams = streams if streams is not None else list_streams(dump)
+
+    by_group = {}
+    for s in streams:
+        group = s.props.get('node.link-group')
+        if group:
+            by_group.setdefault(group, s)
+
+    outputs = {}
+    for node in nodes:
+        if not (node.is_virtual and node.is_sink):
+            continue
+        group = node.props.get('node.link-group')
+        out = by_group.get(group) if group else None
+        if out is not None:
+            outputs[node.name] = (out.id, out.target_id)
+    return outputs
+
+
 def move_stream(stream_id: int, target_serial: int) -> bool:
     """Route a stream to another device; WirePlumber moves it live."""
     rc, _, _ = run(['pw-metadata', str(stream_id), 'target.object',

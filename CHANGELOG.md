@@ -25,6 +25,30 @@ and commit log.
 
 ## Unreleased
 
+**Bug: a virtual device could not be re-pointed from the Mixer**
+
+An equalizer, a filter chain or a virtual device showed up in the Mixer's
+Devices list with a volume, a mute and a solo — and no way at all to say where
+its audio should go. The only routing control that row ever had was the
+hardware **Port** selector, and a virtual device has no ports, so it was always
+hidden. Sending an app to a virtual device was a one-way trip: you could watch
+it arrive and not follow it any further.
+
+Virtual devices now carry an **Output device** picker, where a real device
+carries its port selector. Choosing one takes effect immediately — nothing is
+restarted, so whatever is playing through it keeps playing — and the choice is
+remembered, so it survives the next reboot instead of quietly reverting.
+
+It works for chains this app did not create. A hand-written filter chain in
+`filter-chain.conf.d` has no settings page here, so for those the Mixer is now
+the only place they can be re-pointed at all.
+
+Two smaller things fall out of it. An output that feeds nothing says **Not
+connected**, rather than showing the first device in the list as though that
+were where it went — and it is also how you give one a destination for the
+first time. And a device is not offered anywhere that already feeds it, which
+would be a loop.
+
 **The dashboard is two views instead of five tabs**
 
 Overview and Mixer, picked from a switcher in the window header rather than
