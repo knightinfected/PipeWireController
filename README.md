@@ -299,7 +299,7 @@ ever locked behind a donation.
 
 Linux with a running **PipeWire** audio session — PipeWire ≥ 1.0 and
 WirePlumber ≥ 0.5 (port/profile switching uses `wpctl set-route` /
-`set-profile`). GTK 4 with **libadwaita ≥ 1.4**, Python ≥ 3.10. Pure
+`set-profile`). GTK 4 with **libadwaita ≥ 1.7**, Python ≥ 3.10. Pure
 Python, no build step. Developed and tested on PipeWire 1.6 /
 libadwaita 1.9.
 
@@ -346,18 +346,20 @@ sudo dnf install pipewire wireplumber pipewire-pulseaudio gtk4 libadwaita \
     python3-gobject python3-numpy python3-soundfile
 ```
 
-### Ubuntu 24.04+ / Debian 13+
+### Debian 13+ / Ubuntu 26.04 LTS+
 
 ```bash
 sudo apt install pipewire wireplumber pipewire-pulse gir1.2-gtk-4.0 \
     gir1.2-adw-1 python3-gi python3-numpy python3-soundfile
 ```
 
-Older releases ship a libadwaita before 1.4 and won't work.
+Older releases ship a libadwaita before **1.7** and won't work: Debian 12
+(bookworm) has 1.2.2 and **Ubuntu 24.04 LTS has 1.5.0**. Debian 13 (1.7.6) and
+Ubuntu 26.04 LTS (1.9.1) are the floor.
 
 ### Other distros
 
-Install GTK 4 + libadwaita (≥ 1.4) with GObject introspection and
+Install GTK 4 + libadwaita (≥ 1.7) with GObject introspection and
 PyGObject and pycairo from your package manager, then grab the Python audio bits via
 pip if your distro doesn't package them:
 
