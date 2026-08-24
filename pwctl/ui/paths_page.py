@@ -53,9 +53,9 @@ from .widgets import async_call, confirm, esc, group, icon_button, \
 _PLUGIN_CACHE: dict = {'all': None}
 
 KIND_ICON = {
-    'app': 'application-x-executable-symbolic',
-    'mic': 'audio-input-microphone-symbolic',
-    'everything': 'audio-volume-high-symbolic',
+    'app': 'pwctl-source-app-symbolic',
+    'mic': 'pwctl-source-mic-symbolic',
+    'everything': 'pwctl-source-all-symbolic',
 }
 KIND_BLURB = {
     'app': 'An application',
@@ -63,9 +63,9 @@ KIND_BLURB = {
     'everything': 'Everything on the default output',
 }
 STAGE_ICON = {
-    'eq': 'audio-x-generic-symbolic',
-    'effect': 'applications-multimedia-symbolic',
-    'convolver': 'audio-headphones-symbolic',
+    'eq': 'pwctl-eq-symbolic',
+    'effect': 'pwctl-effects-symbolic',
+    'convolver': 'pwctl-convolver-symbolic',
 }
 BAND_TYPES = [('PK', 'Peak'), ('LSC', 'Low shelf'), ('HSC', 'High shelf')]
 
@@ -1044,7 +1044,7 @@ class PathsPage:
         ('format-justify-fill-symbolic', 'Equalize everything',
          'One equalizer between every app and your current output.',
          '_quick_eq_all'),
-        ('applications-multimedia-symbolic', 'Put effects on one app',
+        ('pwctl-effects-symbolic', 'Put effects on one app',
          'Send a single app through a plugin chain, leaving the rest of your '
          'audio alone.', '_quick_app_fx'),
         ('camera-video-symbolic', 'Speakers and a stream mix',
@@ -1791,7 +1791,7 @@ class PathsPage:
                      'it onto another strip',
                      lambda _b, st=s: self._release_app(st),
                      icon='window-close-symbolic', active=True,
-                     lead_icon='view-pin-symbolic' if kept else '')
+                     lead_icon='pwctl-pin-symbolic' if kept else '')
             drag_source(c, lambda st=s: StreamDrag(st.id, st.name),
                         on_begin=lambda: self._begin_drag('stream', strip),
                         on_end=self._end_drag)
@@ -2127,11 +2127,11 @@ class PathsPage:
 
     def _app_chip_menu(self, stream, node_name, kept):
         if kept:
-            return [('view-pin-symbolic', 'Stop keeping it here',
+            return [('pwctl-pin-symbolic', 'Stop keeping it here',
                      lambda: self._keep_app(stream, node_name, False)),
                     ('window-close-symbolic', 'Send back to default output',
                      lambda: self._release_app(stream))]
-        return [('view-pin-symbolic', 'Keep this app here',
+        return [('pwctl-pin-symbolic', 'Keep this app here',
                  lambda: self._keep_app(stream, node_name, True)),
                 ('window-close-symbolic', 'Send back to default output',
                  lambda: self._release_app(stream))]

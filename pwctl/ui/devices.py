@@ -86,7 +86,7 @@ class DevicesPage:
             row = Adw.ActionRow(title=esc(node.description),
                                 subtitle=esc(node.name),
                                 title_lines=1, subtitle_lines=1)
-        icon = ('application-x-addon-symbolic' if node.is_virtual
+        icon = ('pwctl-virtual-symbolic' if node.is_virtual
                 else 'audio-speakers-symbolic' if node.is_sink
                 else 'audio-input-microphone-symbolic')
         row.add_prefix(Gtk.Image.new_from_icon_name(icon))

@@ -54,7 +54,10 @@ def _app_icon(name):
     theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
     if name and theme.has_icon(name):
         return name
-    return 'audio-x-generic-symbolic'
+    # An app that shipped no icon, or one this theme does not have.  Not our
+    # equalizer glyph: this stands in for *an application*, and a random app
+    # wearing the EQ icon reads as "this is going through the equalizer".
+    return 'application-x-executable-symbolic'
 
 
 def _pct_label():
@@ -329,7 +332,7 @@ class _DeviceRow(_VolumeRowBase):
         self._ports = []
         self.vol.set_meter(node.serial)
 
-        icon = ('application-x-addon-symbolic' if node.is_virtual
+        icon = ('pwctl-virtual-symbolic' if node.is_virtual
                 else 'audio-speakers-symbolic' if node.is_sink
                 else 'audio-input-microphone-symbolic')
         self.icon = Gtk.Image.new_from_icon_name(icon)
@@ -1042,7 +1045,7 @@ class _FavRow(Gtk.Box, GraceMixin):
                 self.serial = node.serial
                 self.vol.set_meter(node.serial)
             self.icon.set_from_icon_name(
-                'application-x-addon-symbolic' if node.is_virtual
+                'pwctl-virtual-symbolic' if node.is_virtual
                 else 'audio-speakers-symbolic' if node.is_sink
                 else 'audio-input-microphone-symbolic')
             self.label.set_label(node.description)
@@ -1566,7 +1569,7 @@ class Dashboard:
 
         # 4. what is playing right now
         play_card, play_body = card(
-            'Playing now', 'emblem-music-symbolic',
+            'Playing now', 'media-playback-start-symbolic',
             link=('Open mixer', lambda: self._goto_mixer('output', 'apps')))
         self.play_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.play_empty = Gtk.Label(label='Nothing is playing.', xalign=0)
@@ -1604,11 +1607,11 @@ class Dashboard:
         for parent, (label, icon, cb) in (
                 (grid, ('Restart audio', 'view-refresh-symbolic',
                         self._restart_all)),
-                (grid, ('Patchbay', 'network-workgroup-symbolic',
+                (grid, ('Patchbay', 'pwctl-patchbay-symbolic',
                         lambda: self.window.goto('graph'))),
-                (grid2, ('Signal Paths', 'network-transmit-receive-symbolic',
+                (grid2, ('Signal Paths', 'pwctl-paths-symbolic',
                          lambda: self.window.goto('paths'))),
-                (grid2, ('Equalizer', 'audio-x-generic-symbolic',
+                (grid2, ('Equalizer', 'pwctl-eq-symbolic',
                          lambda: self.window.goto('enhance')))):
             b = Gtk.Button()
             b.set_child(Adw.ButtonContent(icon_name=icon, label=label,
@@ -1622,7 +1625,7 @@ class Dashboard:
         # 7. the latency calculator — kept, because it is the only place in the
         #    app that can force a quantum/rate live (Tools' copy is read-only).
         calc_card, calc_body = card('Latency calculator',
-                                    'preferences-system-time-symbolic')
+                                    'pwctl-latency-symbolic')
         calc_body.append(self._build_latency_calc())
 
         # The same column layout every other page uses.  A Gtk.FlowBox was

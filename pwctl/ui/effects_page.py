@@ -119,7 +119,7 @@ class EffectsPage:
                             subtitle=' → '.join(names) or 'empty rack',
                             title_lines=1, subtitle_lines=1)
         row.add_prefix(Gtk.Image.new_from_icon_name(
-            'applications-multimedia-symbolic'))
+            'pwctl-effects-symbolic'))
         if meta.enabled:
             row.add_suffix(pill(state, state_style(state)))
         sw = Gtk.Switch(valign=Gtk.Align.CENTER, active=meta.enabled)

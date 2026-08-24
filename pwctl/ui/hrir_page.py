@@ -90,7 +90,7 @@ class HrirPage:
         else:
             sub = f'unreadable: {info.error}'
         row = Adw.ActionRow(title=esc(info.path.name), subtitle=sub)
-        row.add_prefix(Gtk.Image.new_from_icon_name('folder-music-symbolic'))
+        row.add_prefix(Gtk.Image.new_from_icon_name('pwctl-hrir-symbolic'))
         row.add_suffix(pill(info.kind_label.split(' (')[0],
                             KIND_STYLE.get(info.kind, 'dim')))
 

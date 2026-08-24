@@ -91,7 +91,7 @@ class ChainsPage:
         row.add_prefix(Gtk.Image.new_from_icon_name(
             'audio-input-microphone-symbolic'
             if meta.template == 'rnnoise-source'
-            else 'audio-headphones-symbolic'))
+            else 'pwctl-chains-symbolic'))
         if meta.enabled:
             row.add_suffix(pill(state, state_style(state)))
 

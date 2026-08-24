@@ -25,6 +25,28 @@ and commit log.
 
 ## Unreleased
 
+**The app brings its own icons**
+
+Icons used to come entirely from whatever icon theme you run, and that turned
+out not to be safe. On Breeze nine of them did not exist at all and rendered as
+a red "no entry" box — Signal Paths and Session & Bluetooth in the sidebar, and
+the marker on every virtual device in the Mixer. One of them,
+`utilities-system-monitor`, exists in neither Adwaita nor Breeze, so the Monitor
+page was broken for everybody on every distro. Three more rows — Equalizer,
+Streams and HRIR Library — all shared the same music note, because it was the
+closest thing either theme had.
+
+The icons for the things this app is actually about — routing, filters,
+equalizers, virtual devices, meters — now ship with it, so they look the same
+whatever desktop you are on and cannot disappear when a theme drops a name.
+Ordinary actions like add, delete, refresh and open are deliberately left
+alone: those still come from your theme and should follow it.
+
+The sidebar has sixteen distinct icons now instead of thirteen, two of which
+were red boxes.
+
+Icons are from the GNOME icon-development-kit, which is public domain.
+
 **Bug: a virtual device could not be re-pointed from the Mixer**
 
 An equalizer, a filter chain or a virtual device showed up in the Mixer's

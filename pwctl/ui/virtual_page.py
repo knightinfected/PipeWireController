@@ -114,7 +114,7 @@ class VirtualPage:
                             + ('' if dev.persistent else ' · temporary'),
                             title_lines=1, subtitle_lines=1)
         row.add_prefix(Gtk.Image.new_from_icon_name(
-            KIND_ICONS.get(dev.kind, 'application-x-addon-symbolic')))
+            KIND_ICONS.get(dev.kind, 'pwctl-virtual-symbolic')))
         if dev.enabled:
             row.add_suffix(pill(state, state_style(state)))
 
