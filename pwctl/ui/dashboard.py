@@ -26,7 +26,8 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from ..backend import chains, enhance, paths, prefs, pw, surround, system, virtual
 from .volume import VOLUME_STYLES, make_volume
-from .widgets import (ColumnBox, GraceMixin, RowSync, async_call, esc, micro,
+from .widgets import (ColumnBox, GraceMixin, RowSync, async_call, device_icon,
+                      esc, micro,
                       page_scroller, pill, state_style)
 
 SERVICES = [('pipewire.service', 'PipeWire'),
@@ -332,10 +333,7 @@ class _DeviceRow(_VolumeRowBase):
         self._ports = []
         self.vol.set_meter(node.serial)
 
-        icon = ('pwctl-virtual-symbolic' if node.is_virtual
-                else 'audio-speakers-symbolic' if node.is_sink
-                else 'audio-input-microphone-symbolic')
-        self.icon = Gtk.Image.new_from_icon_name(icon)
+        self.icon = Gtk.Image.new_from_icon_name(device_icon(node))
         self.title = Gtk.Label(xalign=0, hexpand=True,
                                ellipsize=Pango.EllipsizeMode.END)
         self.title.add_css_class('heading')
@@ -363,6 +361,15 @@ class _DeviceRow(_VolumeRowBase):
         self.header.append(self.title)
         if node.is_virtual:
             self.header.append(pill('virtual', 'dim'))
+            # ...and what kind of software device it is, when that says more
+            # than "virtual" does.  A hand-written chain in
+            # `filter-chain.conf.d` reads as "virtual · filter chain" here,
+            # which is the only place in the app that names it at all -- it has
+            # no settings page of ours.  Empty for our own virtual devices, so
+            # the row never says "virtual · virtual device".
+            kind = node.software_kind
+            if kind:
+                self.header.append(pill(kind, 'dim'))
         self.header.append(self.port_dd)
         self.header.append(self.out_dd)
         self.header.append(self.star)
@@ -1044,10 +1051,7 @@ class _FavRow(Gtk.Box, GraceMixin):
             if node.serial != self.serial:
                 self.serial = node.serial
                 self.vol.set_meter(node.serial)
-            self.icon.set_from_icon_name(
-                'pwctl-virtual-symbolic' if node.is_virtual
-                else 'audio-speakers-symbolic' if node.is_sink
-                else 'audio-input-microphone-symbolic')
+            self.icon.set_from_icon_name(device_icon(node))
             self.label.set_label(node.description)
             self.set_tooltip_text(node.name)
             if not self.in_grace:

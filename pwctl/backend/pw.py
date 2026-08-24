@@ -83,6 +83,50 @@ class AudioNode:
         # Filter-chain / loopback nodes have no device.api
         return 'device.api' not in self.props
 
+    @property
+    def software_kind(self) -> str:
+        """What *kind* of software device this is, for a badge beside 'virtual'.
+
+        Answered from the node's own props, never from our meta files: this is
+        read on every 3 s dashboard poll, and a meta lookup would be a stat and
+        a JSON parse per row per tick.  Two sources, and between them they
+        cover objects this app did not create:
+
+        * **`node.name`** carries our own prefixes.  `pwctl.eq.enh-…` is an
+          Equalizer, `pwctl.source.psou-…`/`pwctl.mix.pmix-…` are Signal Paths
+          strips, `effect_input.pwctl.…` is a chain from the Filter Chains page
+          (an effect rack is one too -- telling those apart needs the meta, and
+          "filter chain" is true of both).
+        * **`node.link-group`** is stamped by the module that built the node --
+          `filter-chain-<pid>-<n>` or `loopback-<pid>-<n>` -- so a hand-written
+          chain in `filter-chain.conf.d` is identified as readily as ours.
+          This is the same property `pw.Stream.is_app` and `virtual_outputs`
+          pair legs on.
+
+        Returns '' when there is nothing to add beyond "virtual" -- including
+        for our own virtual devices, where a second badge reading "virtual
+        device" would only repeat the first.
+        """
+        if not self.is_virtual:
+            return ''
+        name = self.name
+        if name.startswith('pwctl.eq.'):
+            return 'equalizer'
+        if name.startswith('pwctl.mic.'):
+            return 'mic cleanup'
+        if name.startswith(('pwctl.source.', 'pwctl.mix.', 'pwctl.xover.')):
+            return 'signal path'
+        if name.startswith('pwctl.vd-'):
+            return ''                    # "virtual" already says it
+        if name.startswith('effect_input.pwctl.'):
+            return 'filter chain'
+        group = self.props.get('node.link-group', '')
+        if group.startswith('filter-chain-'):
+            return 'filter chain'
+        if group.startswith('loopback-'):
+            return 'loopback'
+        return ''
+
 
 def _device_routes(dump) -> dict:
     """device object id -> (EnumRoute list, active Route list)."""

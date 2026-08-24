@@ -25,6 +25,24 @@ and commit log.
 
 ## Unreleased
 
+**A device row now says what kind of software device it is**
+
+The Mixer already marked anything that was not real hardware with a small
+**virtual** tag. It now adds a second one naming what the thing actually is —
+**filter chain**, **signal path**, **equalizer**, **mic cleanup** or
+**loopback** — and gives each kind its own icon, so a glance is enough.
+
+This works for things this app did not create. A filter chain you wrote by
+hand in `filter-chain.conf.d` has no settings page here, so the Mixer is the
+only place it is named at all; it now reads *virtual · filter chain* rather
+than just *virtual*.
+
+Your own virtual devices still show a single **virtual** tag, because a second
+one reading "virtual device" would only say the same thing twice.
+
+The Devices page gets the same treatment, and the icon for a given device is
+now the same wherever it is listed — Mixer, Devices and Favourites.
+
 **The app brings its own icons**
 
 Icons used to come entirely from whatever icon theme you run, and that turned
