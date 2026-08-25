@@ -23,13 +23,17 @@ KIND_COLUMN = {
 
 @dataclass
 class Port:
-    id: int
+    id: int                   # global object id — what pw-link takes
     node_id: int
     name: str
     direction: str            # 'in' | 'out'
     is_midi: bool = False
     is_monitor: bool = False
     channel: str = ''
+    index: int = -1           # `port.id`: this port's place in its own node,
+    #                           i.e. which channel of the layout it carries.
+    #                           NOT `id`, which is creation-ordered and puts a
+    #                           card's FR before its FL often enough to matter.
 
 
 @dataclass
@@ -141,7 +145,8 @@ def snapshot(dump=None, include_hidden=False) -> Graph:
             direction='in' if info.get('direction') == 'input' else 'out',
             is_midi='midi' in fmt or 'Midi' in str(props.get('port.alias', '')),
             is_monitor=bool(props.get('port.monitor')),
-            channel=str(props.get('audio.channel', '')))
+            channel=str(props.get('audio.channel', '')),
+            index=int(props.get('port.id', -1) or -1))
         ports_by_node.setdefault(node_id, []).append(port)
 
     for obj in dump:

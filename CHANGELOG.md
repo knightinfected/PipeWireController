@@ -25,6 +25,34 @@ and commit log.
 
 ## Unreleased
 
+**Channel maps now work with any device, not just Pro Audio cards**
+
+You could already build a virtual device wired to *specific channels* of a
+real one — but only if that device was a sound card in the "Pro Audio"
+profile, showing raw `AUX0`, `AUX1`… channels. Every other multi-channel
+device was refused, even though the mechanism handles them perfectly.
+
+It no longer is. Pick any output or input, and map each channel of a virtual
+device onto a channel of it:
+
+- **A controller whose rear channels are its haptics.** A DualSense is a
+  four-channel audio device: the front pair is the speaker, the rear pair is
+  the haptics. Map a stereo sink onto just those two and you have an ordinary
+  output — with its own volume, and an equalizer or filter chain in front of
+  it if you want one — that reaches nothing but the haptics.
+- **One pair of a surround card.** Send something to just the rear speakers,
+  or just the centre, without touching the rest.
+- **Chosen inputs of an interface** published as a virtual microphone.
+
+Audio goes straight through, channel for channel — nothing is up- or
+downmixed, and the channels you leave out receive nothing at all.
+
+Devices you already had are untouched: existing Pro Audio maps generate
+exactly the same configuration as before and keep being linked the same way.
+Only the wording changed — the dialog now says **Channel map**, and the note
+about Pro Audio needing manual linking appears only when you actually pick a
+Pro Audio device.
+
 **Filter chains no longer fail with an error that explains nothing**
 
 On distributions that split PipeWire's plugin support into separate packages,

@@ -58,7 +58,7 @@ class VirtualPage:
         new_row = Adw.ActionRow(
             title='Create a virtual device',
             subtitle='Null sink · virtual microphone · combined (aggregate) '
-                     'device · bus / sub-mix · Pro Audio channel map')
+                     'device · bus / sub-mix · channel map')
         new_btn = Gtk.Button(icon_name='list-add-symbolic',
                              valign=Gtk.Align.CENTER)
         new_btn.add_css_class('suggested-action')
@@ -281,9 +281,9 @@ class VirtualDialog(Adw.Window):
         self.target_row = Adw.ComboRow(title='Target device')
         self.target_group.add(self.target_row)
 
-        # pro-audio channel map
+        # channel map
         self.pro_targets = []
-        self._aux_names = []
+        self._target_chans = []
         self.map_entries = []
         self._pro_updating = False
         self.pro_banner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
@@ -291,27 +291,31 @@ class VirtualDialog(Adw.Window):
         self.pro_banner.add_css_class('pwctl-note')
         _note_icon = Gtk.Image.new_from_icon_name('dialog-information-symbolic')
         _note_icon.set_valign(Gtk.Align.START)
-        _note_lbl = Gtk.Label(
+        self.pro_note = Gtk.Label(
             label='Pro Audio channels don’t auto-route like normal sinks, so '
                   'this links straight to the chosen device. If that device is '
                   'unplugged or leaves Pro Audio mode, toggle this device off '
                   'and on to rebuild the mapping.',
             wrap=True, xalign=0, hexpand=True)
+        _note_lbl = self.pro_note
         self.pro_banner.append(_note_icon)
         self.pro_banner.append(_note_lbl)
         self.pro_banner.set_visible(False)
         self.pro_group = Adw.PreferencesGroup(
-            title='Pro Audio device',
-            description='Set a sound card to the "Pro Audio" profile to expose '
-                        'its raw AUX channels here.')
+            title='Target device',
+            description='The device this maps onto. Any output or input will '
+                        'do — a card in the "Pro Audio" profile shows its raw '
+                        'AUX channels, everything else its normal ones.')
         self.pro_target_row = Adw.ComboRow(title='Target device')
         self.pro_target_row.connect('notify::selected', self._target_changed)
         self.pro_group.add(self.pro_target_row)
 
         self.map_group = Adw.PreferencesGroup(
             title='Channel map',
-            description='Each virtual channel links to one hardware AUX '
-                        'channel (index passthrough, no remixing).')
+            description='Each virtual channel links to one channel on the '
+                        'target device, straight through — no up- or '
+                        'downmixing, and nothing reaches the channels you '
+                        'leave out.')
         add_btn = Gtk.Button(icon_name='list-add-symbolic',
                              valign=Gtk.Align.CENTER, tooltip_text='Add channel')
         add_btn.connect('clicked', lambda *_: self._add_map_row())
@@ -350,16 +354,18 @@ class VirtualDialog(Adw.Window):
 
     def _kind_changed(self, *_a):
         kind = self._current_kind()
-        is_pro = kind.startswith('pro-map')
+        is_map = kind.startswith('pro-map')
         self.members_group.set_visible(kind.startswith('combine'))
         self.target_group.set_visible(kind == 'bus')
-        self.pro_group.set_visible(is_pro)
-        self.map_group.set_visible(is_pro)
-        self.pro_banner.set_visible(is_pro)
-        self.layout_row.set_visible(not is_pro)  # pro-map positions come
-        #                                          from the channel map
+        self.pro_group.set_visible(is_map)
+        self.map_group.set_visible(is_map)
+        # The note is about Pro Audio targets specifically, so it waits until
+        # we know which device is selected rather than following the kind.
+        self.pro_banner.set_visible(False)
+        self.layout_row.set_visible(not is_map)  # a channel map's positions
+        #                                          come from the map itself
         self._fill_members()
-        if is_pro:
+        if is_map:
             self._load_pro_targets()
 
     def _nodes_loaded(self, nodes, error):
@@ -398,7 +404,7 @@ class VirtualDialog(Adw.Window):
     def _load_pro_targets(self):
         direction = 'sink' if self._current_kind() == 'pro-map-sink' \
             else 'source'
-        async_call(lambda: virtual.list_pro_targets(direction),
+        async_call(lambda: virtual.list_map_targets(direction),
                    self._pro_targets_loaded)
 
     def _pro_targets_loaded(self, targets, error):
@@ -409,10 +415,11 @@ class VirtualDialog(Adw.Window):
         try:
             if not targets:
                 self.pro_target_row.set_model(Gtk.StringList.new(
-                    ['No Pro Audio device found']))
+                    ['No device found']))
                 self.pro_target_row.set_sensitive(False)
-                self._aux_names = []
+                self._target_chans = []
                 self._clear_map()
+                self.pro_banner.set_visible(False)
                 return
             self.pro_target_row.set_sensitive(True)
             self.pro_target_row.set_model(
@@ -422,7 +429,7 @@ class VirtualDialog(Adw.Window):
                 sel = next((i for i, t in enumerate(targets)
                             if t[0] == self.dev.target), 0)
             self.pro_target_row.set_selected(sel)
-            self._aux_names = list(targets[sel][2])
+            self._target_chans = list(targets[sel][2])
             # editing this device: restore its saved map; else default 1:1
             if self.dev and self.dev.target == targets[sel][0] \
                     and self.dev.target_positions:
@@ -430,16 +437,25 @@ class VirtualDialog(Adw.Window):
                                 self.dev.target_positions)
             else:
                 self._default_map()
+            self._sync_pro_note()
         finally:
             self._pro_updating = False
+
+    def _sync_pro_note(self):
+        """Show the manual-linking note only for a Pro Audio target."""
+        idx = self.pro_target_row.get_selected()
+        pro = (self.pro_targets and 0 <= idx < len(self.pro_targets)
+               and self.pro_targets[idx][3])
+        self.pro_banner.set_visible(bool(pro))
 
     def _target_changed(self, *_a):
         if self._pro_updating:
             return
         idx = self.pro_target_row.get_selected()
         if 0 <= idx < len(self.pro_targets):
-            self._aux_names = list(self.pro_targets[idx][2])
-            self._default_map()          # aux set changed → reset the map
+            self._target_chans = list(self.pro_targets[idx][2])
+            self._default_map()      # different channels → start the map over
+            self._sync_pro_note()
 
     def _clear_map(self):
         for e in self.map_entries:
@@ -452,24 +468,25 @@ class VirtualDialog(Adw.Window):
             self._add_map_row(vpos, aux)
 
     def _default_map(self):
-        # pair the first N AUX channels with FL/FR/… in order
-        n = min(2, len(self._aux_names)) or len(self._aux_names)
+        # Pair stereo by default — the common case, and a sane starting point
+        # to edit down or up from.  A mono target gets its one channel.
+        n = min(2, len(self._target_chans)) or len(self._target_chans)
         defaults = ['FL', 'FR', 'FC', 'LFE', 'RL', 'RR', 'SL', 'SR']
-        self._build_map(defaults[:n], self._aux_names[:n])
+        self._build_map(defaults[:n], self._target_chans[:n])
 
     def _add_map_row(self, vpos=None, aux_name=None):
-        if not self._aux_names:
+        if not self._target_chans:
             return
         row = Adw.ActionRow(title='→')
         vdd = Gtk.DropDown.new_from_strings(POSITION_NAMES)
         vdd.set_valign(Gtk.Align.CENTER)
         if vpos in POSITION_NAMES:
             vdd.set_selected(POSITION_NAMES.index(vpos))
-        add = Gtk.DropDown.new_from_strings(self._aux_names)
+        add = Gtk.DropDown.new_from_strings(self._target_chans)
         add.set_valign(Gtk.Align.CENTER)
-        if aux_name in self._aux_names:
-            add.set_selected(self._aux_names.index(aux_name))
-        elif len(self.map_entries) < len(self._aux_names):
+        if aux_name in self._target_chans:
+            add.set_selected(self._target_chans.index(aux_name))
+        elif len(self.map_entries) < len(self._target_chans):
             add.set_selected(len(self.map_entries))   # next unused AUX
         entry = {'row': row, 'vdd': vdd, 'add': add}
         rm = icon_button('list-remove-symbolic', 'Remove channel',
@@ -507,21 +524,22 @@ class VirtualDialog(Adw.Window):
         if kind.startswith('pro-map'):
             tsel = self.pro_target_row.get_selected()
             if not self.pro_targets or not (0 <= tsel < len(self.pro_targets)):
-                self.window.toast('Pick a target Pro Audio device')
+                self.window.toast('Pick a target device')
                 return
             target = self.pro_targets[tsel][0]
             positions, target_positions = [], []
             for e in self.map_entries:
                 ai = e['add'].get_selected()
-                if not (0 <= ai < len(self._aux_names)):
+                if not (0 <= ai < len(self._target_chans)):
                     continue
                 positions.append(POSITION_NAMES[e['vdd'].get_selected()])
-                target_positions.append(self._aux_names[ai])
+                target_positions.append(self._target_chans[ai])
             if not positions:
                 self.window.toast('Add at least one channel mapping')
                 return
             if len(set(target_positions)) != len(target_positions):
-                self.window.toast('Each AUX channel can be mapped only once')
+                self.window.toast('Each channel on the target can be '
+                                  'mapped only once')
                 return
 
         if self.dev:
