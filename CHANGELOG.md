@@ -23,71 +23,26 @@ and commit log.
 
 ---
 
-## Unreleased
+## [v0.6.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.0) — 2026-08-24
+**The dashboard is rebuilt — two views instead of five tabs, pinned favourites, and the app now ships its own icons**
 
-**A device row now says what kind of software device it is**
+**libadwaita 1.7 is now the minimum**
 
-The Mixer already marked anything that was not real hardware with a small
-**virtual** tag. It now adds a second one naming what the thing actually is —
-**filter chain**, **signal path**, **equalizer**, **mic cleanup** or
-**loopback** — and gives each kind its own icon, so a glance is enough.
+The stated requirement was 1.4, and it had been wrong for some time — Signal
+Paths has needed 1.7 since v0.4.0. The dashboard rebuild made it matter: the
+view switcher in the window header is built before any page is, so on an older
+libadwaita the app no longer starts at all rather than losing one page.
 
-This works for things this app did not create. A filter chain you wrote by
-hand in `filter-chain.conf.d` has no settings page here, so the Mixer is the
-only place it is named at all; it now reads *virtual · filter chain* rather
-than just *virtual*.
+This drops **Ubuntu 24.04 LTS** (libadwaita 1.5.0), which was previously
+listed as supported. Debian 13 (1.7.6) and Ubuntu 26.04 LTS (1.9.1) are the
+floor; Fedora 42+, openSUSE Tumbleweed and Arch are all well above it. On
+24.04 the options are 26.04, a backport, or running from a checkout against a
+newer libadwaita.
 
-Your own virtual devices still show a single **virtual** tag, because a second
-one reading "virtual device" would only say the same thing twice.
-
-The Devices page gets the same treatment, and the icon for a given device is
-now the same wherever it is listed — Mixer, Devices and Favourites.
-
-**The app brings its own icons**
-
-Icons used to come entirely from whatever icon theme you run, and that turned
-out not to be safe. On Breeze nine of them did not exist at all and rendered as
-a red "no entry" box — Signal Paths and Session & Bluetooth in the sidebar, and
-the marker on every virtual device in the Mixer. One of them,
-`utilities-system-monitor`, exists in neither Adwaita nor Breeze, so the Monitor
-page was broken for everybody on every distro. Three more rows — Equalizer,
-Streams and HRIR Library — all shared the same music note, because it was the
-closest thing either theme had.
-
-The icons for the things this app is actually about — routing, filters,
-equalizers, virtual devices, meters — now ship with it, so they look the same
-whatever desktop you are on and cannot disappear when a theme drops a name.
-Ordinary actions like add, delete, refresh and open are deliberately left
-alone: those still come from your theme and should follow it.
-
-The sidebar has sixteen distinct icons now instead of thirteen, two of which
-were red boxes.
-
-Icons are from the GNOME icon-development-kit, which is public domain.
-
-**Bug: a virtual device could not be re-pointed from the Mixer**
-
-An equalizer, a filter chain or a virtual device showed up in the Mixer's
-Devices list with a volume, a mute and a solo — and no way at all to say where
-its audio should go. The only routing control that row ever had was the
-hardware **Port** selector, and a virtual device has no ports, so it was always
-hidden. Sending an app to a virtual device was a one-way trip: you could watch
-it arrive and not follow it any further.
-
-Virtual devices now carry an **Output device** picker, where a real device
-carries its port selector. Choosing one takes effect immediately — nothing is
-restarted, so whatever is playing through it keeps playing — and the choice is
-remembered, so it survives the next reboot instead of quietly reverting.
-
-It works for chains this app did not create. A hand-written filter chain in
-`filter-chain.conf.d` has no settings page here, so for those the Mixer is now
-the only place they can be re-pointed at all.
-
-Two smaller things fall out of it. An output that feeds nothing says **Not
-connected**, rather than showing the first device in the list as though that
-were where it went — and it is also how you give one a destination for the
-first time. And a device is not offered anywhere that already feeds it, which
-would be a loop.
+Where libadwaita is too old, the app now **says so**: a window naming the
+version it found and the version it needs, and the same text in the terminal.
+Before this it crashed somewhere inside a widget, which showed nothing at all
+when it had been started from its desktop entry.
 
 **The dashboard is two views instead of five tabs**
 
@@ -133,6 +88,76 @@ Pages painted one column of about 730px however wide the window was. A wider
 window now opens another column instead, so maximizing shows you more rather
 than the same amount with more space around it.
 
+**The dashboard refreshes about six times faster**
+
+It was asking PipeWire for each endpoint's volume one command at a time, when
+the level was already there in the reply it had just been given. A refresh
+with 16 endpoints measured 463 ms before and 79 ms after.
+
+**The app brings its own icons**
+
+Icons used to come entirely from whatever icon theme you run, and that turned
+out not to be safe. On Breeze nine of them did not exist at all and rendered as
+a red "no entry" box — Signal Paths and Session & Bluetooth in the sidebar, and
+the marker on every virtual device in the Mixer. One of them,
+`utilities-system-monitor`, exists in neither Adwaita nor Breeze, so the Monitor
+page was broken for everybody on every distro. Three more rows — Equalizer,
+Streams and HRIR Library — all shared the same music note, because it was the
+closest thing either theme had.
+
+The icons for the things this app is actually about — routing, filters,
+equalizers, virtual devices, meters — now ship with it, so they look the same
+whatever desktop you are on and cannot disappear when a theme drops a name.
+Ordinary actions like add, delete, refresh and open are deliberately left
+alone: those still come from your theme and should follow it.
+
+The sidebar has sixteen distinct icons now instead of thirteen, two of which
+were red boxes.
+
+Icons are from the GNOME icon-development-kit, which is public domain.
+
+**A device row now says what kind of software device it is**
+
+The Mixer already marked anything that was not real hardware with a small
+**virtual** tag. It now adds a second one naming what the thing actually is —
+**filter chain**, **signal path**, **equalizer**, **mic cleanup** or
+**loopback** — and gives each kind its own icon, so a glance is enough.
+
+This works for things this app did not create. A filter chain you wrote by
+hand in `filter-chain.conf.d` has no settings page here, so the Mixer is the
+only place it is named at all; it now reads *virtual · filter chain* rather
+than just *virtual*.
+
+Your own virtual devices still show a single **virtual** tag, because a second
+one reading "virtual device" would only say the same thing twice.
+
+The Devices page gets the same treatment, and the icon for a given device is
+now the same wherever it is listed — Mixer, Devices and Favourites.
+
+**Bug: a virtual device could not be re-pointed from the Mixer**
+
+An equalizer, a filter chain or a virtual device showed up in the Mixer's
+Devices list with a volume, a mute and a solo — and no way at all to say where
+its audio should go. The only routing control that row ever had was the
+hardware **Port** selector, and a virtual device has no ports, so it was always
+hidden. Sending an app to a virtual device was a one-way trip: you could watch
+it arrive and not follow it any further.
+
+Virtual devices now carry an **Output device** picker, where a real device
+carries its port selector. Choosing one takes effect immediately — nothing is
+restarted, so whatever is playing through it keeps playing — and the choice is
+remembered, so it survives the next reboot instead of quietly reverting.
+
+It works for chains this app did not create. A hand-written filter chain in
+`filter-chain.conf.d` has no settings page here, so for those the Mixer is now
+the only place they can be re-pointed at all.
+
+Two smaller things fall out of it. An output that feeds nothing says **Not
+connected**, rather than showing the first device in the list as though that
+were where it went — and it is also how you give one a destination for the
+first time. And a device is not offered anywhere that already feeds it, which
+would be a loop.
+
 **Bug: the Mixer listed the app's own plumbing as if it were applications**
 
 A filter chain, a loopback and a virtual device each look like a playing
@@ -144,30 +169,6 @@ applications, in the one list whose whole job is to tell you what is playing.
 Only real applications are listed now. The plumbing is still counted on the
 Running audio objects card and still shown one node at a time in the Patchbay,
 which are the two places that are actually asking about the graph.
-
-**The dashboard refreshes about six times faster**
-
-It was asking PipeWire for each endpoint's volume one command at a time, when
-the level was already there in the reply it had just been given. A refresh
-with 16 endpoints measured 463 ms before and 79 ms after.
-
-**libadwaita 1.7 is now the minimum**
-
-The stated requirement was 1.4, and it had been wrong for some time — Signal
-Paths has needed 1.7 since v0.4.0. The dashboard rebuild made it matter: the
-view switcher in the window header is built before any page is, so on an older
-libadwaita the app no longer starts at all rather than losing one page.
-
-This drops **Ubuntu 24.04 LTS** (libadwaita 1.5.0), which was previously
-listed as supported. Debian 13 (1.7.6) and Ubuntu 26.04 LTS (1.9.1) are the
-floor; Fedora 42+, openSUSE Tumbleweed and Arch are all well above it. On
-24.04 the options are 26.04, a backport, or running from a checkout against a
-newer libadwaita.
-
-Where libadwaita is too old, the app now **says so**: a window naming the
-version it found and the version it needs, and the same text in the terminal.
-Before this it crashed somewhere inside a widget, which showed nothing at all
-when it had been started from its desktop entry.
 
 ---
 
