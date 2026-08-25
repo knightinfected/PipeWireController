@@ -543,3 +543,16 @@ never modified.
 - Thanks to **Wim Taymans**, creator of PipeWire, for reviewing the Server
   page's quantum and buffer settings — his feedback corrected the
   `link.max-buffers` description and the quantum hard-limit range in v0.3.1.
+
+- The app's own symbolic icons come from the [GNOME
+  icon-development-kit](https://gitlab.gnome.org/Teams/Design/icon-development-kit),
+  released under CC0 1.0. They are bundled so a missing theme icon can no
+  longer leave a blank space where a control should be.
+
+## License
+
+PipeWire Controller is licensed **GPL-3.0-or-later** — see [LICENSE](LICENSE).
+
+The bundled icons under `pwctl/icons/` are from the GNOME
+icon-development-kit and are **CC0 1.0** (public domain dedication). CC0
+imposes no conditions, so it does not affect the app's own licensing.
