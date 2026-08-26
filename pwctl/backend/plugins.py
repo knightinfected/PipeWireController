@@ -20,15 +20,43 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# /usr/lib64 is a symlink to /usr/lib on Arch but a separate tree on Fedora,
+# openSUSE and RHEL, where every 64-bit plugin lives in it and nowhere else.
+# Both go in the list; _dirs() resolves away the overlap where it is a link.
 LADSPA_DIRS = [Path(p) for p in
                os.environ.get('LADSPA_PATH', '').split(':') if p] or \
-              [Path('/usr/lib/ladspa'), Path('/usr/local/lib/ladspa'),
+              [Path('/usr/lib/ladspa'), Path('/usr/lib64/ladspa'),
+               Path('/usr/local/lib/ladspa'), Path('/usr/local/lib64/ladspa'),
                Path.home() / '.ladspa']
 LV2_DIRS = [Path(p) for p in os.environ.get('LV2_PATH', '').split(':') if p] or \
-           [Path('/usr/lib/lv2'), Path('/usr/local/lib/lv2'),
+           [Path('/usr/lib/lv2'), Path('/usr/lib64/lv2'),
+            Path('/usr/local/lib/lv2'), Path('/usr/local/lib64/lv2'),
             Path.home() / '.lv2']
-VST3_DIRS = [Path('/usr/lib/vst3'), Path.home() / '.vst3']
-CLAP_DIRS = [Path('/usr/lib/clap'), Path.home() / '.clap']
+VST3_DIRS = [Path('/usr/lib/vst3'), Path('/usr/lib64/vst3'),
+             Path.home() / '.vst3']
+CLAP_DIRS = [Path('/usr/lib/clap'), Path('/usr/lib64/clap'),
+             Path.home() / '.clap']
+
+
+def _dirs(paths: list) -> list:
+    """The ones that exist, de-duplicated by real path.
+
+    Scanning both /usr/lib and /usr/lib64 would otherwise list every plugin
+    twice on a distro where one is a symlink to the other.
+    """
+    seen, out = set(), []
+    for d in paths:
+        try:
+            if not d.is_dir():
+                continue
+            real = d.resolve()
+        except OSError:
+            continue
+        if real in seen:
+            continue
+        seen.add(real)
+        out.append(d)
+    return out
 
 
 @dataclass
@@ -108,9 +136,7 @@ def _scan_ladspa_lib(path: Path) -> list[Plugin]:
 
 def scan_ladspa() -> list[Plugin]:
     plugins = []
-    for d in LADSPA_DIRS:
-        if not d.is_dir():
-            continue
+    for d in _dirs(LADSPA_DIRS):
         for lib in sorted(d.glob('*.so')):
             plugins += _scan_ladspa_lib(lib)
     return plugins
@@ -118,11 +144,38 @@ def scan_ladspa() -> list[Plugin]:
 
 # --------------------------------------------------------------------- LV2 --
 
+# A Turtle subject is written either as a full <URI> or as a prefixed name
+# (`plug:autogain_mono`) declared by an @prefix line.  Matching only the
+# first form made whole vendors invisible — LSP and the Zam suite write
+# every subject prefixed, so none of their plugins was ever listed.
+_TTL_SUBJ = (r'(?:<(?P<uri>[^>\s]+)>'
+             r'|(?P<pfx>[A-Za-z][\w.-]*)?:(?P<local>[\w.\-%]+))')
+
 _TTL_PLUGIN_RE = re.compile(
-    r'<([^>\s]+)>\s+(?:\n\s*)?a\s+(?:[^;.]*\b)?lv2:Plugin\b', re.M)
+    _TTL_SUBJ + r'\s+a\s+(?:[^;.]*\b)?lv2:Plugin\b', re.M)
 _TTL_SEEALSO_RE = re.compile(r'rdfs:seeAlso\s+<([^>]+)>')
 _TTL_NAME_RE = re.compile(r'doap:name\s+"((?:[^"\\]|\\.)*)"')
-_TTL_SUBJECT_SPLIT = re.compile(r'^<([^>\s]+)>', re.M)
+_TTL_SUBJECT_SPLIT = re.compile(r'^' + _TTL_SUBJ, re.M)
+_TTL_PREFIX_RE = re.compile(
+    r'^\s*@?prefix\s+([A-Za-z][\w.-]*)?:\s*<([^>]*)>', re.M | re.I)
+
+
+def _ttl_prefixes(text: str) -> dict:
+    """The @prefix declarations of one Turtle file, as name -> namespace."""
+    return {m.group(1) or '': m.group(2)
+            for m in _TTL_PREFIX_RE.finditer(text)}
+
+
+def _ttl_subject(m, prefixes: dict) -> str:
+    """The full URI of a matched subject, expanding a prefixed name.
+
+    Returns '' for a prefix the file never declared, so an unresolvable
+    subject is skipped rather than recorded under a half-built URI.
+    """
+    if m.group('uri'):
+        return m.group('uri')
+    ns = prefixes.get(m.group('pfx') or '')
+    return ns + m.group('local') if ns is not None else ''
 
 
 def _lv2_ports(block: str) -> tuple[list, list]:
@@ -148,9 +201,12 @@ def _scan_lv2_bundle(bundle: Path) -> list[Plugin]:
         text = manifest.read_text(encoding='utf-8', errors='replace')
     except OSError:
         return []
+    prefixes = _ttl_prefixes(text)
     uris = []
     for m in _TTL_PLUGIN_RE.finditer(text):
-        uri = m.group(1)
+        uri = _ttl_subject(m, prefixes)
+        if not uri:
+            continue
         # the manifest entry usually points to the file with the details
         tail = text[m.start():m.start() + 500]
         see = _TTL_SEEALSO_RE.search(tail)
@@ -166,7 +222,8 @@ def _scan_lv2_bundle(bundle: Path) -> list[Plugin]:
                 detail = ''
             # isolate this plugin's block in a possibly multi-plugin file
             block = detail
-            subjects = [(m.start(), m.group(1))
+            dprefixes = _ttl_prefixes(detail)
+            subjects = [(m.start(), _ttl_subject(m, dprefixes))
                         for m in _TTL_SUBJECT_SPLIT.finditer(detail)]
             for i, (pos, subj) in enumerate(subjects):
                 if subj == uri:
@@ -185,9 +242,7 @@ def _scan_lv2_bundle(bundle: Path) -> list[Plugin]:
 
 def scan_lv2() -> list[Plugin]:
     plugins = []
-    for d in LV2_DIRS:
-        if not d.is_dir():
-            continue
+    for d in _dirs(LV2_DIRS):
         for bundle in sorted(d.iterdir()):
             if bundle.is_dir():
                 plugins += _scan_lv2_bundle(bundle)
@@ -202,9 +257,8 @@ def detect_unsupported() -> dict:
     for fmt, dirs, pat in (('VST3', VST3_DIRS, '*.vst3'),
                            ('CLAP', CLAP_DIRS, '*.clap')):
         count = 0
-        for d in dirs:
-            if d.is_dir():
-                count += len(list(d.glob(pat)))
+        for d in _dirs(dirs):
+            count += len(list(d.glob(pat)))
         if count:
             found[fmt] = count
     return found

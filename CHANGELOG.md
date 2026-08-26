@@ -23,7 +23,7 @@ and commit log.
 
 ---
 
-## [v0.6.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.0) — 2026-08-24
+## [v0.6.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.0) — 2026-08-25
 **The dashboard is rebuilt — two views instead of five tabs, pinned favourites, and the app now ships its own icons**
 
 **libadwaita 1.7 is now the minimum**
@@ -169,6 +169,28 @@ applications, in the one list whose whole job is to tell you what is playing.
 Only real applications are listed now. The plumbing is still counted on the
 Running audio objects card and still shown one node at a time in the Patchbay,
 which are the two places that are actually asking about the graph.
+
+**Bug: whole plugin collections were missing from Effects and Signal Paths**
+
+If you had the LSP or Zam plugins installed, the app did not list them — and on
+Fedora, openSUSE or RHEL it may not have listed anything at all.
+
+Two things were wrong. An LV2 plugin can be named in its manifest either by its
+full address or by a shorthand, and only the first form was understood. LSP and
+Zam both use the shorthand, so both collections were skipped everywhere — on a
+typical install that is over two hundred plugins that were installed, working,
+and invisible. It went unnoticed for so long because LSP also ships in the
+older LADSPA format and that half was always detected, so the list never looked
+empty.
+
+The second was the search path. On Fedora and openSUSE, 64-bit plugins live in
+`/usr/lib64`, which was never looked at — on Arch that folder is just another
+name for one already scanned, so it never showed up in testing.
+
+Both are fixed, and the scan now also looks in `/usr/local/lib64`. On a
+development machine here the number of LV2 plugins found went from 92 to 322.
+
+Reported by @GileonFletcher.
 
 ---
 
