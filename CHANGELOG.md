@@ -23,7 +23,7 @@ and commit log.
 
 ---
 
-## [v0.6.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.0) — 2026-08-25
+## [v0.6.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.0) — 2026-08-26
 **The dashboard is rebuilt — two views instead of five tabs, pinned favourites, and the app now ships its own icons**
 
 **libadwaita 1.7 is now the minimum**
@@ -56,6 +56,10 @@ volume, mute and live meter stay on the dashboard. A favourite whose device is
 unplugged keeps its place and still reads as its own name rather than
 vanishing or turning into an ALSA device string, and its controls come back on
 their own when the device does.
+
+![The rebuilt Overview — default output and input, pinned favourites, and the view switcher in the window header](screenshots/dashboard-0.6.0.png)
+
+![Pinning a favourite — every output, input and virtual device in one list](screenshots/favorite-devices.png)
 
 The sidebar's sixteen pages are now grouped under Mix, Route, Process,
 Configure and System. Nothing was dropped in the rebuild: all sixteen pages
@@ -134,6 +138,8 @@ one reading "virtual device" would only say the same thing twice.
 The Devices page gets the same treatment, and the icon for a given device is
 now the same wherever it is listed — Mixer, Devices and Favourites.
 
+![Mixer, Devices — every software device says what kind it is, and where its audio goes](screenshots/mixer-devices.png)
+
 **Bug: a virtual device could not be re-pointed from the Mixer**
 
 An equalizer, a filter chain or a virtual device showed up in the Mixer's
@@ -158,6 +164,8 @@ were where it went — and it is also how you give one a destination for the
 first time. And a device is not offered anywhere that already feeds it, which
 would be a loop.
 
+![The same list in dark mode with the LED meter style — an output that feeds nothing says so](screenshots/mixer-devices-dark.png)
+
 **Bug: the Mixer listed the app's own plumbing as if it were applications**
 
 A filter chain, a loopback and a virtual device each look like a playing
@@ -169,6 +177,8 @@ applications, in the one list whose whole job is to tell you what is playing.
 Only real applications are listed now. The plumbing is still counted on the
 Running audio objects card and still shown one node at a time in the Patchbay,
 which are the two places that are actually asking about the graph.
+
+![Mixer, Apps — four real applications, and none of the plumbing that used to sit among them](screenshots/mixer-apps.png)
 
 **Bug: whole plugin collections were missing from Effects and Signal Paths**
 
