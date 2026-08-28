@@ -513,6 +513,7 @@ class VirtualDialog(Adw.Window):
                    if row.get_active()]
         target = ''
         target_positions = []
+        target_pro = None
         if kind.startswith('combine') and len(members) < 2:
             self.window.toast('Pick at least two member devices')
             return
@@ -527,6 +528,10 @@ class VirtualDialog(Adw.Window):
                 self.window.toast('Pick a target device')
                 return
             target = self.pro_targets[tsel][0]
+            # Recorded now, from the live graph, because it cannot be asked
+            # again later: the card may be unplugged or off the profile by
+            # the time the conf is generated.
+            target_pro = bool(self.pro_targets[tsel][3])
             positions, target_positions = [], []
             for e in self.map_entries:
                 ai = e['add'].get_selected()
@@ -549,11 +554,13 @@ class VirtualDialog(Adw.Window):
             dev.members = members
             dev.target = target
             dev.target_positions = target_positions
+            dev.target_pro = target_pro
             dev.persistent = self.persist_row.get_active()
         else:
             dev = virtual.new_device(
                 name, kind, positions=positions, members=members,
                 target=target, target_positions=target_positions,
+                target_pro=target_pro,
                 persistent=self.persist_row.get_active())
             dev.enabled = True
 
