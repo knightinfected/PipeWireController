@@ -8,6 +8,7 @@ filter-chain module) from a ChainMeta, so it can be run as its own
 from __future__ import annotations
 
 from .. import spa_json
+from . import backends
 
 # HeSuVi 14-channel WAV layout: channel index per (speaker, ear)
 HESUVI = {
@@ -270,8 +271,10 @@ def _rnnoise(meta):
     vad = meta.params.get('vad_threshold', 50.0)
     nodes = [{
         'type': 'ladspa', 'name': 'rnnoise',
-        'plugin': meta.params.get(
-            'rnnoise_plugin', '/usr/lib/ladspa/librnnoise_ladspa.so'),
+        # Re-resolved because /usr/lib64 is a real tree on Fedora/openSUSE and
+        # the hardcoded default only ever exists on Arch — see backends.py.
+        'plugin': backends.resolve_ladspa_path(meta.params.get(
+            'rnnoise_plugin', '/usr/lib/ladspa/librnnoise_ladspa.so')),
         'label': 'noise_suppressor_stereo',
         'control': {'VAD Threshold (%)': vad, 'VAD Grace Period (ms)': 200,
                     'Retroactive VAD Grace (ms)': 0},

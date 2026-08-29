@@ -21,7 +21,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 from .. import spa_json
-from . import system, templates
+from . import backends, system, templates
 from .config import XDG_CONFIG
 from .hrir import analyze
 
@@ -193,6 +193,14 @@ def apply(meta: ChainMeta) -> tuple[bool, str]:
         generate(meta)
     except (spa_json.SpaJsonError, ValueError) as e:
         return False, f'Invalid config: {e}'
+    # Pre-flight before systemd gets involved.  A conf naming a backend this
+    # machine lacks is refused outright — the unit dies in ~30 ms and systemd
+    # reports only "control process exited with error code", which names
+    # neither the cause nor the cure (issue #15).  Checked here rather than in
+    # a picker because the SOFA and rnnoise templates never go near one.
+    problem = backends.explain(meta.conf_path.read_text())
+    if problem:
+        return False, problem
     ensure_unit()
     if meta.enabled:
         rc, _, err = system.sysctl_user('enable', '--now', meta.unit)
@@ -209,6 +217,10 @@ def set_enabled(meta: ChainMeta, enabled: bool) -> tuple[bool, str]:
     save_meta(meta)
     if enabled and not meta.conf_path.is_file():
         return apply(meta)
+    if enabled:
+        problem = backends.explain(meta.conf_path.read_text())
+        if problem:
+            return False, problem
     ensure_unit()
     if enabled:
         rc, _, err = system.sysctl_user('enable', '--now', meta.unit)

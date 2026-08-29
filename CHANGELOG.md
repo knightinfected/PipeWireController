@@ -23,6 +23,36 @@ and commit log.
 
 ---
 
+## Unreleased
+
+**Filter chains no longer fail with an error that explains nothing**
+
+On distributions that split PipeWire's plugin support into separate packages,
+adding a plugin to a Signal Path or an effect rack could produce a chain that
+simply refused to start — and the only explanation offered was systemd's
+"control process exited with error code", which names neither the cause nor
+the cure. Arch ships every piece in one package, so this was invisible here
+and reported from elsewhere.
+
+The app now establishes what this machine can actually load, before it starts
+anything:
+
+- **Plugins PipeWire cannot host here are greyed out in both pickers**, with
+  the reason on the row and the package to install where that is known.
+- **A chain that would fail is refused up front**, naming the missing piece
+  instead of leaving you in `journalctl`. Every surface that builds a chain is
+  covered, including the surround templates, the noise suppressor and
+  microphone cleanup.
+- **Plugins the app cannot wire are refused too.** Anything that is neither
+  mono nor stereo used to be offered and accepted, then run with its ports
+  dangling — no error anywhere, just wrong audio. That one was not
+  distro-specific; it had been hiding behind the louder failure.
+
+Also fixes the bundled noise suppressor's plugin path on distributions that
+keep 64-bit plugins in `/usr/lib64`.
+
+---
+
 ## [v0.6.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.0) — 2026-08-26
 **The dashboard is rebuilt — two views instead of five tabs, pinned favourites, and the app now ships its own icons**
 
