@@ -12,11 +12,14 @@ Why it exists
 PipeWire >= 1.4 splits filter-graph support into one shared object per plugin
 type under ``spa-0.2/filter-graph/``, and echo-cancel into one per canceller
 under ``spa-0.2/aec/``.  Arch's ``pipewire-audio`` ships all of them in the
-base package; Fedora splits ``-lv2``, ``-sofa`` and ``-onnx`` into subpackages
-a stock install does not pull in.  A conf naming a backend that is not
-installed does not degrade — PipeWire refuses the whole config and the process
-dies with ``exit 254`` in tens of milliseconds, which systemd reports only as
-"control process exited with error code" (issue #15).
+base package; Fedora splits ``-lv2`` and ``-sofa`` into subpackages a stock
+install does not pull in (measured on ``fedora:42``: only builtin, ebur128 and
+ladspa ship by default, and LADSPA is in the base package, so there is no
+``-ladspa`` — see ``_PACKAGE_HINTS`` for why onnx is not named either).
+A conf naming a backend that is not installed does not degrade — PipeWire
+refuses the whole config and the process dies with ``exit 254`` in tens of
+milliseconds, which systemd reports only as "control process exited with error
+code" (issue #15).
 
 Because detection and playback go through different mechanisms, nothing ever
 checked that they agreed.  `required_backends()` closes that by reading the
@@ -47,10 +50,16 @@ _ALWAYS = {'builtin'}
 
 # Fedora is the only distro seen splitting these so far; the hint is advice in
 # a message, never a branch — an unknown distro just gets the generic line.
+#
+# Measured on a stock fedora:42 container (`docker/probe-distros.sh`), not read
+# off a package list: `-lv2` and `-sofa` are real packages, but `-onnx` is NOT,
+# and nothing in Fedora 42 provides the onnx backend under any name.  A package
+# name `dnf` cannot find is worse advice than no name at all, so onnx has no
+# entry here deliberately and falls through to the generic "the filter-graph
+# backend is not installed" wording.  Re-probe before adding it back.
 _PACKAGE_HINTS = {
     'lv2': 'pipewire-module-filter-chain-lv2',
     'sofa': 'pipewire-module-filter-chain-sofa',
-    'onnx': 'pipewire-module-filter-chain-onnx',
 }
 
 
