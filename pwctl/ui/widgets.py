@@ -167,6 +167,22 @@ class ColumnBox(Gtk.Widget):
         if span:
             self._spans.add(child)
 
+    def set_order(self, children):
+        """Lay the children out in this order, front to back.
+
+        Children keep document order (see the class docstring), so ordering
+        *is* the list — re-ordering it and asking for a fresh allocation is
+        the whole job.  Nothing is unparented or rebuilt, so a card keeps its
+        state, its meters and its expanded rows across a re-order.
+
+        Any child not named keeps its relative order behind the ones that
+        are, which is what lets a caller re-order the cards it knows about
+        without having to account for every child in the box.
+        """
+        named = [c for c in children if c in self._kids]
+        self._kids = named + [c for c in self._kids if c not in named]
+        self.queue_resize()
+
     def do_dispose(self):
         # A Gtk.Widget subclass must unparent its children itself, or GTK
         # warns that it was finalized with children still attached.

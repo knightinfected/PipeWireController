@@ -977,3 +977,36 @@ headerbar.pwctl-header:not(.pwctl-sidebar-header) > windowhandle {
 .dash-qa {
     padding: 9px 10px;
 }
+
+/* ---------------------------------------------- arranging the dashboard --
+   The controls sit over a card rather than inside it, because the eight
+   arrangeable cards are built four different ways and none of them has a
+   slot to put these in.  The plate is opaque so the buttons stay readable
+   over whatever the card is showing underneath. */
+.dash-arrange {
+    margin: 6px;
+    padding: 2px;
+    border-radius: 8px;
+    background: alpha(@window_bg_color, 0.92);
+    box-shadow: 0 1px 3px alpha(@window_fg_color, 0.25);
+}
+
+.dash-arrange button {
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0;
+}
+
+/* While arranging, a card reads as a thing you can pick up rather than a
+   thing you can use — the same blue the drop indicators use, so the two
+   move-things-around gestures in the app look related. */
+.dash-arranging {
+    outline: 2px dashed alpha(@pwctl_drop, 0.55);
+    outline-offset: -2px;
+    border-radius: 12px;
+}
+
+.dash-arrange-bar {
+    background: alpha(@pwctl_drop, 0.12);
+    border: 1px solid alpha(@pwctl_drop, 0.4);
+}

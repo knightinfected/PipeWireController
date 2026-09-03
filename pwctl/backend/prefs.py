@@ -18,7 +18,20 @@ DEFAULTS = {
     'autoload_presets': False,   # apply device preset when default changes
     'device_presets': {},        # node.name -> preset dict (backend/presets)
     'last_page': 'dashboard',    # restored on startup
+    # Sidebar visibility, remembered across restarts.  Only consulted while
+    # the window is wide enough to hold the sidebar beside the content: the
+    # breakpoint owns the narrow case, and a docked window should come back
+    # docked rather than re-opening the sidebar over its own content.
+    'sidebar_shown': True,
     'dashboard_tab': 'overview',
+    # Dashboard → Overview board layout.  Card *ids*, never indices: an index
+    # moves under the user the moment a card is added or removed upstream.
+    # Both lists are advisory — an id that no longer exists is ignored, and a
+    # card missing from `dashboard_order` keeps its built-in position — so a
+    # card added in a later release turns up where its author put it instead
+    # of silently vanishing from an arranged board.
+    'dashboard_order': [],       # card ids, in the order the user chose
+    'dashboard_hidden': [],      # card ids the user has put away
     # Dashboard → Overview → Favourites, as a list of `node.name`.  Names, not
     # ids or serials: an id is recycled and a serial changes every time a node
     # is recreated, so only the name survives a reboot or a chain restart —
