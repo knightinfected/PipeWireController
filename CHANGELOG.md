@@ -25,6 +25,57 @@ and commit log.
 
 ## Unreleased
 
+**The window fits down the side of a monitor**
+
+The window could not be made narrower than 795px — a third of a 1440p
+monitor, and too wide to leave open beside anything else. It now goes down to
+about 400px, a fifth of that monitor, and stays usable there.
+
+Three things were holding the width:
+
+- **The sidebar could never be put away.** It is an overlay now: below 700px
+  it slides over the content instead of sitting beside it, and a button in
+  the header opens and closes it at any width. Whether it is open is
+  remembered between runs.
+- **Every page was sized for the widest page.** The stack reserved the
+  Patchbay's width on all sixteen pages, so the Dashboard could not go narrow
+  even though it was built to — the same fault fixed for the Patchbay's own
+  toolbar in v0.4.0, one level further out.
+- **The header bar's buttons carried their labels at every width.** Below
+  700px they fall back to their icons and their tooltips, and take their
+  labels up again when there is room. Device Presets also gains the
+  `can_shrink` the other header buttons already had.
+
+Thirteen of the sixteen pages fit a 400px window. The Patchbay, Monitor and
+Surround Setup do not — a node graph, a live process table and a speaker grid
+mean nothing at that width — and their content is cut off rather than
+scrolled if you open one while the window is that narrow. Widen it to read
+them.
+
+**The dashboard board can be arranged, and it stays arranged**
+
+The Overview showed the same eight cards in the same order for everyone. It
+now remembers an order and a set of cards you have put away.
+
+The pencil beside the Overview/Mixer switcher turns the board into arrange
+mode: every card grows a pair of arrows and a Hide button, and a banner across
+the top offers **Reset to default** and **Done**. Cards you have hidden stay
+on the board while you are arranging — dimmed, with the button reading Show —
+so nothing you put away becomes unreachable.
+
+- **Order and hidden cards are remembered** between runs, per card rather than
+  per position, so they survive a card being added or removed in a later
+  release. A card the app gains later appears where it was designed to, not
+  appended to the end of a board you arranged months ago.
+- **Reset to default** puts back the reading order the Overview was designed
+  around and brings back everything hidden.
+- **The alert is not arrangeable.** It only appears when audio is actually
+  broken, so it is pinned to the top of the board rather than being something
+  you can bury or switch off.
+
+Arranging is available on the Overview only, and leaving the board leaves
+arrange mode with it.
+
 **Channel maps now work with any device, not just Pro Audio cards**
 
 You could already build a virtual device wired to *specific channels* of a

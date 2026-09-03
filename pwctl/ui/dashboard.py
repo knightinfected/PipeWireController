@@ -95,6 +95,87 @@ def dot(css: str = 'dim') -> Gtk.Label:
     return d
 
 
+def _walk(widget):
+    """Every widget in a subtree, the widget itself included."""
+    yield widget
+    child = widget.get_first_child()
+    while child is not None:
+        yield from _walk(child)
+        child = child.get_next_sibling()
+
+
+class _BoardCard:
+    """One arrangeable card on the Overview board.
+
+    The eight cards come from four different builders — `card()`, the two
+    endpoint cards, the favourites card and a bare box for the status hero --
+    so the arrange controls go in a `Gtk.Overlay` wrapped around each one
+    rather than into any of them.  Nothing about how a card is built has to
+    change for it to become arrangeable.
+    """
+
+    def __init__(self, board, card_id, title, widget, span=False):
+        self.id = card_id
+        self.title = title
+        self.span = span
+        self.widget = widget
+        self._board = board
+
+        self.strip = Gtk.Box(spacing=2, halign=Gtk.Align.END,
+                             valign=Gtk.Align.START)
+        self.strip.add_css_class('dash-arrange')
+        self.strip.set_visible(False)
+        for icon, tip, cb in (
+                ('go-up-symbolic', 'Move up',
+                 lambda: board.move_card(self, -1)),
+                ('go-down-symbolic', 'Move down',
+                 lambda: board.move_card(self, 1))):
+            b = Gtk.Button(icon_name=icon, tooltip_text=tip)
+            b.add_css_class('flat')
+            b.connect('clicked', lambda _b, c=cb: c())
+            self.strip.append(b)
+
+        # A word, not a glyph.  The obvious icons for this are the
+        # conceal/reveal eyes, which Breeze does not ship, and every
+        # alternative present in both themes draws as a cross — which reads
+        # as "delete this card" rather than "put it away for now".
+        self.hide_button = Gtk.Button(label='Hide')
+        self.hide_button.add_css_class('flat')
+        self.hide_button.connect('clicked',
+                                 lambda _b: board.toggle_hidden(self))
+        self.strip.append(self.hide_button)
+
+        self.overlay = Gtk.Overlay()
+        self.overlay.set_child(widget)
+        self.overlay.add_overlay(self.strip)
+        if not span:
+            self.overlay.set_valign(Gtk.Align.START)
+
+        # A card's own action ('Change', 'Add', 'Open mixer'...) sits exactly
+        # where the strip does, so it is faded and switched off while
+        # arranging — faded rather than hidden, so the header keeps its
+        # height and the cards do not jump as arrange mode goes on and off.
+        self._links = [w for w in _walk(widget)
+                       if isinstance(w, Gtk.Button)
+                       and w.has_css_class('dash-link')]
+
+    def set_arranging(self, on: bool, hidden: bool):
+        """Show the controls, and say which state the hide button is in."""
+        self.strip.set_visible(on)
+        self.overlay.set_css_classes(['dash-arranging'] if on else [])
+        for link in self._links:
+            link.set_opacity(0.0 if on else 1.0)
+            link.set_sensitive(not on)
+        if on:
+            self.widget.set_opacity(0.45 if hidden else 1.0)
+            self.hide_button.set_label('Show' if hidden else 'Hide')
+            self.hide_button.set_tooltip_text(
+                'Put this card back on the board' if hidden
+                else 'Take this card off the board')
+        else:
+            self.widget.set_opacity(1.0)
+
+
 def card(title: str = '', icon: str = '', *, link: tuple | None = None):
     """A dashboard card.  Returns (card, body) — pack content into `body`.
 
@@ -1266,6 +1347,73 @@ class Dashboard:
     kind = 'apps'            # apps | devices
     _switching = False       # suppress the switcher's own navigation
 
+    # -------------------------------------------------------- board layout --
+    def _order(self):
+        """The card ids in the order they should appear.
+
+        Saved order first, for the ids that still exist; then anything the
+        save does not mention, at the index it has by default.  That is what
+        makes a card added in a later release appear where its author put it
+        rather than being appended to the end of somebody's arranged board.
+        """
+        by_id = {bc.id: bc for bc in self.board}
+        saved = [i for i in (prefs.get('dashboard_order') or []) if i in by_id]
+        out = list(saved)
+        for i, bc in enumerate(self.board):
+            if bc.id not in out:
+                out.insert(min(i, len(out)), bc.id)
+        return out
+
+    def _apply_board(self):
+        """Push the current order and hidden set into the ColumnBox."""
+        by_id = {bc.id: bc for bc in self.board}
+        ordered = [by_id[i] for i in self._order()]
+        self.cards.set_order([self.arrange_bar, self.alert]
+                             + [bc.overlay for bc in ordered])
+        for bc in ordered:
+            hidden = bc.id in self._hidden
+            # A hidden card stays on the board while arranging, or there
+            # would be no way to reach it and bring it back.
+            bc.overlay.set_visible(self._arranging or not hidden)
+            bc.set_arranging(self._arranging, hidden)
+        self.arrange_bar.set_visible(self._arranging)
+
+    def _save_board(self):
+        prefs.save(dashboard_order=self._order(),
+                   dashboard_hidden=sorted(self._hidden))
+
+    def set_arranging(self, on: bool):
+        """Enter or leave arrange mode."""
+        if on == self._arranging:
+            return
+        self._arranging = on
+        self._apply_board()
+        if not on:
+            self._save_board()
+        button = getattr(self.window, 'arrange_button', None)
+        if button is not None and button.get_active() != on:
+            button.set_active(on)
+
+    def move_card(self, bc, delta: int):
+        order = self._order()
+        i = order.index(bc.id)
+        j = max(0, min(len(order) - 1, i + delta))
+        if i == j:
+            return
+        order.insert(j, order.pop(i))
+        prefs.save(dashboard_order=order)
+        self._apply_board()
+
+    def toggle_hidden(self, bc):
+        self._hidden.symmetric_difference_update({bc.id})
+        prefs.save(dashboard_hidden=sorted(self._hidden))
+        self._apply_board()
+
+    def reset_board(self):
+        self._hidden.clear()
+        prefs.save(dashboard_order=[], dashboard_hidden=[])
+        self._apply_board()
+
     def _build_view_switcher(self):
         tg = Adw.ToggleGroup(can_shrink=True)
         tg.add(Adw.Toggle(name='overview', label='Overview',
@@ -1277,6 +1425,24 @@ class Dashboard:
         self._view_tg = tg
         self._switching = False
         return tg
+
+    def set_compact(self, compact: bool):
+        """Narrow window: the header controls this page owns go icon-only.
+
+        `app.py` calls this whenever the split view collapses; see
+        `Window._apply_compact`.  Labels come back from the constants they
+        were built from rather than from anything cached off the widgets, so
+        a style change while compact still restores the right text.
+        """
+        self._view_tg.get_toggle(0).set_label(None if compact else 'Overview')
+        self._view_tg.get_toggle(1).set_label(None if compact else 'Mixer')
+        if compact:
+            self._style_content.set_label('')
+        else:
+            active = next((s for s in VOLUME_STYLES
+                           if s[0] == self.volume_style), VOLUME_STYLES[0])
+            self._style_content.set_label(active[1])
+        self._sync_arrange_button()
 
     def _on_view_toggle(self, tg, _p):
         """The switcher is in the window header, so it is live on every page.
@@ -1302,8 +1468,31 @@ class Dashboard:
                 self.views.get_visible_child_name() if on_page else None)
         finally:
             self._switching = False
+        self._sync_arrange_button(on_page)
+
+    def _sync_arrange_button(self, on_page: bool | None = None):
+        """The arrange control only means anything on the Overview.
+
+        Leaving the board — for the Mixer or for another page — also leaves
+        arrange mode, so nobody comes back to a page still covered in little
+        arrows they have forgotten they turned on.
+        """
+        button = getattr(self.window, 'arrange_button', None)
+        if button is None:               # window still being built
+            return
+        if on_page is None:
+            on_page = self.window.stack.get_visible_child_name() == 'dashboard'
+        overview = self.views.get_visible_child_name() == 'overview'
+        # Not while the window is narrow: arranging is a thing you do once, on
+        # a window with room, and a third header button costs a docked board
+        # ~30px of the width the compact header exists to win back.
+        room = not self.window.compact
+        button.set_visible(bool(on_page) and overview and room)
+        if self._arranging and not (on_page and overview and room):
+            self.set_arranging(False)
 
     def _sync_switcher(self):
+        self._sync_arrange_button()
         name = self.views.get_visible_child_name()
         if name and self._view_tg.get_active_name() != name:
             self._switching = True
@@ -1481,8 +1670,12 @@ class Dashboard:
         prefs.save(volume_style=key)
         for k, check in self._style_checks.items():
             check.set_opacity(1.0 if k == key else 0.0)
-        self._style_content.set_label(
-            next(s[1] for s in VOLUME_STYLES if s[0] == key))
+        # Not while compact: the label is deliberately empty there, and the
+        # button already shows the style through its icon.  set_compact()
+        # puts the right text back when the window widens again.
+        if not self.window.compact:
+            self._style_content.set_label(
+                next(s[1] for s in VOLUME_STYLES if s[0] == key))
         for tab in (self.playback, self.recording, self.outputs, self.inputs):
             tab.clear()
         for ep in (self.out_card, self.in_card, self.fav):
@@ -1650,19 +1843,62 @@ class Dashboard:
         # across every column, with the column packing resuming underneath.
         # They were siblings in an outer box before, which lined them up with
         # the scroller instead of with the columns.
+        # The banner shown only while arranging.  A span band, so it runs the
+        # full width above everything the way the alert does.
+        self.arrange_bar = Gtk.Box(spacing=10)
+        self.arrange_bar.add_css_class('dash-card')
+        self.arrange_bar.add_css_class('dash-arrange-bar')
+        self.arrange_bar.set_visible(False)
+        ab_text = Gtk.Label(
+            xalign=0, hexpand=True, wrap=True,
+            label='Arranging the board. Use the arrows to move a card, and '
+                  'Hide to take one off. Hidden cards stay on the board while '
+                  'you are arranging, so you can put them back.')
+        reset_b = Gtk.Button(label='Reset to default')
+        reset_b.connect('clicked', lambda _b: self.reset_board())
+        done_b = Gtk.Button(label='Done')
+        done_b.add_css_class('suggested-action')
+        done_b.connect('clicked', lambda _b: self.set_arranging(False))
+        self.arrange_bar.append(ab_text)
+        self.arrange_bar.append(reset_b)
+        self.arrange_bar.append(done_b)
+
         cards = ColumnBox(spacing=16, max_columns=3)
         cards.set_margin_top(20)
         cards.set_margin_bottom(28)
         cards.set_margin_start(16)
         cards.set_margin_end(16)
-        for w in (self.out_card.card, self.in_card.card, self.fav.card):
-            w.set_valign(Gtk.Align.START)
-            cards.append(w)
+        self.cards = cards
+
+        # The order of this list IS the default board, so the reading order
+        # argued for above is stated once and never duplicated: `_apply_board`
+        # falls back to it for anything the user has not moved.  The ids are
+        # permanent — they are what ends up in ui.json — so rename a title
+        # freely but never an id.
+        self.board = [
+            _BoardCard(self, 'output', 'Default output', self.out_card.card),
+            _BoardCard(self, 'input', 'Default input', self.in_card.card),
+            _BoardCard(self, 'favourites', 'Favourites', self.fav.card),
+            _BoardCard(self, 'status', 'Status', self.hero, span=True),
+            _BoardCard(self, 'playing', 'Playing now', play_card),
+            _BoardCard(self, 'running', 'Running audio objects', run_card),
+            _BoardCard(self, 'actions', 'Quick actions', qa_card),
+            _BoardCard(self, 'latency', 'Latency calculator', calc_card),
+        ]
+        self._arranging = False
+        self._hidden = set(prefs.get('dashboard_hidden') or [])
+
+        # The alert is deliberately NOT arrangeable.  Its visibility already
+        # belongs to `refresh()`, which would fight a user's hidden flag, and
+        # a warning that says audio is not working is not something to let
+        # someone bury under eight cards they have rearranged — so it is
+        # pinned to the top of the board instead of sitting fourth.  It only
+        # appears when something is actually wrong.
+        cards.append(self.arrange_bar, span=True)
         cards.append(self.alert, span=True)
-        cards.append(self.hero, span=True)
-        for w in (play_card, run_card, qa_card, calc_card):
-            w.set_valign(Gtk.Align.START)
-            cards.append(w)
+        for bc in self.board:
+            cards.append(bc.overlay, span=bc.span)
+        self._apply_board()
 
         # No clamp: ColumnBox already refuses to stretch a card past MAX_COL,
         # so the width is spent on more columns and the bands span the same

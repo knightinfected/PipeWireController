@@ -9,7 +9,7 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from .backend import graph, levels, prefs, presets, pw, system
 from .ui.chains_page import ChainsPage
@@ -76,15 +76,31 @@ class Window(Adw.ApplicationWindow):
         self._pending_restarts: set[str] = set()
         self.advanced = bool(prefs.get('advanced'))
         self._advanced_widgets: list = []
+        self.compact = False
         self._last_default_sink = None
 
         self.toaster = Adw.ToastOverlay()
+        # `hhomogeneous=False` is what lets a narrow window work at all.  A
+        # Gtk.Stack otherwise reserves the width of its *widest* child on
+        # every page, so the Patchbay's minimum (585px here) was charged to
+        # the Dashboard too — the same shape as the over-wide Patchbay
+        # toolbar fixed in v0.4.0, one level further out.  Vertical sizing
+        # stays homogeneous: pages are scrollers, so nothing wants it off.
         self.stack = Gtk.Stack(
-            transition_type=Gtk.StackTransitionType.CROSSFADE)
+            transition_type=Gtk.StackTransitionType.CROSSFADE,
+            hhomogeneous=False)
 
         # sidebar
-        self.listbox = Gtk.ListBox(css_classes=['navigation-sidebar'])
-        self.listbox.connect('row-selected', self._on_select)
+        # Selection is off, and the current row is drawn with the selected
+        # *state flag* instead (see `_highlight`).  GtkListBox moves focus to
+        # the row *after* the focused one when it regains focus — its
+        # `next_focus_row` comes from get_next_visible while the box still
+        # has a focus child — and selection follows focus, so hiding and
+        # showing the sidebar advanced the page by one every time.  Nothing
+        # selects now, and navigation comes from `row-activated`.
+        self.listbox = Gtk.ListBox(css_classes=['navigation-sidebar'],
+                                   selection_mode=Gtk.SelectionMode.NONE)
+        self.listbox.connect('row-activated', self._on_activate)
         for name, title, icon, section in PAGES:
             row = Gtk.ListBoxRow()
             box = Gtk.Box(spacing=12, margin_top=10, margin_bottom=10,
@@ -161,12 +177,45 @@ class Window(Adw.ApplicationWindow):
         # theme instead of guessing at a border colour.
         content_view.set_top_bar_style(Adw.ToolbarStyle.RAISED_BORDER)
 
-        split = Adw.NavigationSplitView(
-            min_sidebar_width=210, max_sidebar_width=240)
-        split.set_sidebar(Adw.NavigationPage.new(side_view, 'Menu'))
-        split.set_content(Adw.NavigationPage.new(content_view, 'Content'))
-        self.toaster.set_child(split)
+        # An *overlay* split, not a navigation split.  Both can collapse, but
+        # a NavigationSplitView collapses into a back-button flow: sidebar and
+        # content become separate screens, so every page change costs two
+        # clicks and the Advanced switch — which lives in the sidebar footer —
+        # ends up behind one of them.  An overlay keeps the content on screen
+        # and slides the sidebar over it.  Both are libadwaita 1.4, under
+        # this app's 1.7 floor (see compat.MIN_ADW).
+        self.split = Adw.OverlaySplitView(
+            min_sidebar_width=210, max_sidebar_width=240,
+            show_sidebar=bool(prefs.get('sidebar_shown')))
+        self.split.set_sidebar(side_view)
+        self.split.set_content(content_view)
+        self.toaster.set_child(self.split)
         self.set_content(self.toaster)
+
+        # Below this the two panes genuinely stop fitting side by side: the
+        # sidebar measures 192 and the narrowest the content can be — header
+        # bar with its buttons down to icons — is ~400, and a window that
+        # tight wants all of itself for the page.  700 is where it stops
+        # being a split view and starts being a column.
+        bp = Adw.Breakpoint.new(
+            Adw.BreakpointCondition.parse('max-width: 700px'))
+        bp.add_setter(self.split, 'collapsed', True)
+        self.add_breakpoint(bp)
+        self.split.connect('notify::collapsed', self._on_collapsed)
+        self.split.connect('notify::show-sidebar', self._on_sidebar_shown)
+
+        # The sidebar button sits before anything a page packs, so it is the
+        # leftmost thing in the header on every page.  Bound both ways, so it
+        # also lights correctly when the breakpoint — not the user — is what
+        # moved the sidebar.
+        self.sidebar_button = Gtk.ToggleButton()
+        self.split.bind_property(
+            'show-sidebar', self.sidebar_button, 'active',
+            GObject.BindingFlags.SYNC_CREATE
+            | GObject.BindingFlags.BIDIRECTIONAL)
+        content_header.pack_start(self.sidebar_button)
+        self.sidebar_button.connect('notify::active', self._sync_sidebar_icon)
+        self._sync_sidebar_icon()
 
         # pages
         self.pages = {
@@ -201,6 +250,16 @@ class Window(Adw.ApplicationWindow):
         dash = self.pages['dashboard']
         content_header.pack_start(dash.view_switcher)
         content_header.pack_end(dash.style_button)
+        # Arranging the board is a Dashboard job, but the control belongs in
+        # the header with the other two rather than costing the board a row
+        # of its own.  It is only sensible on the Overview, so `set_on_page`
+        # is what shows and hides it.
+        self.arrange_button = Gtk.ToggleButton(
+            icon_name='document-edit-symbolic',
+            tooltip_text='Move or hide the cards on this board')
+        self.arrange_button.connect(
+            'toggled', lambda b: dash.set_arranging(b.get_active()))
+        content_header.pack_end(self.arrange_button)
 
         start = 0
         import os
@@ -210,7 +269,7 @@ class Window(Adw.ApplicationWindow):
             for i, (n, _t, _i2, _s) in enumerate(PAGES):
                 if n == want:
                     start = i
-        self.listbox.select_row(self.listbox.get_row_at_index(start))
+        self.goto(PAGES[start][0])
         GLib.timeout_add_seconds(5, self._autoload_tick)
 
         # link / service watcher for system notifications
@@ -232,11 +291,65 @@ class Window(Adw.ApplicationWindow):
         for w in self._advanced_widgets:
             w.set_visible(self.advanced)
 
+    # -------------------------------------------------------------- narrow --
+    def _sync_sidebar_icon(self, *_a):
+        """Show the glyph for what clicking will do, not for what is there.
+
+        There is no `sidebar-hide-symbolic` to pair with `sidebar-show-`:
+        neither Adwaita nor Breeze ships that name, so the open state uses
+        `pan-start-symbolic` — the sidebar pushed back out of the way.  Both
+        names were checked against both themes; anything only one of them has
+        would need to join the bundled `pwctl-*` icons instead.
+        """
+        shown = self.sidebar_button.get_active()
+        self.sidebar_button.set_icon_name(
+            'pan-start-symbolic' if shown else 'sidebar-show-symbolic')
+        self.sidebar_button.set_tooltip_text(
+            'Hide the sidebar' if shown else 'Show the sidebar')
+
+    def _on_collapsed(self, split, _p):
+        """The breakpoint moved us between column and split-view shapes."""
+        collapsed = split.get_collapsed()
+        self._apply_compact(collapsed)
+        # A window narrow enough to collapse opens on its content, not with
+        # the sidebar over the top of it; widening restores what was chosen
+        # last time there was room for both.
+        split.set_show_sidebar(
+            False if collapsed else bool(prefs.get('sidebar_shown')))
+
+    def _on_sidebar_shown(self, split, _p):
+        # Only remember the choice made while the sidebar had a place of its
+        # own.  Opening the overlay to reach a page in a docked window is
+        # navigation, not a preference, and must not persist.
+        if not split.get_collapsed():
+            prefs.save(sidebar_shown=split.get_show_sidebar())
+
+    def _apply_compact(self, compact: bool):
+        """Drop header-button labels to icons when the window is narrow.
+
+        The four labels together were 124px of the content header's 505px
+        minimum.  Every control keeps its place and its tooltip.
+
+        A page opts in by growing a `set_compact(bool)` method, the same
+        shape as the optional `header_widget` attribute.
+        """
+        self.compact = compact
+        self._presets_content.set_label('' if compact else 'Device Presets')
+        for page in getattr(self, 'pages', {}).values():
+            setter = getattr(page, 'set_compact', None)
+            if setter is not None:
+                setter(compact)
+
     # ------------------------------------------------------ device presets --
     def _build_presets_button(self):
         btn = Gtk.MenuButton(tooltip_text='Device presets')
-        btn.set_child(Adw.ButtonContent(icon_name='user-bookmarks-symbolic',
-                                        label='Device Presets'))
+        # `can_shrink` for the reason _build_style_picker gives: it lets the
+        # label ellipsize away instead of setting a floor under the app.  This
+        # was the one header button without it.
+        self._presets_content = Adw.ButtonContent(
+            icon_name='user-bookmarks-symbolic', label='Device Presets',
+            can_shrink=True)
+        btn.set_child(self._presets_content)
         self._presets_popover = Gtk.Popover()
         self._presets_popover.connect('show', self._fill_presets_popover)
         btn.set_popover(self._presets_popover)
@@ -361,16 +474,26 @@ class Window(Adw.ApplicationWindow):
         lbl.set_margin_start(14)
         row.set_header(lbl)
 
-    def _on_select(self, _lb, row):
-        if row:
-            self.stack.set_visible_child_name(row.page_name)
-            title = next(t for n, t, _i, _s in PAGES if n == row.page_name)
-            self._set_header_widget(row.page_name, title)
-            dash = getattr(self, 'pages', {}).get('dashboard')
-            if dash is not None:
-                dash.set_on_page(row.page_name == 'dashboard')
-            if not self._debug_page:
-                prefs.save(last_page=row.page_name)
+    def _on_activate(self, _lb, row):
+        if row is not None:
+            self.goto(row.page_name)
+
+    def _highlight(self, current):
+        """Draw one row as the current one without selecting anything.
+
+        `.navigation-sidebar` styles `row:selected`, and CSS reads that from
+        the widget's SELECTED state flag — which can be set directly.  So the
+        sidebar keeps libadwaita's own look with no stylesheet of ours, while
+        the list itself stays selection-less for the reason given where it is
+        built.
+        """
+        i = 0
+        while (row := self.listbox.get_row_at_index(i)) is not None:
+            if row is current:
+                row.set_state_flags(Gtk.StateFlags.SELECTED, False)
+            else:
+                row.unset_state_flags(Gtk.StateFlags.SELECTED)
+            i += 1
 
     def _set_header_widget(self, page_name, title):
         """A page may own the header bar's title slot.
@@ -395,10 +518,22 @@ class Window(Adw.ApplicationWindow):
         return False
 
     def goto(self, name):
+        row = None
         for i, (n, _t, _i2, _s) in enumerate(PAGES):
             if n == name:
-                self.listbox.select_row(self.listbox.get_row_at_index(i))
-                return
+                row = self.listbox.get_row_at_index(i)
+                break
+        if row is None:
+            return
+        self._highlight(row)
+        self.stack.set_visible_child_name(name)
+        title = next(t for n, t, _i, _s in PAGES if n == name)
+        self._set_header_widget(name, title)
+        dash = getattr(self, 'pages', {}).get('dashboard')
+        if dash is not None:
+            dash.set_on_page(name == 'dashboard')
+        if not getattr(self, '_debug_page', False):
+            prefs.save(last_page=name)
 
     # ------------------------------------------------------- notifications --
     def notify_user(self, title: str, body: str):
