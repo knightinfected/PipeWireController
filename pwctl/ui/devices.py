@@ -14,11 +14,11 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from ..backend import livestate, prefs, pw, rules
+from ..backend import balance, livestate, prefs, pw, rules
 from .device_levels import sync_device_levels
-from .volume import make_volume
+from .volume import ChannelPanel, make_volume
 from .widgets import (LOCAL_GRACE, async_call, device_icon, esc, group,
-                      page_scroller, pill)
+                      micro, page_scroller, pill)
 
 
 class DevicesPage:
@@ -29,7 +29,8 @@ class DevicesPage:
         self.volume_style = prefs.get('volume_style')
         self.sinks = group('Outputs (sinks)',
                            'Star a device to make it the default output. '
-                           'Expand a hardware device for per-device settings.')
+                           'Expand a device for its balance and channel '
+                           'levels, and a hardware device for its settings.')
         self.sources = group('Inputs (sources)')
         head = group('')
         refresh_row = Adw.ActionRow(
@@ -193,8 +194,11 @@ class DevicesPage:
     def _device_row(self, node, rule_data, cards):
         is_hw = node.name.startswith(('alsa_', 'bluez_'))
         rule = rule_data['nodes'].get(node.name, {})
+        # Anything with two or more channels expands too, to show them; on
+        # hardware the channels sit above the per-device settings.
+        multichannel = len(node.channels) > 1
 
-        if is_hw:
+        if is_hw or multichannel:
             row = Adw.ExpanderRow(title=esc(node.description),
                                   subtitle=esc(node.name))
             if rule:
@@ -254,14 +258,27 @@ class DevicesPage:
             'is_sink': node.is_sink,
             'updating': False,
             'local_ts': 0.0,
+            # the row's one copy of the channels: the master and the channel
+            # panel both act on it, so neither works from stale levels
+            'levels': balance.Levels(node.channels, node.channel_map),
+            'panel': None,
         }
+        levels = live['levels']
 
         def touch():
             live['local_ts'] = GLib.get_monotonic_time() / 1e6
 
-        def set_volume(value):
+        def write(values):
             touch()
-            async_call(lambda: pw.set_volume(node.id, value))
+            nid, serial, mclass = node.id, node.serial, node.media_class
+            async_call(lambda: pw.set_channel_volumes(
+                nid, values, serial=serial, media_class=mclass))
+
+        def set_volume(value):
+            # scales every channel, so a balance survives the master slider
+            write(levels.set_master(value))
+            if live['panel'] is not None:
+                live['panel'].refresh()
 
         vol = make_volume(
             self.volume_style,
@@ -289,6 +306,20 @@ class DevicesPage:
         live['volume'] = vol
         live['mute'] = mute
         self._live_controls[(node.id, node.serial)] = live
+
+        if multichannel:
+            def channels_written(values):
+                write(values)
+                vol.set_value(levels.master)
+            panel = ChannelPanel(levels, self.volume_style, channels_written,
+                                 compact=True)
+            live['panel'] = panel
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                          margin_top=10, margin_bottom=12,
+                          margin_start=12, margin_end=12)
+            box.append(micro('Channel levels'))
+            box.append(panel.widget)
+            row.add_row(box)
 
         if is_hw:
             try:

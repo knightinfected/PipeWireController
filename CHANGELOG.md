@@ -25,6 +25,36 @@ and commit log.
 
 ## Unreleased
 
+**Balance, and a volume for each channel**
+
+Every output, input and app in the Mixer has a **Channels** button next to
+its volume. It opens a **Balance** slider for anything in stereo, and a
+slider for each channel: front left, front right, centre, subwoofer and so
+on, or AUX 0 to AUX 7 on a Pro Audio card. Use it to even out speakers that
+sit at different distances, turn down one side of a pair of headphones, or
+set two outputs of an audio interface to different levels. **Reset** puts
+every channel back to the same level. The Devices page has the same controls
+when you expand a device.
+
+- **Every other volume slider keeps your balance.** The main slider in the
+  Mixer, the Overview's default-output card, Favourites, the Equalizer and
+  Signal Paths all move every channel by the same amount, and so do Device
+  Presets and routing snapshots, which store one level.
+- **It's still there after a restart.** WirePlumber saves the balance and
+  puts it back when the device or app returns, for hardware, for the app's
+  own virtual devices, filter chains and equalizers, and for apps.
+- **A balanced device's slider shows its loudest channel**, as pavucontrol
+  and GNOME do. It used to show the left channel. Nothing changes for a
+  device whose channels are all at the same level.
+- Each channel slider follows the volume style you picked in the header.
+
+**Bug: moving a volume slider undid a balance set somewhere else**
+
+If you had set a balance in pavucontrol or your desktop's sound settings,
+touching any volume slider in this app set every channel to the same level,
+and the balance was gone. Every slider now scales the channels together and
+keeps the balance (above).
+
 **The app starts listening instead of asking every few seconds**
 
 Until now, every page that shows live audio state kept itself current by

@@ -13,7 +13,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
-from ..backend import chains, enhance, prefs, pw, rules
+from ..backend import balance, chains, enhance, prefs, pw, rules
 from ..backend.surround import LAYOUTS as _SPEAKER_LAYOUTS
 from .volume import make_volume
 from .widgets import async_call, combine_devices, confirm, esc, group, \
@@ -254,8 +254,9 @@ class EnhancePage:
         pct = Gtk.Label(label=f'{round((node.volume or 0) * 100)}%',
                         width_chars=4, xalign=1)
         pct.add_css_class('caption')
+        levels = balance.Levels(node.channels, node.channel_map)
         ctl = make_volume(self.volume_style,
-                          lambda v: self._on_eq_volume(node.id, v, pct),
+                          lambda v: self._on_eq_volume(node, levels, v, pct),
                           compact=True)
         ctl.set_value(node.volume if node.volume is not None else 1.0)
         ctl.set_meter(node.serial)
@@ -271,9 +272,11 @@ class EnhancePage:
         row.add_suffix(pct)
         return row
 
-    def _on_eq_volume(self, node_id, value, pct):
+    def _on_eq_volume(self, node, levels, value, pct):
         pct.set_text(f'{round(value * 100)}%')
-        async_call(lambda: pw.set_volume(node_id, value))
+        values = levels.set_master(value)       # keeps a balance set elsewhere
+        async_call(lambda: pw.set_channel_volumes(
+            node.id, values, serial=node.serial, media_class=node.media_class))
 
     # -- app routing ------------------------------------------------------
     # Two Firefox windows are two streams with the same application.name, so

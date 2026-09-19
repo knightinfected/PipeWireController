@@ -232,11 +232,14 @@ def apply(snap: dict, remove_extra=False, restore_volumes=True) -> ApplyReport:
             rep.defaults += 1
 
     if restore_volumes:
+        # AudioNodes, not the graph's nodes: set_master needs the channels so
+        # the snapshot's level is applied without flattening a balance.
+        audio = {n.name: n for n in pw.list_audio_nodes()}
         for name, vol in (snap.get('volumes') or {}).items():
-            node = by_name.get(name)
+            node = audio.get(name)
             if not node:
                 continue
-            if pw.set_volume(node.id, float(vol.get('volume', 1.0))):
+            if pw.set_master(node, float(vol.get('volume', 1.0))):
                 rep.volumes += 1
             pw.set_mute(node.id, bool(vol.get('muted')))
     return rep

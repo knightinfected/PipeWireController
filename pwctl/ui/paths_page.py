@@ -44,8 +44,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from ..backend import backends, levels, path_templates, paths, plugins, \
-    prefs, pw, rules, virtual
+from ..backend import backends, balance, levels, path_templates, paths, \
+    plugins, prefs, pw, rules, virtual
 from .volume import make_volume
 from .widgets import async_call, confirm, esc, group, icon_button, \
     pick_file, pick_folder, pill, state_style
@@ -1857,8 +1857,11 @@ class PathsPage:
         mute.connect('toggled', lambda b, n=node: pw.set_mute(n.id,
                                                               b.get_active()))
         box.append(mute)
+        chans = balance.Levels(node.channels, node.channel_map)
         ctl = make_volume(self.volume_style,
-                          lambda v, n=node: pw.set_volume(n.id, v))
+                          lambda v, n=node: pw.set_channel_volumes(
+                              n.id, chans.set_master(v), serial=n.serial,
+                              media_class=n.media_class))
         ctl.set_value(node.volume if node.volume is not None else 1.0)
         if node.serial and node.serial > 0 and not levels.at_capacity():
             ctl.set_meter(node.serial)

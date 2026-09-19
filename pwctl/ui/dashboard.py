@@ -25,9 +25,10 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from ..backend import (chains, enhance, paths, prefs, pw, surround, system,
+from ..backend import (balance, chains, enhance, paths, prefs, pw, surround,
+                       system,
                        units, virtual)
-from .volume import VOLUME_STYLES, make_volume
+from .volume import VOLUME_STYLES, ChannelPanel, make_volume
 from .widgets import (LOCAL_GRACE, ColumnBox, GraceMixin, RowSync, async_call,
                       device_icon, esc, micro,
                       page_scroller, pill, state_style)
@@ -148,32 +149,70 @@ def kv(key: str, value_widget) -> Gtk.Box:
     return row
 
 
+def _write_channels(node_id, values, serial, media_class):
+    """Send a full channel array; level arrays go out as plain wpctl."""
+    async_call(lambda: pw.set_channel_volumes(
+        node_id, values, serial=serial, media_class=media_class))
+
+
 # ---------------------------------------------------------------- mixer rows --
 
 class _VolumeRowBase(Gtk.ListBoxRow, GraceMixin):
-    """Two-line row: header line + full-width volume control, pavucontrol style."""
+    """Two-line row: header line + full-width volume control, pavucontrol style.
+
+    A node with two or more channels also gets a Channels toggle that opens
+    its balance and per-channel levels underneath.
+    """
 
     def __init__(self, style):
         super().__init__(activatable=False)
         self.updating = False
         self.filter_text = ''
+        self.style = style
+        self.serial = None
+        self.media_class = ''
+        # One copy of the channels for the master and the panel alike, so a
+        # master drag never leaves the panel acting on levels from before it.
+        self.levels = balance.Levels()
+        self.panel = None
 
         self.header = Gtk.Box(spacing=10)
         self.vol = make_volume(style, self._on_volume)
         self.pct = _pct_label()
         self.mute = _mute_button()
         self.solo = _solo_button()
+        self.chan_btn = Gtk.ToggleButton(valign=Gtk.Align.CENTER,
+                                         tooltip_text='Balance and the level '
+                                                      'of each channel')
+        self.chan_btn.add_css_class('flat')
+        self.chan_btn.set_child(Adw.ButtonContent(
+            icon_name='pan-end-symbolic', label='Channels', can_shrink=True))
+        self.chan_btn.set_visible(False)
+        self.chan_btn.connect('toggled', self._on_channels_toggled)
+        buttons = Gtk.Box(spacing=10)
+        buttons.append(self.mute)
+        buttons.append(self.solo)
         vol_line = Gtk.Box(spacing=10)
-        vol_line.append(self.mute)
-        vol_line.append(self.solo)
+        vol_line.append(buttons)
         vol_line.append(self.vol.widget)
         vol_line.append(self.pct)
+        vol_line.append(self.chan_btn)
+        # the channel panel's columns line up with this line's
+        self._align = {key: Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+                       for key in ('label', 'pct', 'tail')}
+        self._align['label'].add_widget(buttons)
+        self._align['pct'].add_widget(self.pct)
+        self._align['tail'].add_widget(self.chan_btn)
+
+        self.chan_reveal = Gtk.Revealer(
+            transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
                       margin_top=14, margin_bottom=14,
                       margin_start=16, margin_end=16)
         box.append(self.header)
         box.append(vol_line)
+        box.append(self.chan_reveal)
         self.set_child(box)
 
         self.mute.connect('toggled', self._on_mute)
@@ -182,6 +221,30 @@ class _VolumeRowBase(Gtk.ListBoxRow, GraceMixin):
     # -- subclass provides the node id to control ------------------------
     node_id = None
     tab = None
+
+    def _on_channels_toggled(self, btn):
+        shown = btn.get_active()
+        btn.get_child().set_icon_name('pan-down-symbolic' if shown
+                                      else 'pan-end-symbolic')
+        if shown and self.panel is None:
+            # built on first open: most rows are never expanded, and each
+            # panel is a volume control per channel
+            self.panel = ChannelPanel(self.levels, self.style,
+                                      self._on_channels_written,
+                                      align=self._align)
+            self.panel.widget.set_margin_top(4)
+            self.chan_reveal.set_child(self.panel.widget)
+        self.chan_reveal.set_reveal_child(shown)
+
+    def _on_channels_written(self, values):
+        """The panel changed the balance or one channel (user input)."""
+        if self.node_id is None:
+            return
+        self.touch()
+        master = self.levels.master or 0.0
+        self.vol.set_value(master)
+        self.pct.set_label(f'{master * 100:.0f}%')
+        _write_channels(self.node_id, values, self.serial, self.media_class)
 
     def _on_solo(self, btn):
         if self.updating or self.tab is None:
@@ -195,7 +258,10 @@ class _VolumeRowBase(Gtk.ListBoxRow, GraceMixin):
         if self.node_id is None:
             return
         self.touch()
-        async_call(lambda: pw.set_volume(self.node_id, value))
+        values = self.levels.set_master(value)      # keeps the balance
+        if self.panel is not None:
+            self.panel.refresh()
+        _write_channels(self.node_id, values, self.serial, self.media_class)
 
     def _on_mute(self, btn):
         if self.updating or self.node_id is None:
@@ -204,14 +270,24 @@ class _VolumeRowBase(Gtk.ListBoxRow, GraceMixin):
         active = btn.get_active()
         async_call(lambda: pw.set_mute(self.node_id, active))
 
-    def set_levels(self, volume, muted):
-        """Apply polled volume/mute unless the user just touched the row."""
-        if self.in_grace:
+    def set_levels(self, node):
+        """Apply a polled node or stream unless the user just touched the row."""
+        self.serial = node.serial
+        self.media_class = node.media_class
+        many = len(node.channels) > 1
+        self.chan_btn.set_visible(many)
+        if not many and self.chan_btn.get_active():
+            self.chan_btn.set_active(False)
+        layout_changed = len(node.channels) != self.levels.count
+        if self.in_grace and not layout_changed:
             return
-        if volume is not None:
-            self.vol.set_value(volume)
-            self.pct.set_label(f'{volume * 100:.0f}%')
-        self.mute.set_active(muted)
+        self.levels.update(node.channels, node.channel_map)
+        if self.panel is not None:
+            self.panel.refresh()
+        if node.volume is not None:
+            self.vol.set_value(node.volume)
+            self.pct.set_label(f'{node.volume * 100:.0f}%')
+        self.mute.set_active(node.muted)
 
 
 class _StreamRow(_VolumeRowBase):
@@ -284,7 +360,7 @@ class _StreamRow(_VolumeRowBase):
                             if d[2] == stream.target_id), None)
                 self.dropdown.set_selected(
                     idx if idx is not None else Gtk.INVALID_LIST_POSITION)
-            self.set_levels(stream.volume, stream.muted)
+            self.set_levels(stream)
         finally:
             self.updating = False
 
@@ -491,7 +567,7 @@ class _DeviceRow(_VolumeRowBase):
                     idx if idx is not None else Gtk.INVALID_LIST_POSITION)
 
             self.paint_star(node.is_default)
-            self.set_levels(node.volume, node.muted)
+            self.set_levels(node)
         finally:
             self.updating = False
 
@@ -811,6 +887,8 @@ class _EndpointCard:
         self.sink = sink
         self.node_id = None
         self.serial = None
+        self.media_class = ''
+        self.levels = balance.Levels()
         self.updating = False
         self._port_key = None
         self._ports = []
@@ -872,7 +950,8 @@ class _EndpointCard:
         self.pct.set_label(f'{value * 100:.0f}%')
         if self.node_id is not None:
             self.dash.touch_local()
-            async_call(lambda: pw.set_volume(self.node_id, value))
+            _write_channels(self.node_id, self.levels.set_master(value),
+                            self.serial, self.media_class)
 
     def _on_mute(self, btn):
         if self.updating or self.node_id is None:
@@ -944,7 +1023,10 @@ class _EndpointCard:
                 self.vol_line.set_visible(False)
                 return
             self.vol_line.set_visible(True)
+            if node.id != self.node_id:
+                self.levels.update(node.channels, node.channel_map)
             self.node_id = node.id
+            self.media_class = node.media_class
             if node.serial != self.serial:
                 self.serial = node.serial
                 self.vol.set_meter(node.serial)
@@ -968,6 +1050,7 @@ class _EndpointCard:
                     idx if idx is not None else Gtk.INVALID_LIST_POSITION)
 
             if not in_grace:
+                self.levels.update(node.channels, node.channel_map)
                 if node.volume is not None:
                     self.vol.set_value(node.volume)
                     self.pct.set_label(f'{node.volume * 100:.0f}%')
@@ -993,6 +1076,8 @@ class _FavRow(Gtk.Box, GraceMixin):
         self.node_name = node_name
         self.node_id = None
         self.serial = None
+        self.media_class = ''
+        self.levels = balance.Levels()
         self.updating = False
 
         self.icon = Gtk.Image.new_from_icon_name('audio-speakers-symbolic')
@@ -1025,7 +1110,8 @@ class _FavRow(Gtk.Box, GraceMixin):
         if self.node_id is None:
             return
         self.touch()
-        async_call(lambda: pw.set_volume(self.node_id, value))
+        _write_channels(self.node_id, self.levels.set_master(value),
+                        self.serial, self.media_class)
 
     def _on_mute(self, btn):
         if self.updating or self.node_id is None:
@@ -1054,7 +1140,10 @@ class _FavRow(Gtk.Box, GraceMixin):
                     'here and comes back with the device.')
                 return
             self.label.remove_css_class('dim-label')
+            if node.id != self.node_id:
+                self.levels.update(node.channels, node.channel_map)
             self.node_id = node.id
+            self.media_class = node.media_class
             if node.serial != self.serial:
                 self.serial = node.serial
                 self.vol.set_meter(node.serial)
@@ -1062,6 +1151,7 @@ class _FavRow(Gtk.Box, GraceMixin):
             self.label.set_label(node.description)
             self.set_tooltip_text(node.name)
             if not self.in_grace:
+                self.levels.update(node.channels, node.channel_map)
                 if node.volume is not None:
                     self.vol.set_value(node.volume)
                     self.pct.set_label(f'{node.volume * 100:.0f}%')

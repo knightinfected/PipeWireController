@@ -29,6 +29,15 @@ def sync_device_levels(controls, nodes, now, grace_seconds,
             continue
         if node.volume is not None:
             state['volume'].set_value(node.volume)
+        # The channels share the row's grace: a delivery that lands while a
+        # channel is being dragged must not put the old balance back.
+        levels = state.get('levels')
+        if levels is not None:
+            levels.update(getattr(node, 'channels', None) or [],
+                          getattr(node, 'channel_map', None))
+            panel = state.get('panel')
+            if panel is not None:
+                panel.refresh()
         state['updating'] = True
         state['mute'].set_active(node.muted)
         state['updating'] = False

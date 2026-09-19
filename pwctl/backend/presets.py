@@ -73,14 +73,12 @@ def apply(preset: dict) -> list[str]:
                 done.append('card profile')
 
     if preset.get('volume') is not None:
-        for obj in dump:
-            if obj.get('type') != 'PipeWire:Interface:Node':
-                continue
-            props = (obj.get('info') or {}).get('props') or {}
-            if props.get('node.name') == preset['device']:
-                pw.set_volume(obj['id'], preset['volume'])
-                done.append(f'volume {preset["volume"] * 100:.0f}%')
-                break
+        # set_master keeps the device's balance; a preset stores a level only.
+        node = next((n for n in pw.list_audio_nodes(dump)
+                     if n.name == preset['device']), None)
+        if node is not None:
+            pw.set_master(node, preset['volume'])
+            done.append(f'volume {preset["volume"] * 100:.0f}%')
     return done
 
 

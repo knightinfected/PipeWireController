@@ -21,11 +21,11 @@ from __future__ import annotations
 import gi
 
 gi.require_version('Gtk', '4.0')
-from gi.repository import GLib, Gtk  # noqa: E402
+from gi.repository import GLib, Gtk, Pango  # noqa: E402
 
-from ..backend import levels  # noqa: E402
+from ..backend import balance, levels  # noqa: E402
 
-MAX_VOL = 1.5
+MAX_VOL = balance.MAX_VOL
 STEP = 0.05
 
 # Level colours.  levels.level() is already dB-mapped, so these thresholds are
@@ -487,3 +487,174 @@ def make_volume(style, on_change, compact=False):
     ctl = _IMPL.get(style, _ClassicVol)(on_change, compact)
     ctl._setup_meter()
     return ctl
+
+
+# --------------------------------------------------------- channel panel --
+#
+# Deliberately NOT a fifth make_volume style.  A style is one control bound to
+# one value; a channel panel is N controls under a master, and it composes
+# with whichever style the user chose -- each channel IS a make_volume control
+# in that style (DR-002 piece 4).
+
+
+class ChannelPanel:
+    """Balance and one control per channel, for a node with two or more.
+
+    It edits a `balance.Levels` that the owning row holds too, so the row's
+    master control and this panel always act on the same array: a master drag
+    moves the channels here, and an edit here moves the master.
+
+    `on_write(values)` gets the FULL array after every user edit -- a short
+    array is averaged across every channel by `pw-cli` -- and `refresh()`,
+    for values from the graph, never calls it.
+    """
+
+    BALANCE_DETENT = 0.03    # a balance this close to the middle is centred
+
+    def __init__(self, levels, style, on_write, compact=False, align=None):
+        """`align` lines the columns up with the master control above:
+        {'label': SizeGroup, 'pct': SizeGroup, 'tail': SizeGroup} for the
+        widgets left of the master's slider, its percentage, and what
+        follows that."""
+        self.levels = levels
+        self.style = style
+        self.on_write = on_write
+        self.compact = compact
+        self.align = align or {}
+        self._layout = None
+        self._updating = False
+        self._bal = None
+        self._rows = []
+        self._grouped = []
+        self.widget = Gtk.Grid(column_spacing=10, row_spacing=6)
+        self.widget.add_css_class('vol-channels')
+        self.refresh()
+
+    # -- building ------------------------------------------------------------
+    def _group(self, key, widget):
+        group = self.align.get(key)
+        if group is not None:
+            group.add_widget(widget)
+            self._grouped.append((group, widget))
+        return widget
+
+    def _clear(self):
+        for group, widget in self._grouped:
+            group.remove_widget(widget)
+        self._grouped = []
+        child = self.widget.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            self.widget.remove(child)
+            child = nxt
+        self._bal = None
+        self._rows = []
+
+    def _label(self, text, tooltip=None):
+        lbl = Gtk.Label(label=text, xalign=0, width_chars=10,
+                        max_width_chars=16, ellipsize=Pango.EllipsizeMode.END)
+        lbl.add_css_class('dim-label')
+        if tooltip:
+            lbl.set_tooltip_text(tooltip)
+        return lbl
+
+    def _build(self):
+        self._clear()
+        lv = self.levels
+        grid = self.widget
+
+        self._reset = Gtk.Button(
+            label='Reset', valign=Gtk.Align.CENTER,
+            tooltip_text='Set every channel to the same level')
+        self._reset.add_css_class('flat')
+        self._reset.connect('clicked', self._on_reset)
+
+        if lv.count == 2:
+            bal = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,
+                                           -1.0, 1.0, 0.01)
+            bal.set_draw_value(False)
+            bal.set_valign(Gtk.Align.CENTER)
+            bal.add_mark(0.0, Gtk.PositionType.BOTTOM, None)
+            if self.compact:
+                bal.set_size_request(146, -1)
+            else:
+                bal.set_hexpand(True)
+            bal.set_tooltip_text('Balance between left and right')
+            bal.connect('value-changed', self._on_balance)
+            self._bal = bal
+            line = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER)
+            line.set_hexpand(not self.compact)
+            for text, w in (('L', None), (None, bal), ('R', None)):
+                if w is None:
+                    side = Gtk.Label(label=text)
+                    side.add_css_class('caption')
+                    side.add_css_class('dim-label')
+                    line.append(side)
+                else:
+                    line.append(w)
+            grid.attach(self._group('label', self._label('Balance')),
+                        0, 0, 1, 1)
+            grid.attach(line, 1, 0, 2 if self.align else 1, 1)
+        else:
+            grid.attach(self._group('label',
+                                    self._label(f'{lv.count} channels')),
+                        0, 0, 1, 1)
+            spacer = Gtk.Box(hexpand=not self.compact)
+            grid.attach(spacer, 1, 0, 2 if self.align else 1, 1)
+        # aligned: Reset sits under whatever follows the master's percentage
+        grid.attach(self._group('tail', self._reset),
+                    3 if self.align else 2, 0, 1, 1)
+
+        for i in range(lv.count):
+            ctl = make_volume(self.style,
+                              lambda v, idx=i: self._on_channel(idx, v),
+                              compact=self.compact)
+            pct = Gtk.Label(xalign=1, width_chars=5)
+            pct.add_css_class('numeric')
+            pct.add_css_class('dim-label')
+            pos = lv.positions[i] if i < len(lv.positions) else ''
+            grid.attach(self._group('label', self._label(
+                lv.name(i), tooltip=pos or None)), 0, i + 1, 1, 1)
+            grid.attach(ctl.widget, 1, i + 1, 1, 1)
+            grid.attach(self._group('pct', pct), 2, i + 1, 1, 1)
+            self._rows.append((ctl, pct))
+
+    # -- values ----------------------------------------------------------------
+    def refresh(self):
+        """Show what `levels` holds now.  Never writes."""
+        lv = self.levels
+        layout = (lv.count, tuple(lv.positions))
+        if layout != self._layout:
+            self._layout = layout
+            self._build()
+        self._updating = True
+        try:
+            if self._bal is not None:
+                self._bal.set_value(lv.balance)
+            for i, (ctl, pct) in enumerate(self._rows):
+                value = lv.chans[i]
+                ctl.set_value(value)
+                pct.set_label(f'{value * 100:.0f}%')
+            self._reset.set_sensitive(not lv.level)
+        finally:
+            self._updating = False
+
+    def _push(self, values):
+        self.on_write(values)
+        self.refresh()
+
+    def _on_balance(self, scale):
+        if self._updating:
+            return
+        bal = scale.get_value()
+        if abs(bal) < self.BALANCE_DETENT:
+            bal = 0.0
+        self._push(self.levels.set_balance(bal))
+
+    def _on_channel(self, index, value):
+        if self._updating:
+            return
+        self._push(self.levels.set_channel(index, value))
+
+    def _on_reset(self, _btn):
+        self._push(self.levels.even_out())

@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from . import levels
+from . import balance, levels
 from .system import run
 
 # ------------------------------------------------------------- pw-metadata --
@@ -127,6 +127,8 @@ class AudioNode:
     is_default: bool = False
     volume: float | None = None
     muted: bool = False
+    channels: list = field(default_factory=list)      # per-channel, cubic (UI) scale
+    channel_map: list = field(default_factory=list)   # 'FL', 'FR', 'AUX3', …
     serial: int = -1
     ports: list = field(default_factory=list)   # [(route_index, description, available)]
     active_port: int | None = None
@@ -242,6 +244,52 @@ def _attach_ports(node: AudioNode, routes: dict):
     node.active_port = route['index'] if route else None
 
 
+_POSITION_RE = re.compile(r'[A-Z][A-Z0-9_]*')
+
+
+def _applied_channels(obj, route: dict | None = None
+                      ) -> tuple[list[float], list[str], bool] | None:
+    """(raw channel volumes as PipeWire applies them, positions, muted).
+
+    A node on a card is read from its active `route` when one is passed and
+    it carries volumes, not from the node's own Props: see `dump_volume()`.
+
+    Usually that is just `channelVolumes`.  The exception, measured
+    2026-10-21: WirePlumber restores a virtual node's saved volume by
+    `media.name`, even when the saved entry has fewer channels than the node
+    has now (a device rebuilt from stereo to 5.1 under the same name, or two
+    combined devices sharing "Combine stream").  Props then carry a 2-entry
+    array on a 6-channel node, pactl shows the other four at 0%, and what
+    actually plays is the **mean of the short array on every channel**.
+    `softVolumes` always has the node's real channel count, so the array is
+    rebuilt to that length with the mean, which is the level you hear, and
+    a full-length write from the app repairs the node.
+    """
+    route_props = (route or {}).get('props') or {}
+    if route_props.get('channelVolumes'):
+        entry = route_props
+    else:
+        params = (obj.get('info') or {}).get('params') or {}
+        props = params.get('Props') or []
+        if not props:
+            return None
+        entry = props[0] or {}
+    raw = list(entry.get('channelVolumes') or [])
+    if not raw:
+        return None
+    real = len(entry.get('softVolumes') or ())
+    if real > len(raw):
+        raw = [sum(raw) / len(raw)] * real
+    positions = list(entry.get('channelMap') or [])
+    if len(positions) != len(raw):
+        node_props = (obj.get('info') or {}).get('props') or {}
+        positions = _POSITION_RE.findall(str(node_props.get('audio.position')
+                                             or ''))
+        if len(positions) != len(raw):
+            positions = [''] * len(raw)
+    return raw, positions, bool(entry.get('mute'))
+
+
 def dump_volume(obj, route: dict | None = None) -> tuple[float, bool] | None:
     """(volume, muted) straight out of a pw-dump object, or None.
 
@@ -269,24 +317,35 @@ def dump_volume(obj, route: dict | None = None) -> tuple[float, bool] | None:
     * Use **`channelVolumes`, not `volume`** — `volume` reads 1.0 on every node
       regardless of the actual level (it is a separate master prop), so it would
       silently report 100% for everything.
-    * wpctl reports the **cube root of the first channel**.  Checked against an
-      unbalanced pair: `channelVolumes = [0.027, 0.216]` reads back as 0.30,
-      i.e. cbrt of `[0]`, *not* of the loudest channel.  Writes need no
-      conversion — `wpctl set-volume` already takes the cubic value.
+    * The volume is the **cube root of the loudest channel**.  wpctl reports
+      the first channel instead (`channelVolumes = [0.027, 0.216]` reads back
+      as 0.30, measured), and this used to copy it — but a master write scales
+      from the loudest channel (`balance.scaled`), so a slider showing channel
+      0 moved *down* when raised on a right-heavy balance (found on review,
+      2026-10-09).  The loudest channel is also what pavucontrol and GNOME
+      show.  On a level node, every node nobody has balanced, the two agree.
     """
-    route_props = (route or {}).get('props') or {}
-    if route_props.get('channelVolumes'):
-        entry = route_props
-    else:
-        params = (obj.get('info') or {}).get('params') or {}
-        props = params.get('Props') or []
-        if not props:
-            return None
-        entry = props[0] or {}
-    chans = entry.get('channelVolumes')
-    if not chans:
+    applied = _applied_channels(obj, route)
+    if applied is None:
         return None
-    return chans[0] ** (1 / 3), bool(entry.get('mute'))
+    raw, _positions, muted = applied
+    return max(raw) ** (1 / 3), muted
+
+
+def dump_channels(obj, route: dict | None = None
+                  ) -> tuple[list[float], list[str]]:
+    """(channels, channelMap) out of a pw-dump object, in the cubic UI scale.
+
+    Separate from `dump_volume()`, whose 2-tuple has callers of its own.  The
+    values are cube-rooted per channel, the same transform `dump_volume`
+    applies, so `max(channels) == volume` for every node.  `route` as for
+    `dump_volume()`.
+    """
+    applied = _applied_channels(obj, route)
+    if applied is None:
+        return [], []
+    raw, positions, _muted = applied
+    return [c ** (1 / 3) for c in raw], positions
 
 
 def list_audio_nodes(dump=None) -> list[AudioNode]:
@@ -312,9 +371,11 @@ def list_audio_nodes(dump=None) -> list[AudioNode]:
             is_default=(name == def_sink if mclass == 'Audio/Sink'
                         else name == def_source))
         _attach_ports(node, routes)
-        vol = dump_volume(obj, _active_route(node, routes))
+        route = _active_route(node, routes)
+        vol = dump_volume(obj, route)
         if vol:
             node.volume, node.muted = vol
+        node.channels, node.channel_map = dump_channels(obj, route)
         nodes.append(node)
     return nodes
 
@@ -357,6 +418,8 @@ class Stream:
     props: dict = field(default_factory=dict)
     volume: float | None = None
     muted: bool = False
+    channels: list = field(default_factory=list)      # per-channel, cubic (UI) scale
+    channel_map: list = field(default_factory=list)   # 'FL', 'FR', 'AUX3', …
     target_id: int | None = None   # node id of the device it is linked to
 
     @property
@@ -442,6 +505,7 @@ def list_streams(dump=None, apps_only=False) -> list[Stream]:
         vol = dump_volume(obj)
         if vol:
             s.volume, s.muted = vol
+        s.channels, s.channel_map = dump_channels(obj)
         streams.append(s)
     streams.sort(key=lambda s: (s.name.lower(), s.id))
     return streams
@@ -535,7 +599,102 @@ def get_volume(node_id):
 
 
 def set_volume(node_id, value: float) -> bool:
+    """Every channel to one level, through `wpctl`.
+
+    This flattens a balance.  Anything holding a node goes through
+    `set_master()` instead, which keeps it; this stays for a write with no
+    node in hand.
+    """
     rc, _, _ = run(['wpctl', 'set-volume', str(node_id), f'{value:.2f}'])
+    return rc == 0
+
+
+def set_master(node, value: float) -> bool:
+    """Move `node`'s level to `value` and keep its balance.
+
+    `node` is an AudioNode or a Stream from a recent read.  On a level node
+    (one nobody has balanced) this is the same `wpctl set-volume` argv as
+    `set_volume()`, byte for byte.
+    """
+    chans = list(getattr(node, 'channels', None) or [])
+    values = balance.scaled(chans, value) if chans else [balance.clamp(value)]
+    return set_channel_volumes(node.id, values, serial=node.serial,
+                               media_class=node.media_class)
+
+
+def pulse_available() -> bool:
+    """Does a PulseAudio server (pipewire-pulse) answer?
+
+    Asked only after a `pactl` write failed, to tell "no server" from "no such
+    node": the first means fall back to `pw-cli`, the second means the node is
+    gone and nothing should be written.  Never cached.
+    """
+    rc, _, _ = run(['pactl', 'info'])
+    return rc == 0
+
+
+def pactl_verb(media_class: str) -> str | None:
+    """The pactl volume command for a node of this class, or None.
+
+    The class decides it, never trial and error: a sink and its monitor
+    source share one index, so `set-source-volume <a sink's serial>` succeeds
+    and sets the monitor (measured 2026-10-21).
+    """
+    mc = media_class or ''
+    if mc.startswith('Stream/Output/Audio'):
+        return 'set-sink-input-volume'
+    if mc.startswith('Stream/Input/Audio'):
+        return 'set-source-output-volume'
+    if mc.startswith('Audio/Sink'):
+        return 'set-sink-volume'
+    if mc.startswith('Audio/Source'):
+        return 'set-source-volume'
+    return None
+
+
+def set_channel_volumes(node_id, values: list[float], serial: int | None = None,
+                        media_class: str = '') -> bool:
+    """Write one value per channel.  `values` are in the cubic (UI) scale.
+
+    **`values` must carry one entry per channel of the node.**  `pw-cli` takes
+    a short array as the *mean* of what was sent, written to every channel,
+    silently and with rc 0 (measured 2026-09-19).  The callers build the array
+    from `balance.Levels`, which always holds the full set.
+
+    Writers, measured 2026-09-19 and 2026-10-21:
+
+    * **Level values go through `wpctl set-volume`**, the argv the app has
+      always used, so nothing changes for a node nobody has balanced.
+    * **Anything else through `pactl`, addressed by `object.serial`**, which
+      is pactl's index for sinks, sources and both kinds of stream.
+      WirePlumber saves the result and restores it when the node comes back
+      (hardware in `default-routes`, everything else in `stream-properties`).
+      pactl refuses a wrong-length array, unlike `pw-cli`.  The integer form
+      is `(n / 65536) ** 3` raw, so a rescale doesn't walk in 1% steps.
+    * **`pw-cli` only when no pipewire-pulse answers.**  It applies live, and
+      on hardware it is not saved.
+    """
+    if not values:
+        return False
+    vals = [balance.clamp(v) for v in values]
+    if balance.is_level(vals):
+        rc, _, _ = run(['wpctl', 'set-volume', str(node_id), f'{vals[0]:.2f}'])
+        return rc == 0
+
+    verb = pactl_verb(media_class)
+    if verb and serial is not None and serial >= 0:
+        ints = [str(round(v * 65536)) for v in vals]
+        rc, _, _ = run(['pactl', verb, str(serial)] + ints)
+        if rc == 0:
+            return True
+        if pulse_available():
+            # The server answered and still refused: the node is gone or has
+            # a different channel count.  pw-cli would average the array.
+            return False
+
+    raw = ', '.join(f'{v ** 3:.6f}' for v in vals)
+    rc, _, _ = run(['pw-cli', 'set-param', str(node_id), 'Props',
+                    '{ channelVolumes: [ %s ] }' % raw])
     return rc == 0
 
 
