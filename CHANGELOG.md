@@ -79,6 +79,21 @@ anything:
 Also fixes the bundled noise suppressor's plugin path on distributions that
 keep 64-bit plugins in `/usr/lib64`.
 
+**The Debian and Ubuntu install line was missing a package**
+
+The level meters, graphs and Patchbay are drawn with cairo, and on Debian and
+Ubuntu the piece that connects cairo to the app is a package of its own,
+`python3-gi-cairo`. The install line left it out. If nothing else had
+installed cairo's Python support first, the app wouldn't start. If something
+had, the app opened, but the meters stayed flat and the Patchbay stayed empty.
+The package is in the install line now, and the app checks for it when it
+starts. If it's missing, the app says which package to install instead of
+failing quietly.
+
+Also, the app-menu entry for a git checkout now has the program's full path
+written into it, so it launches even when the desktop's `PATH` doesn't include
+`~/.local/bin` yet.
+
 ---
 
 ## [v0.6.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.0) — 2026-08-26

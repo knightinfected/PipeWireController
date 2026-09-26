@@ -6,7 +6,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 # Before importing the app, so a module that grows a too-new libadwaita symbol
-# at import scope still reports it properly instead of dying on the import.
+# at import scope, or paths_page's `import cairo` on a machine without pycairo,
+# still reports it properly instead of dying on the import.
 from pwctl.compat import require
 
 require()

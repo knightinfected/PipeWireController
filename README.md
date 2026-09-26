@@ -423,7 +423,7 @@ sudo dnf install pipewire wireplumber pipewire-pulseaudio gtk4 libadwaita \
 
 ```bash
 sudo apt install pipewire wireplumber pipewire-pulse gir1.2-gtk-4.0 \
-    gir1.2-adw-1 python3-gi python3-numpy python3-soundfile
+    gir1.2-adw-1 python3-gi python3-gi-cairo python3-numpy python3-soundfile
 ```
 
 Older releases ship a libadwaita before **1.7** and won't work: Debian 12
@@ -432,9 +432,11 @@ Ubuntu 26.04 LTS (1.9.1) are the floor.
 
 ### Other distros
 
-Install GTK 4 + libadwaita (≥ 1.7) with GObject introspection and
-PyGObject and pycairo from your package manager, then grab the Python audio bits via
-pip if your distro doesn't package them:
+Install GTK 4 + libadwaita (≥ 1.7) with GObject introspection, PyGObject,
+pycairo, and PyGObject's cairo support from your package manager. That last
+one is a package of its own on some distros (`python3-gobject-cairo` on
+openSUSE), and without it the meters and Patchbay can't draw. Then grab the
+Python audio bits via pip if your distro doesn't package them:
 
 ```bash
 python3 -m pip install --user numpy soundfile
@@ -452,17 +454,24 @@ cd PipeWireController
 ./pipewire-control-center
 ```
 
-Optional app-menu entry (the desktop file expects `pipewire-control-center`
-on your `PATH`, which the symlink provides). The second symlink is a short
-alias — `pwcc` is quicker to type and collides with nothing:
+Optional: `pipewire-control-center` and `pwcc` commands, plus an app-menu
+entry. `pwcc` is a short alias, quicker to type, and it collides with nothing.
+The menu entry gets the full path written into it, because an app launcher
+doesn't necessarily see the same `PATH` as your terminal:
 
 ```bash
 mkdir -p ~/.local/bin ~/.local/share/applications
 ln -sf "$PWD/pipewire-control-center" ~/.local/bin/
 ln -sf "$PWD/pipewire-control-center" ~/.local/bin/pwcc
-cp io.github.knightinfected.PipeWireControlCenter.desktop \
-    ~/.local/share/applications/
+sed "s|^Exec=.*|Exec=$HOME/.local/bin/pipewire-control-center|" \
+    io.github.knightinfected.PipeWireControlCenter.desktop \
+    > ~/.local/share/applications/io.github.knightinfected.PipeWireControlCenter.desktop
 ```
+
+If a new terminal can't find `pwcc`, then `~/.local/bin` isn't on your `PATH`
+yet. On Debian and Ubuntu it's added at login, but only if the folder already
+existed, so log out and back in once. Elsewhere, add it in your shell's
+profile.
 
 ## What it does
 

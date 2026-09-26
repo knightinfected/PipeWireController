@@ -84,6 +84,34 @@ def problem(found: tuple[int, ...] | None = None, _probe: bool = True):
             % (_fmt(MIN_ADW), _fmt(found)))
 
 
+def cairo_problem():
+    """(title, body) when this machine can't draw the app's graphics, else None.
+
+    Asks for the exact thing the drawing uses.  Every `set_draw_func` callback
+    is handed a `cairo.Context`, which PyGObject can only pass to Python
+    through its cairo bridge, `gi._gi_cairo` — and `require_foreign('cairo')`
+    loads exactly that.  `import cairo` succeeding proves nothing: pycairo and
+    the bridge are separate packages on Debian, Ubuntu and openSUSE, and with
+    pycairo alone the window opens and every meter, sparkline and the Patchbay
+    stays blank, logging a TypeError per frame (issue #21).  Without pycairo as
+    well, the app dies on its first `import cairo`.  This catches both.
+    """
+    try:
+        import gi
+        gi.require_foreign('cairo')
+    except Exception as exc:
+        return ('Cairo support could not be loaded',
+                'PipeWire Controller draws its level meters, graphs and '
+                'Patchbay with cairo, through PyGObject\'s cairo support, and '
+                'that could not be loaded here.\n\n'
+                'It is packaged by your distribution, and on some it is a '
+                'package of its own: python3-gi-cairo on Debian and Ubuntu, '
+                'python3-gobject-cairo on openSUSE. On Arch install '
+                'python-cairo, and on Fedora python3-gobject.\n\n'
+                'Python reported: %s' % exc)
+    return None
+
+
 def _report_terminal(title: str, body: str) -> None:
     sys.stderr.write('\n%s\n\n%s\n\n%s\n\n' % (title, body, REPO))
 
@@ -156,7 +184,7 @@ def require() -> None:
     Safe to call more than once — the launcher calls it before importing the
     app at all, in case a module ever grows a too-new symbol at import scope.
     """
-    found = problem()
+    found = problem() or cairo_problem()
     if found is None:
         return
     title, body = found

@@ -564,7 +564,7 @@ def main():
     import sys
 
     from .compat import require
-    require()   # says so and exits if libadwaita is too old to build the window
+    require()   # says so and exits if libadwaita is too old, or cairo can't draw
 
     app = App()
     return app.run(sys.argv)
