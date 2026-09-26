@@ -21,7 +21,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 from .. import spa_json
-from . import backends, system, templates
+from . import backends, headroom, system, templates
 from .config import XDG_CONFIG
 from .hrir import analyze
 
@@ -137,6 +137,28 @@ def new_chain(name: str, template: str, **kw) -> ChainMeta:
         info = analyze(meta.hrir)
         meta.hrir_channels = info.channels
     return meta
+
+
+def stamp_gain(meta: ChainMeta) -> float | None:
+    """Write the convolver gain measured from this chain's IR into `params`.
+
+    Issue #17: at gain 1.0 every HeSuVi file measured clips, by 5 to 19 dB,
+    and the right gain differs per file.  Called where a chain is created
+    straight from a file without the dialog.  Writing the number into the
+    chain's JSON, not moving `templates`' 1.0 default, is deliberate: a chain
+    saved without a `gain` falls through to that default at render time, so
+    changing it would re-gain chains people already have, silently, the next
+    time anything regenerates their conf.  Returns the gain, or None when the
+    file cannot be measured (the chain is then left at 1.0, as before).
+    """
+    if meta.is_raw:
+        return None
+    found, _why = headroom.check(headroom.for_template, meta.template,
+                                 meta.hrir, meta.hrir_channels, 1.0)
+    if found is None:
+        return None
+    meta.params['gain'] = found.suggested
+    return found.suggested
 
 
 # ------------------------------------------------------------- generation --

@@ -94,6 +94,33 @@ Also, the app-menu entry for a git checkout now has the program's full path
 written into it, so it launches even when the desktop's `PATH` doesn't include
 `~/.local/bin` yet.
 
+**Virtual surround no longer comes out far too loud**
+
+The virtual surround templates mix eight convolvers into each ear, and HRIR
+files aren't normalised, so even one of them can come out louder than what
+went in. At the default gain of 1.0, every HeSuVi file we measured came out 5
+to 19 dB over full scale, so it distorted. The *Convolver gain* box could always fix that, but
+it started at 1.0 and nothing said it needed changing. PipeWire's own
+example config has the same gap.
+
+The right gain depends on the file (from about 0.12 to 0.55 across a whole
+HeSuVi collection), so the app now works it out from the file itself:
+
+- **New chains get the right gain automatically**, whether you make them in
+  the chain dialog or with the HRIR library's *New chain* button. The value
+  is saved with the chain, so it stays where it was put.
+- **The chain dialog has a Level section.** It shows where the chain peaks
+  against full scale on a bar that moves as you change the gain, and has a
+  button that applies the suggested gain.
+- **Chains you already have keep their gain.** Nothing about how they
+  sound changes on its own, but a chain that is too loud now shows a
+  *Too loud* tag in the list. Imported configs are measured as written, and
+  the dialog says what to change in their text.
+
+The same measurement covers the stereo and true-stereo convolver templates.
+The *Convolver gain* box now only appears for templates that have a
+convolver.
+
 ---
 
 ## [v0.6.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.0) — 2026-08-26
