@@ -1,0 +1,58 @@
+#!/usr/bin/make -f
+
+# Pure Python, no build step. The application tree is installed to
+# /usr/share/pipewire-control-center and reached through symlinks in /usr/bin,
+# which is the same layout the AUR package uses — keeping the distros
+# identical means a bug report names the same paths everywhere.
+#
+# The launcher resolves its own symlink with realpath() before adding its
+# directory to sys.path, so both /usr/bin entries import pwctl correctly.
+
+export DH_VERBOSE = 1
+
+include /usr/share/dpkg/pkg-info.mk
+
+PKGDIR = debian/pipewire-control-center
+APPDIR = $(PKGDIR)/usr/share/pipewire-control-center
+
+%:
+	dh $@
+
+# The version lives in pwctl/__init__.py alone; the changelog has to repeat it,
+# or name a snapshot of it (0.6.0+git20260926). Refuse to build otherwise, so a
+# .deb can never carry a different version from the one the app reports.
+APP_VERSION := $(shell sed -n "s/^__version__ = '\(.*\)'$$/\1/p" pwctl/__init__.py)
+
+override_dh_auto_configure:
+	@case "$(DEB_VERSION)" in \
+	  "$(APP_VERSION)"|"$(APP_VERSION)"+*) ;; \
+	  *) echo "debian/changelog is $(DEB_VERSION) but pwctl/__init__.py is" \
+	          "'$(APP_VERSION)' - add a changelog entry for it" >&2; exit 1 ;; \
+	esac
+
+# Nothing to compile or test.
+override_dh_auto_build:
+override_dh_auto_test:
+
+override_dh_auto_install:
+	install -d $(APPDIR)
+	cp -r pwctl $(APPDIR)/
+	# A build from a working tree (rather than a release tarball) carries
+	# byte-compiled caches that must not ship.
+	find $(APPDIR)/pwctl -name __pycache__ -type d -prune -exec rm -rf {} +
+	install -Dm755 pipewire-control-center $(APPDIR)/pipewire-control-center
+	install -d $(PKGDIR)/usr/bin
+	ln -sf /usr/share/pipewire-control-center/pipewire-control-center \
+		$(PKGDIR)/usr/bin/pipewire-control-center
+	# Short alias. Deliberately not `pwctl`: one transposition from `wpctl`,
+	# WirePlumber's real CLI, and `pw-*` is PipeWire's own tool prefix.
+	ln -sf /usr/share/pipewire-control-center/pipewire-control-center \
+		$(PKGDIR)/usr/bin/pwcc
+	install -Dm644 io.github.knightinfected.PipeWireControlCenter.desktop \
+		$(PKGDIR)/usr/share/applications/io.github.knightinfected.PipeWireControlCenter.desktop
+
+# No override for dh_python3: it finds the private tree in
+# /usr/share/pipewire-control-center by itself and byte-compiles it on install
+# (py3compile) and removes the caches on removal (py3clean). Overriding it away
+# left __pycache__ behind after any run as root, so purge could not remove the
+# directory.

@@ -1,0 +1,8 @@
+pipewire-control-center (0.6.0+git20260926) unstable; urgency=medium
+
+  * Initial Debian packaging, built and installed on Debian 13 and
+    Ubuntu 26.04. A snapshot of main after 0.6.0, for testing.
+  * Renamed from pipewire-controller: an unrelated project holds that name on
+    PyPI and installs the same /usr/bin binary and .desktop filename.
+
+ -- knightinfected <hmzmahmood5@gmail.com>  Sat, 26 Sep 2026 20:53:50 -0400
