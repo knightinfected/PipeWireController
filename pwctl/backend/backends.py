@@ -35,11 +35,24 @@ it is safe to call from a UI thread and cheap enough to call per dialog.
 from __future__ import annotations
 
 import os
+import sysconfig
 from pathlib import Path
 
 # /usr/lib64 is a real tree on Fedora/openSUSE/RHEL and a symlink on Arch.
 SPA_DIRS = [Path('/usr/lib/spa-0.2'), Path('/usr/lib64/spa-0.2'),
             Path('/usr/local/lib/spa-0.2'), Path('/usr/local/lib64/spa-0.2')]
+
+# Debian and Ubuntu use neither: SPA lives on the multiarch path,
+# /usr/lib/x86_64-linux-gnu/spa-0.2.  Missing it made `probe()` return None
+# there, the "1.2-era, allow everything" answer, so every check in this module
+# failed open on every Debian derivative.  Python reports its own triplet on
+# all five distros probed (Arch, Fedora, openSUSE, Debian, Ubuntu), and the
+# directory exists only where it is used, so it is named exactly rather than
+# globbed — a glob would also match an i386 tree the daemon cannot load.
+_TRIPLET = sysconfig.get_config_var('MULTIARCH')
+if _TRIPLET:
+    SPA_DIRS += [Path(f'/usr/lib/{_TRIPLET}/spa-0.2'),
+                 Path(f'/usr/local/lib/{_TRIPLET}/spa-0.2')]
 
 FILTER_GRAPH = 'filter-graph'
 AEC = 'aec'
