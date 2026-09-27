@@ -48,19 +48,33 @@ AEC = 'aec'
 # so can never be missing.  Everything else is a separate object.
 _ALWAYS = {'builtin'}
 
-# Fedora is the only distro seen splitting these so far; the hint is advice in
-# a message, never a branch — an unknown distro just gets the generic line.
+# Which package holds a split-out backend, per distro.  The hint is advice in a
+# message, never a branch — a distro not listed here gets the generic line.
+# Chosen by /etc/os-release `ID`, then each `ID_LIKE` in order, so Mint and
+# Pop!_OS (ID_LIKE "ubuntu debian") get Ubuntu's names.  Every name below was
+# measured in a container (`docker/probe-distros.sh`), not read off a list:
 #
-# Measured on a stock fedora:42 container (`docker/probe-distros.sh`), not read
-# off a package list: `-lv2` and `-sofa` are real packages, but `-onnx` is NOT,
-# and nothing in Fedora 42 provides the onnx backend under any name.  A package
-# name `dnf` cannot find is worse advice than no name at all, so onnx has no
-# entry here deliberately and falls through to the generic "the filter-graph
-# backend is not installed" wording.  Re-probe before adding it back.
+# * fedora:42 — `-lv2` and `-sofa` are real packages, but `-onnx` is NOT, and
+#   nothing in Fedora 42 provides the onnx backend under any name.  A package
+#   name `dnf` cannot find is worse advice than no name at all, so onnx has no
+#   entry here deliberately and falls through to the generic "the filter-graph
+#   backend is not installed" wording.  Re-probe before adding it back.
+# * ubuntu:26.04 — lv2, sofa and ebur128 are in `libspa-0.2-modules-extra`
+#   (universe), which only `ubuntu-restricted-addons` pulls in.  Debian 13 and
+#   sid ship every backend in base `libspa-0.2-modules`, so Debian needs none.
+#
+# This used to be one flat table of Fedora names shown on every distro.  That
+# only went unnoticed because the probe could not see Debian's multiarch tree,
+# so on Ubuntu the message never fired at all.
 _PACKAGE_HINTS = {
-    'lv2': 'pipewire-module-filter-chain-lv2',
-    'sofa': 'pipewire-module-filter-chain-sofa',
+    'fedora': {'lv2': 'pipewire-module-filter-chain-lv2',
+               'sofa': 'pipewire-module-filter-chain-sofa'},
+    'ubuntu': dict.fromkeys(('lv2', 'sofa', 'ebur128'),
+                            'libspa-0.2-modules-extra'),
 }
+
+# Read per call; a module attribute so a harness can point it at a fake.
+OS_RELEASE = Path('/etc/os-release')
 
 
 def _roots() -> list[Path]:
@@ -126,9 +140,30 @@ def available(kind: str, subdir: str = FILTER_GRAPH) -> bool:
     return kind in have
 
 
+def _os_ids() -> list[str]:
+    """This distro's `ID`, then its `ID_LIKE` entries — most specific first."""
+    try:
+        text = OS_RELEASE.read_text()
+    except OSError:
+        return []
+    ids, like = [], []
+    for line in text.splitlines():
+        key, _, value = line.partition('=')
+        value = value.strip().strip('"\'')
+        if key == 'ID':
+            ids = [value]
+        elif key == 'ID_LIKE':
+            like = value.split()
+    return ids + like
+
+
 def package_hint(kind: str) -> str:
-    """The package a missing backend usually lives in, or '' if unknown."""
-    return _PACKAGE_HINTS.get(kind, '')
+    """The package holding a missing backend on this distro, or ''."""
+    for distro in _os_ids():
+        pkg = _PACKAGE_HINTS.get(distro, {}).get(kind)
+        if pkg:
+            return pkg
+    return ''
 
 
 # ------------------------------------------------------- reading a conf ----
