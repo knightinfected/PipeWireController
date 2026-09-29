@@ -26,7 +26,8 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from ..backend import chains, enhance, paths, prefs, pw, surround, system, virtual
 from .volume import VOLUME_STYLES, make_volume
-from .widgets import (ColumnBox, GraceMixin, RowSync, async_call, esc, micro,
+from .widgets import (ColumnBox, GraceMixin, RowSync, async_call, device_icon,
+                      esc, micro,
                       page_scroller, pill, state_style)
 
 SERVICES = [('pipewire.service', 'PipeWire'),
@@ -54,7 +55,10 @@ def _app_icon(name):
     theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
     if name and theme.has_icon(name):
         return name
-    return 'audio-x-generic-symbolic'
+    # An app that shipped no icon, or one this theme does not have.  Not our
+    # equalizer glyph: this stands in for *an application*, and a random app
+    # wearing the EQ icon reads as "this is going through the equalizer".
+    return 'application-x-executable-symbolic'
 
 
 def _pct_label():
@@ -275,6 +279,48 @@ class _StreamRow(_VolumeRowBase):
             self.updating = False
 
 
+def _remember_output(node_name: str, target_name: str) -> str:
+    """Record a new output on whichever of our objects publishes this sink.
+
+    Moving the stream takes effect at once, but an object that carries its own
+    target in its generated conf goes straight back to it the next time its
+    unit restarts — so the *stored* target has to move too or the change
+    quietly undoes itself on the next reboot.  `save_meta` writes it without
+    regenerating or restarting, which matters: restarting removes the sink and
+    tears down every stream feeding it, and the whole point here is to re-point
+    a device while audio keeps playing through it.
+
+    Returns a note to append to the toast, or ''.  A hand-written chain in
+    `filter-chain.conf.d` belongs to nobody and needs no note — nothing will
+    overwrite the move.
+    """
+    for items, setter in (
+            (chains.list_chains(),
+             lambda o, t: (setattr(o, 'target', t), chains.save_meta(o))),
+            (enhance.list_enhancements(),
+             lambda o, t: (o.params.__setitem__('target', t),
+                           enhance.save_meta(o))),
+            (virtual.list_devices(),
+             lambda o, t: (setattr(o, 'target', t), virtual.save_meta(o)))):
+        for obj in items:
+            if obj.node_name == node_name:
+                setter(obj, target_name)
+                return ''
+
+    for strip in paths.list_strips():
+        if strip.node_name != node_name:
+            continue
+        # A strip feeding several outputs is a fan, and which leg the user
+        # meant is not answerable from one dropdown — so move it live and say
+        # where the permanent version of the setting lives.
+        if len(strip.outputs) > 1:
+            return ' (until restart — set outputs in Signal Paths)'
+        strip.outputs = [target_name]
+        paths.save_meta(strip)
+        return ''
+    return ''
+
+
 class _DeviceRow(_VolumeRowBase):
     """One sink/source: default star, port selector, volume."""
 
@@ -282,14 +328,12 @@ class _DeviceRow(_VolumeRowBase):
         super().__init__(tab.dash.volume_style)
         self.tab = tab
         self.node_id = node.id
+        self.node_name = node.name
         self._port_key = None
         self._ports = []
         self.vol.set_meter(node.serial)
 
-        icon = ('application-x-addon-symbolic' if node.is_virtual
-                else 'audio-speakers-symbolic' if node.is_sink
-                else 'audio-input-microphone-symbolic')
-        self.icon = Gtk.Image.new_from_icon_name(icon)
+        self.icon = Gtk.Image.new_from_icon_name(device_icon(node))
         self.title = Gtk.Label(xalign=0, hexpand=True,
                                ellipsize=Pango.EllipsizeMode.END)
         self.title.add_css_class('heading')
@@ -297,6 +341,16 @@ class _DeviceRow(_VolumeRowBase):
         self.port_dd = Gtk.DropDown(tooltip_text='Port')
         self.port_dd.set_valign(Gtk.Align.CENTER)
         self.port_dd.connect('notify::selected', self._on_port)
+
+        # A virtual device has no hardware port, so `port_dd` is always hidden
+        # on one — and without this it had no routing control at all, which is
+        # how a chain became impossible to re-point from the Mixer.
+        self._outs = []
+        self._out_key = None
+        self._out_stream = None
+        self.out_dd = Gtk.DropDown(tooltip_text='Output device')
+        self.out_dd.set_valign(Gtk.Align.CENTER)
+        self.out_dd.connect('notify::selected', self._on_output)
 
         self.star = Gtk.Button()
         self.star.add_css_class('flat')
@@ -307,8 +361,48 @@ class _DeviceRow(_VolumeRowBase):
         self.header.append(self.title)
         if node.is_virtual:
             self.header.append(pill('virtual', 'dim'))
+            # ...and what kind of software device it is, when that says more
+            # than "virtual" does.  A hand-written chain in
+            # `filter-chain.conf.d` reads as "virtual · filter chain" here,
+            # which is the only place in the app that names it at all -- it has
+            # no settings page of ours.  Empty for our own virtual devices, so
+            # the row never says "virtual · virtual device".
+            kind = node.software_kind
+            if kind:
+                self.header.append(pill(kind, 'dim'))
         self.header.append(self.port_dd)
+        self.header.append(self.out_dd)
         self.header.append(self.star)
+
+    def _on_output(self, dd, _pspec):
+        if self.updating:
+            return
+        idx = dd.get_selected()
+        if idx == Gtk.INVALID_LIST_POSITION or idx >= len(self._outs):
+            return
+        entry = self._outs[idx]
+        if entry is None:            # the "Not connected" placeholder
+            return
+        serial, label, _dest_id, name = entry
+        stream_id = self._out_stream
+        if stream_id is None:
+            return
+        self.touch()
+        node_name, window = self.node_name, self.tab.dash.window
+
+        def move():
+            if not pw.move_stream(stream_id, serial):
+                return None
+            # Only once the live move worked — recording a target we failed to
+            # apply would leave the stored setting and the graph disagreeing.
+            return _remember_output(node_name, name)
+
+        async_call(move,
+                   lambda note, e: (
+                       window.toast(f'Output: {label}{note}'
+                                    if note is not None and not e
+                                    else 'Could not change the output'),
+                       self.tab.dash.refresh_soon()))
 
     def _on_port(self, dd, _pspec):
         if self.updating:
@@ -329,13 +423,40 @@ class _DeviceRow(_VolumeRowBase):
                    lambda ok, e: (window.toast('Default device changed'),
                                   self.tab.dash.refresh_soon()))
 
-    def update(self, node):
+    def update(self, node, outs=None):
+        """`outs` is (output stream id, current destination id, choices) for a
+        virtual device that has an output to choose, else None."""
         self.updating = True
         try:
             self.vol.set_meter(node.serial)      # see _StreamRow.update
+            self.node_name = node.name
             self.title.set_label(node.description)
             self.set_tooltip_text(node.name)
             self.filter_text = f'{node.description} {node.name}'.lower()
+
+            self.out_dd.set_visible(outs is not None)
+            if outs is not None:
+                self._out_stream, dest_id, choices = outs
+                entries = list(choices)
+                idx = next((i for i, c in enumerate(entries)
+                            if c[2] == dest_id), None)
+                if idx is None:
+                    # GTK trap, measured: `set_selected(INVALID_LIST_POSITION)`
+                    # does NOT stick once a model is set — the dropdown stays
+                    # on 0, so an unconnected device would read as if the first
+                    # device in the list were its output.  Saying so is the
+                    # only honest option, and it doubles as the way to give a
+                    # discarded leg an output for the first time.
+                    entries.insert(0, None)
+                    idx = 0
+                labels = ['Not connected' if e is None else e[1]
+                          for e in entries]
+                self._outs = entries
+                if tuple(labels) != self._out_key:
+                    self._out_key = tuple(labels)
+                    self.out_dd.set_model(Gtk.StringList.new(labels))
+                if not self.in_grace:
+                    self.out_dd.set_selected(idx)
 
             ports = [(idx, desc + (' (unplugged)' if avail == 'no' else ''))
                      for idx, desc, avail in node.ports]
@@ -592,7 +713,8 @@ class DevicesTab(_ListTab):
                          else 'No input devices found.')
         self.sinks = sinks
 
-    def update(self, nodes, cards=()):
+    def update(self, nodes, cards=(), vout=None):
+        vout = vout or {}
         cardmap = {c.id: c for c in cards}
 
         def card_of(n):
@@ -630,12 +752,35 @@ class DevicesTab(_ListTab):
                                               n.description.lower())):
             items.append((n.id, n))
 
+        # Where each virtual sink currently sends its audio, by name, so the
+        # ring check can walk it.  `chains.would_loop` is a plain edge-map
+        # walker, so feeding it the *live* graph rather than our stored metas
+        # costs nothing and also sees hand-written chains — which is the only
+        # way a ring through one of those could be caught at all.
+        by_id = {n.id: n for n in nodes}
+        edges = {name: (by_id[dest].name if dest in by_id else '')
+                 for name, (_sid, dest) in vout.items()}
+        sinks = [n for n in nodes if n.is_sink]
+
+        def outs_for(node):
+            entry = vout.get(node.name)
+            if entry is None:
+                return None
+            stream_id, dest_id = entry
+            choices = [(n.serial, n.description, n.id, n.name) for n in sinks
+                       if n.name != node.name
+                       and not chains.would_loop(node.name, n.name, edges)]
+            return (stream_id, dest_id, choices) if choices else None
+
         pairs = self._sync_rows(
             items,
             lambda o: (_CardConfigRow(self, o)
                        if isinstance(o, surround.Card) else _DeviceRow(self, o)))
         for row, obj in pairs:
-            row.update(obj)
+            if isinstance(obj, surround.Card):
+                row.update(obj)
+            else:
+                row.update(obj, outs_for(obj))
         self.refilter()
 
 
@@ -906,10 +1051,7 @@ class _FavRow(Gtk.Box, GraceMixin):
             if node.serial != self.serial:
                 self.serial = node.serial
                 self.vol.set_meter(node.serial)
-            self.icon.set_from_icon_name(
-                'application-x-addon-symbolic' if node.is_virtual
-                else 'audio-speakers-symbolic' if node.is_sink
-                else 'audio-input-microphone-symbolic')
+            self.icon.set_from_icon_name(device_icon(node))
             self.label.set_label(node.description)
             self.set_tooltip_text(node.name)
             if not self.in_grace:
@@ -1431,7 +1573,7 @@ class Dashboard:
 
         # 4. what is playing right now
         play_card, play_body = card(
-            'Playing now', 'emblem-music-symbolic',
+            'Playing now', 'media-playback-start-symbolic',
             link=('Open mixer', lambda: self._goto_mixer('output', 'apps')))
         self.play_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.play_empty = Gtk.Label(label='Nothing is playing.', xalign=0)
@@ -1469,11 +1611,11 @@ class Dashboard:
         for parent, (label, icon, cb) in (
                 (grid, ('Restart audio', 'view-refresh-symbolic',
                         self._restart_all)),
-                (grid, ('Patchbay', 'network-workgroup-symbolic',
+                (grid, ('Patchbay', 'pwctl-patchbay-symbolic',
                         lambda: self.window.goto('graph'))),
-                (grid2, ('Signal Paths', 'network-transmit-receive-symbolic',
+                (grid2, ('Signal Paths', 'pwctl-paths-symbolic',
                          lambda: self.window.goto('paths'))),
-                (grid2, ('Equalizer', 'audio-x-generic-symbolic',
+                (grid2, ('Equalizer', 'pwctl-eq-symbolic',
                          lambda: self.window.goto('enhance')))):
             b = Gtk.Button()
             b.set_child(Adw.ButtonContent(icon_name=icon, label=label,
@@ -1487,7 +1629,7 @@ class Dashboard:
         # 7. the latency calculator — kept, because it is the only place in the
         #    app that can force a quantum/rate live (Tools' copy is read-only).
         calc_card, calc_body = card('Latency calculator',
-                                    'preferences-system-time-symbolic')
+                                    'pwctl-latency-symbolic')
         calc_body.append(self._build_latency_calc())
 
         # The same column layout every other page uses.  A Gtk.FlowBox was
@@ -1673,7 +1815,12 @@ class Dashboard:
             # two mixer lists and Playing now — is answering "what is playing
             # and where is it going", and a chain's own output leg is not an
             # answer to that.  The graph itself is the Patchbay's job.
-            data['streams'] = pw.list_streams(dump, apps_only=True)
+            all_streams = pw.list_streams(dump)
+            data['streams'] = [s for s in all_streams if s.is_app]
+            # The legs `apps_only` just dropped are what tells us where each
+            # virtual device sends its audio, so this needs the full list.
+            data['vout'] = pw.virtual_outputs(dump, nodes=data['nodes'],
+                                              streams=all_streams)
             data['cards'] = surround.list_cards(dump, outputs_only=False)
             if want_slow:
                 data['states'] = {u: system.unit_state(u) for u, _ in SERVICES}
@@ -1793,8 +1940,8 @@ class Dashboard:
         # -- the four mixer lists -----------------------------------------
         self.playback.update(data['streams'], nodes)
         self.recording.update(data['streams'], nodes)
-        self.outputs.update(nodes, data['cards'])
-        self.inputs.update(nodes, data['cards'])
+        self.outputs.update(nodes, data['cards'], data.get('vout'))
+        self.inputs.update(nodes, data['cards'], data.get('vout'))
 
     def _fill_playing(self, playing, recording):
         """Up to five current streams, newest membership wins.

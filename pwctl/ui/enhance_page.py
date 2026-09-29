@@ -170,7 +170,7 @@ class EnhancePage:
             n = len([b for b in enh.params.get('bands') or []
                      if b.get('on', True)])
             subtitle = f'{n} band{"s" if n != 1 else ""} active'
-            icon = 'audio-x-generic-symbolic'
+            icon = 'pwctl-eq-symbolic'
         else:
             bits = []
             if enh.params.get('noise_suppression', True):
@@ -320,7 +320,7 @@ class EnhancePage:
             # This pins it with an application rule so it comes back on its
             # own; off by default, so nothing changes unless it is pressed.
             kept = rules.stream_is_bound(s, node.name)
-            keep = Gtk.ToggleButton(icon_name='view-pin-symbolic',
+            keep = Gtk.ToggleButton(icon_name='pwctl-pin-symbolic',
                                     active=kept, valign=Gtk.Align.CENTER,
                                     css_classes=['flat'],
                                     tooltip_text='Keep sending this app here, '

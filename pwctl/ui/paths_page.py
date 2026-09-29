@@ -44,8 +44,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from ..backend import levels, path_templates, paths, plugins, prefs, pw, \
-    rules, virtual
+from ..backend import backends, levels, path_templates, paths, plugins, \
+    prefs, pw, rules, virtual
 from .volume import make_volume
 from .widgets import async_call, confirm, esc, group, icon_button, \
     pick_file, pick_folder, pill, state_style
@@ -53,9 +53,9 @@ from .widgets import async_call, confirm, esc, group, icon_button, \
 _PLUGIN_CACHE: dict = {'all': None}
 
 KIND_ICON = {
-    'app': 'application-x-executable-symbolic',
-    'mic': 'audio-input-microphone-symbolic',
-    'everything': 'audio-volume-high-symbolic',
+    'app': 'pwctl-source-app-symbolic',
+    'mic': 'pwctl-source-mic-symbolic',
+    'everything': 'pwctl-source-all-symbolic',
 }
 KIND_BLURB = {
     'app': 'An application',
@@ -63,9 +63,9 @@ KIND_BLURB = {
     'everything': 'Everything on the default output',
 }
 STAGE_ICON = {
-    'eq': 'audio-x-generic-symbolic',
-    'effect': 'applications-multimedia-symbolic',
-    'convolver': 'audio-headphones-symbolic',
+    'eq': 'pwctl-eq-symbolic',
+    'effect': 'pwctl-effects-symbolic',
+    'convolver': 'pwctl-convolver-symbolic',
     'xover': 'view-list-symbolic',
 }
 BAND_TYPES = [('PK', 'Peak'), ('LSC', 'Low shelf'), ('HSC', 'High shelf')]
@@ -455,23 +455,37 @@ def chip_row(label: str, *widgets) -> Adw.WrapBox:
 def search_picker(parent, title, subtitle, items, on_pick, empty=''):
     """A searchable list dialog.
 
-    `items` is a list of (key, title, subtitle) tuples.  Every long list on
-    this page goes through here — a machine with twenty sinks and three
-    hundred LV2 plugins makes a ComboRow useless, and the search entry is the
-    difference between the page scaling and not.
+    `items` is a list of (key, title, subtitle) tuples, or
+    (key, title, subtitle, reason) where a non-empty `reason` shows the row
+    greyed out and unpickable with `reason` as its subtitle.  Showing a
+    blocked entry and saying why beats hiding it: a user who came looking for
+    LSP needs to learn that the backend is missing, not conclude the scan is
+    broken (issue #15).
+
+    Every long list on this page goes through here — a machine with twenty
+    sinks and three hundred LV2 plugins makes a ComboRow useless, and the
+    search entry is the difference between the page scaling and not.
     """
     dlg = Adw.Dialog(title=title, content_width=520, content_height=560)
     search = Gtk.SearchEntry(placeholder_text='Search…', margin_bottom=6)
     listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE,
                           css_classes=['boxed-list'])
     rows = []
-    for key, t, sub in items:
-        row = Adw.ActionRow(title=esc(t), subtitle=esc(sub),
-                            activatable=True, title_lines=1, subtitle_lines=1)
-        row.add_suffix(Gtk.Image.new_from_icon_name('go-next-symbolic'))
+    for item in items:
+        key, t, sub = item[0], item[1], item[2]
+        reason = item[3] if len(item) > 3 else ''
+        row = Adw.ActionRow(title=esc(t), subtitle=esc(reason or sub),
+                            activatable=not reason,
+                            title_lines=1, subtitle_lines=1)
+        if reason:
+            row.set_sensitive(False)
+            row.add_suffix(Gtk.Image.new_from_icon_name(
+                'dialog-warning-symbolic'))
+        else:
+            row.add_suffix(Gtk.Image.new_from_icon_name('go-next-symbolic'))
+            row.connect('activated', lambda r: (dlg.close(), on_pick(r._key)))
         row._key = key
-        row._hay = f'{t} {sub}'.lower()
-        row.connect('activated', lambda r: (dlg.close(), on_pick(r._key)))
+        row._hay = f'{t} {sub} {reason}'.lower()
         listbox.append(row)
         rows.append(row)
 
@@ -911,13 +925,24 @@ class StageDialog(Adw.Window):
             if error or not all_p:
                 self.window.toast('No LADSPA or LV2 plugins found')
                 return
-            items = []
+            items, blocked = [], 0
             for pl in all_p:
                 d = pl if isinstance(pl, dict) else vars(pl)
                 ports = (f"{len(d.get('audio_in') or [])} in / "
                          f"{len(d.get('audio_out') or [])} out")
+                # The picker used to offer everything, which is issue #15:
+                # a plugin whose backend PipeWire lacks kills the chain with
+                # exit 254, and one the graph cannot wire comes up green and
+                # wrong.  Both are refused here, and both say why.
+                reason = backends.plugin_problem(pl)
+                blocked += bool(reason)
                 items.append((d, d.get('name') or d.get('label') or '?',
-                              f"{d.get('type', '')} · {ports}"))
+                              f"{d.get('type', '')} · {ports}", reason))
+            note = ('Stereo plugins run once per channel pair, mono '
+                    'plugins once per channel.')
+            if blocked:
+                note += (f'  {blocked} of {len(items)} cannot be used here '
+                         '— each greyed-out row says why.')
 
             def picked(d):
                 self.stage['params'].update({
@@ -929,9 +954,7 @@ class StageDialog(Adw.Window):
                         self.name_row.get_text().strip() == 'effect':
                     self.name_row.set_text(d.get('name') or d.get('label') or '')
                 self._refresh_plugin_row()
-            search_picker(self, 'Choose a plugin',
-                          'Stereo plugins run once per channel pair, mono '
-                          'plugins once per channel.', items, picked,
+            search_picker(self, 'Choose a plugin', note, items, picked,
                           empty='No LADSPA or LV2 plugins found')
         async_call(_all_plugins, loaded)
 
@@ -1201,7 +1224,7 @@ class PathsPage:
         ('format-justify-fill-symbolic', 'Equalize everything',
          'One equalizer between every app and your current output.',
          '_quick_eq_all'),
-        ('applications-multimedia-symbolic', 'Put effects on one app',
+        ('pwctl-effects-symbolic', 'Put effects on one app',
          'Send a single app through a plugin chain, leaving the rest of your '
          'audio alone.', '_quick_app_fx'),
         ('camera-video-symbolic', 'Speakers and a stream mix',
@@ -2265,7 +2288,7 @@ class PathsPage:
                      'it onto another strip',
                      lambda _b, st=s: self._release_app(st),
                      icon='window-close-symbolic', active=True,
-                     lead_icon='view-pin-symbolic' if kept else '')
+                     lead_icon='pwctl-pin-symbolic' if kept else '')
             drag_source(c, lambda st=s: StreamDrag(st.id, st.name),
                         on_begin=lambda: self._begin_drag('stream', strip),
                         on_end=self._end_drag)
@@ -2696,11 +2719,11 @@ class PathsPage:
 
     def _app_chip_menu(self, stream, node_name, kept):
         if kept:
-            return [('view-pin-symbolic', 'Stop keeping it here',
+            return [('pwctl-pin-symbolic', 'Stop keeping it here',
                      lambda: self._keep_app(stream, node_name, False)),
                     ('window-close-symbolic', 'Send back to default output',
                      lambda: self._release_app(stream))]
-        return [('view-pin-symbolic', 'Keep this app here',
+        return [('pwctl-pin-symbolic', 'Keep this app here',
                  lambda: self._keep_app(stream, node_name, True)),
                 ('window-close-symbolic', 'Send back to default output',
                  lambda: self._release_app(stream))]

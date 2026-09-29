@@ -50,7 +50,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 from .. import spa_json
-from . import pw, system, virtual
+from . import backends, pw, system, virtual
 from .chains import GEN_DIR, ensure_unit, pick_targets, would_loop
 from .config import XDG_CONFIG
 
@@ -1056,6 +1056,12 @@ def apply(strip: Strip, strips=None) -> tuple[bool, str]:
         generate(strip, strips)
     except (spa_json.SpaJsonError, ValueError) as e:
         return False, str(e)
+    # See chains.apply — a missing filter-graph backend is refused by
+    # PipeWire before the graph ever runs, and systemd's own text explains
+    # nothing (issue #15).
+    problem = backends.explain(strip.conf_path.read_text())
+    if problem:
+        return False, problem
     ok, err = sync_fan(strip, strips)
     if not ok:
         return False, f'fan-out device: {err}'

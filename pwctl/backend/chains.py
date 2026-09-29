@@ -21,7 +21,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 from .. import spa_json
-from . import system, templates
+from . import backends, headroom, system, templates
 from .config import XDG_CONFIG
 from .hrir import analyze
 
@@ -139,6 +139,28 @@ def new_chain(name: str, template: str, **kw) -> ChainMeta:
     return meta
 
 
+def stamp_gain(meta: ChainMeta) -> float | None:
+    """Write the convolver gain measured from this chain's IR into `params`.
+
+    Issue #17: at gain 1.0 every HeSuVi file measured clips, by 5 to 19 dB,
+    and the right gain differs per file.  Called where a chain is created
+    straight from a file without the dialog.  Writing the number into the
+    chain's JSON, not moving `templates`' 1.0 default, is deliberate: a chain
+    saved without a `gain` falls through to that default at render time, so
+    changing it would re-gain chains people already have, silently, the next
+    time anything regenerates their conf.  Returns the gain, or None when the
+    file cannot be measured (the chain is then left at 1.0, as before).
+    """
+    if meta.is_raw:
+        return None
+    found, _why = headroom.check(headroom.for_template, meta.template,
+                                 meta.hrir, meta.hrir_channels, 1.0)
+    if found is None:
+        return None
+    meta.params['gain'] = found.suggested
+    return found.suggested
+
+
 # ------------------------------------------------------------- generation --
 
 def _rewrite_filenames(conf_text: str, new_path: str) -> str:
@@ -193,6 +215,14 @@ def apply(meta: ChainMeta) -> tuple[bool, str]:
         generate(meta)
     except (spa_json.SpaJsonError, ValueError) as e:
         return False, f'Invalid config: {e}'
+    # Pre-flight before systemd gets involved.  A conf naming a backend this
+    # machine lacks is refused outright — the unit dies in ~30 ms and systemd
+    # reports only "control process exited with error code", which names
+    # neither the cause nor the cure (issue #15).  Checked here rather than in
+    # a picker because the SOFA and rnnoise templates never go near one.
+    problem = backends.explain(meta.conf_path.read_text())
+    if problem:
+        return False, problem
     ensure_unit()
     if meta.enabled:
         rc, _, err = system.sysctl_user('enable', '--now', meta.unit)
@@ -209,6 +239,10 @@ def set_enabled(meta: ChainMeta, enabled: bool) -> tuple[bool, str]:
     save_meta(meta)
     if enabled and not meta.conf_path.is_file():
         return apply(meta)
+    if enabled:
+        problem = backends.explain(meta.conf_path.read_text())
+        if problem:
+            return False, problem
     ensure_unit()
     if enabled:
         rc, _, err = system.sysctl_user('enable', '--now', meta.unit)

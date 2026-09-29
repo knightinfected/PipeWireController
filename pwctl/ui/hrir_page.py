@@ -90,7 +90,7 @@ class HrirPage:
         else:
             sub = f'unreadable: {info.error}'
         row = Adw.ActionRow(title=esc(info.path.name), subtitle=sub)
-        row.add_prefix(Gtk.Image.new_from_icon_name('folder-music-symbolic'))
+        row.add_prefix(Gtk.Image.new_from_icon_name('pwctl-hrir-symbolic'))
         row.add_suffix(pill(info.kind_label.split(' (')[0],
                             KIND_STYLE.get(info.kind, 'dim')))
 
@@ -111,9 +111,12 @@ class HrirPage:
         from .chains_page import ChainDialog
         tpl = info.templates[0]
         meta = chains.new_chain(info.path.stem, tpl, hrir=str(info.path))
+        gain = chains.stamp_gain(meta)
         chains.save_meta(meta)
-        self.window.toast(f'Chain created with template '
-                          f'“{tpl}” — configure and enable it')
+        self.window.toast(f'Chain created with template “{tpl}”'
+                          + (f', gain {gain:.2f} measured from the file'
+                             if gain is not None else '')
+                          + ' — configure and enable it')
         self.window.goto('chains')
         ChainDialog(self.window, self.window.pages['chains'], meta)
 

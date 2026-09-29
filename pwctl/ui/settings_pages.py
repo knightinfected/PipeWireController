@@ -455,7 +455,7 @@ class WirePlumberPage:
                                  else ''))
         exp.set_expanded(True)
         exp.add_prefix(Gtk.Image.new_from_icon_name(
-            'bluetooth-active-symbolic'))
+            'pwctl-session-symbolic'))
 
         profile = Adw.ComboRow(
             title='Profile',

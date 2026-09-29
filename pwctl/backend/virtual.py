@@ -13,6 +13,11 @@ Kinds:
   combine-source one source that records several real inputs at once
   bus            loopback sink whose output shows up as a routable stream —
                  a group/sub-mix with its own volume, feeding any device
+  pro-map-sink   channel map: a virtual sink wired to chosen channels of a
+                 real device (the kind string is historical — this started
+                 as a Pro Audio AUX mapper and is no longer limited to one)
+  pro-map-source channel map the other way: chosen channels of a real device
+                 published as a virtual microphone
 """
 
 from __future__ import annotations
@@ -37,17 +42,21 @@ KINDS = {
     'combine-sink': 'Combined output (plays on several devices)',
     'combine-source': 'Combined input (records several devices)',
     'bus': 'Bus / sub-mix (routable group sink)',
-    'pro-map-sink': 'Pro Audio output map (channels → AUX)',
-    'pro-map-source': 'Pro Audio input map (AUX → virtual mic)',
+    'pro-map-sink': 'Channel map output (play into chosen channels)',
+    'pro-map-source': 'Channel map input (record chosen channels)',
 }
 
 DEFAULT_POSITIONS = ['FL', 'FR']
 
-# Channel names offered for the virtual side of a Pro Audio map.
+# Channel names offered for the virtual side of a channel map.
 POSITION_NAMES = ['MONO', 'FL', 'FR', 'FC', 'LFE', 'RL', 'RR', 'SL', 'SR',
                   'RC', 'TFL', 'TFR', 'TRL', 'TRR']
 
 _AUX_RE = re.compile(r'^AUX\d+$')
+# PipeWire's ALSA monitor names a Pro Audio profile's nodes
+# <card>.pro-output-N / .pro-input-N.  That suffix, and the card's active
+# profile, are the two reliable markers — the channel NAMES are not one.
+_PRO_NODE_RE = re.compile(r'\.pro-(?:output|input)-\d+$')
 
 
 @dataclass
@@ -58,7 +67,12 @@ class VirtualDevice:
     positions: list = field(default_factory=lambda: list(DEFAULT_POSITIONS))
     members: list = field(default_factory=list)   # node.names for combine-*
     target: str = ''                              # bus/pro-map target (node.name)
-    target_positions: list = field(default_factory=list)  # AUX names for pro-map
+    target_positions: list = field(default_factory=list)  # target's channel names
+    target_pro: bool | None = None                # was the target Pro Audio?
+    #   Recorded when the target is picked, because it cannot be re-derived
+    #   later: the card may be unplugged or have left the profile.  None =
+    #   a device stored before this was recorded; those fall back to the old
+    #   channel-name test so they keep generating exactly as they always have.
     enabled: bool = False
     persistent: bool = True                       # False = gone after reboot
 
@@ -103,31 +117,137 @@ def list_devices() -> list[VirtualDevice]:
     return out
 
 
-def list_pro_targets(direction: str) -> list[tuple[str, str, list[str]]]:
-    """Pro Audio devices exposing generic AUX channels.
+def is_pro_channels(channels) -> bool:
+    """Whether a channel list is a Pro Audio one (generic AUX ports).
 
-    direction 'sink'   → Audio/Sink targets whose playback ports are AUX*
-                         (map a virtual sink onto them).
-    direction 'source' → Audio/Source targets whose capture ports are AUX*
-                         (capture them into a virtual mic).
-    Returns [(node.name, description, [AUX0, AUX1, …])], AUX list in numeric
-    order.  Empty when no card is in the Pro Audio profile.
+    This is the question that decides whether the map has to be linked by
+    hand, so it is asked of the *stored* channel names rather than of the
+    live graph: a card that is unplugged, or has left the Pro Audio profile
+    since the device was created, must still get the drop-in it has always
+    had.
+    """
+    return bool(channels) and all(_AUX_RE.match(str(c)) for c in channels)
+
+
+def node_is_pro(name: str, channels=(), profile: str = '') -> bool:
+    """Whether a target node belongs to a card in the Pro Audio profile.
+
+    Asked of the live graph at the moment a target is picked, and then STORED
+    on the device as `target_pro` — see `needs_link_dropin` for why it must
+    not be asked again afterwards.
+
+    Three signals, any one of which settles it:
+
+    * the node-name suffix `.pro-output-N` / `.pro-input-N`, which is how
+      PipeWire's ALSA monitor names the nodes of a Pro Audio profile;
+    * the owning card's active profile being `pro-audio`;
+    * every channel being a generic `AUX<n>` port.
+
+    The third used to be the whole test, and on its own it is WRONG: a
+    DualSense on the Pro Audio profile reports `[FL FR RL RR]`, because the
+    ALSA device declares a real 4-channel layout (measured in the issue #12
+    pw-dump).  Believing it there takes the ordinary-device path, whose
+    `target.object` a Pro Audio node ignores — so the map would play into the
+    default sink instead, with no error and audio still audible.
+    """
+    return bool(_PRO_NODE_RE.search(name or '')
+                or (profile or '') == 'pro-audio'
+                or is_pro_channels(channels))
+
+
+def _active_profiles(dump) -> dict:
+    """{device id (as str): active profile name} for every card in a dump.
+
+    pw-dump reports only the ACTIVE profile under a Device's `Profile` param,
+    so the first entry is the one in force.
+    """
+    out = {}
+    for obj in dump:
+        if obj.get('type') != 'PipeWire:Interface:Device':
+            continue
+        params = (obj.get('info') or {}).get('params') or {}
+        for prof in (params.get('Profile') or []):
+            if isinstance(prof, dict) and prof.get('name'):
+                out[str(obj.get('id'))] = str(prof['name'])
+                break
+    return out
+
+
+def list_map_targets(direction: str) -> list[tuple[str, str, list[str], bool]]:
+    """Devices a channel map can be pointed at, with the channels they have.
+
+    direction 'sink'   → Audio/Sink targets, by their playback channels
+                         (play into chosen channels of one).
+    direction 'source' → Audio/Source targets, by their capture channels
+                         (record chosen channels of one).
+
+    Returns [(node.name, description, [channel, …], is_pro)].  Channels are
+    the port names in port order — FL/FR/RL/RR on an ordinary card, AUX0…
+    on one in the Pro Audio profile — because that is what `audio.position`
+    has to name on the hardware side of the loopback.
+
+    AUX targets keep their numeric ordering; everything else keeps the order
+    the device declares, which is the channel order of its layout.
     """
     from . import graph
+    from .pw import pw_dump
     want_sink = direction == 'sink'
     out = []
-    for n in graph.snapshot().nodes.values():
+    dump = pw_dump()                # one pass: nodes AND their cards' profiles
+    profiles = _active_profiles(dump)
+    for n in graph.snapshot(dump).nodes.values():
         if n.kind != ('sink' if want_sink else 'source'):
             continue
         if n.name.startswith('pwctl.'):
             continue                      # never target our own virtuals
         ports = n.inputs if want_sink else n.outputs
-        aux = sorted((p.channel for p in ports if _AUX_RE.match(p.channel)),
-                     key=lambda c: int(c[3:]))
-        if aux:
-            out.append((n.name, n.label, aux))
+        named = [p for p in ports if p.channel]
+        if not named:
+            continue
+        pro = node_is_pro(n.name, [p.channel for p in named],
+                          profiles.get(str(n.props.get('device.id'))))
+        # Ordering is a separate question from pro-ness: only AUX names carry
+        # their channel in the name.  A Pro Audio card reporting FL/FR/RL/RR
+        # is ordered like any other — by port index, never by parsing 'AUX'.
+        if is_pro_channels([p.channel for p in named]):
+            chans = sorted((p.channel for p in named),
+                           key=lambda c: int(c[3:]))
+        else:
+            chans = [p.channel for p in sorted(named, key=lambda p: p.index)]
+        out.append((n.name, n.label, chans, pro))
     out.sort(key=lambda t: t[1].lower())
     return out
+
+
+def list_pro_targets(direction: str) -> list[tuple[str, str, list[str]]]:
+    """Only the Pro Audio targets, in the pre-channel-map shape.
+
+    Kept because it was the module's way of asking this question; new callers
+    want `list_map_targets`, which answers it for every device.
+    """
+    return [(name, label, chans)
+            for name, label, chans, pro in list_map_targets(direction) if pro]
+
+
+def needs_link_dropin(dev: VirtualDevice) -> bool:
+    """Whether this device's channel map has to be linked by hand.
+
+    WirePlumber refuses to auto-route onto a Pro Audio node, so those need
+    the ExecStartPost drop-in below.  Every other device routes itself from
+    `target.object` — measured, and the reason a channel map works on an
+    ordinary sound card at all.
+    """
+    if dev.kind not in ('pro-map-sink', 'pro-map-source'):
+        return False
+    if dev.target_pro is None:
+        # Stored before pro-ness was recorded: answer exactly as before, so
+        # every device already on disk keeps the drop-in it has always had.
+        return is_pro_channels(dev.target_positions)
+    # AUX channel names exist only on a Pro Audio profile, so they force the
+    # drop-in even if the stored answer disagrees.  The asymmetry is
+    # deliberate: a needless drop-in is harmless — its pw-link calls just fail
+    # quietly — while a missing one is another silent misroute.
+    return bool(dev.target_pro) or is_pro_channels(dev.target_positions)
 
 
 def save_meta(dev: VirtualDevice):
@@ -248,34 +368,49 @@ def _bus_conf(dev: VirtualDevice) -> dict:
 
 
 def _pro_map_conf(dev: VirtualDevice) -> dict:
-    """Map a virtual sink/source onto specific Pro Audio AUX channels.
+    """Map a virtual sink/source onto chosen channels of a real device.
 
-    When a card is in the "Pro Audio" profile it exposes every channel as a
-    flat set of generic AUX ports (AUX0, AUX1, …) with no stereo/surround
-    grouping.  This builds a small loopback whose *virtual* side carries the
-    friendly layout (positions, e.g. [FL FR]) and whose *hardware* side
-    declares the target's AUX names (target_positions, e.g. [AUX0 AUX1]).
+    Builds a small loopback whose *virtual* side carries the friendly layout
+    (positions, e.g. [FL FR]) and whose *hardware* side declares the channels
+    it occupies on the target (target_positions, e.g. [RL RR] on an ordinary
+    4-channel card, or [AUX0 AUX1] on one in the Pro Audio profile).
 
-    positions[i] pairs by index with target_positions[i]; stream.dont-remix
-    keeps it a straight per-channel passthrough (no up/downmix, so FL doesn't
-    get "interpreted" onto an unnamed AUX channel).
+    positions[i] pairs by index with target_positions[i].
 
-    WirePlumber will NOT auto-route a stream onto a Pro Audio node (those are
-    meant for manual routing), so target.object is ignored and autoconnect
-    falls back to the default sink.  We therefore set node.autoconnect=false
-    here and create the exact links ourselves after the node appears (see
-    apply()) — the loopback conf can't declare them because the ports don't
-    exist yet at config-parse time.
+    **`stream.dont-remix` is what makes this a channel map at all** and it is
+    not optional.  Measured against PipeWire 1.6.8: asking for [RL RR] with it
+    set links exactly RL and RR; delete that one line and the same config
+    links *every* channel of the device and channel-mixes them down to fit.
+    The failure mode is therefore silent and wrong in the worst way — audio
+    still plays, so it looks like it worked, but it is a downmix of the whole
+    device rather than the channels that were asked for.
+
+    Two ways to reach the hardware, and which one is used is the only
+    difference between a Pro Audio target and any other:
+
+    * **Ordinary device** — `target.object` plus the position names is enough;
+      WirePlumber links the named channels itself.  Measured.
+    * **Pro Audio** — WirePlumber will NOT auto-route onto those nodes (they
+      are meant for manual routing), so `target.object` is silently ignored
+      and autoconnect sends the stream to the *default sink* instead.  Those
+      set node.autoconnect=false and get their links created after the node
+      appears (see `needs_link_dropin` and apply()) — the loopback conf cannot
+      declare them, because the ports do not exist yet at config-parse time.
     """
     pos = list(dev.positions)
     aux = list(dev.target_positions)
     if not pos or len(pos) != len(aux):
         raise ValueError('channel map must pair each virtual channel with '
-                         'exactly one AUX channel')
+                         'exactly one channel on the target device')
     if not dev.target:
-        raise ValueError('choose a target Pro Audio device')
+        raise ValueError('choose a target device')
     hw = {'audio.position': aux, 'stream.dont-remix': True,
-          'node.passive': True, 'node.autoconnect': False}
+          'node.passive': True}
+    if needs_link_dropin(dev):
+        hw['node.autoconnect'] = False    # linked by the drop-in instead
+    else:
+        hw['target.object'] = dev.target
+        hw['node.dont-reconnect'] = False
     if dev.kind == 'pro-map-sink':
         hw['node.name'] = f'{dev.node_name}.out'
         hw['node.description'] = f'{dev.name} → {dev.target}'
@@ -294,7 +429,7 @@ def _pro_map_conf(dev: VirtualDevice) -> dict:
     return _base([{'name': 'libpipewire-module-loopback', 'args': args}])
 
 
-# --- pro-map explicit linking (WirePlumber won't auto-route to Pro Audio) ---
+# --- explicit linking, Pro Audio targets only (see needs_link_dropin) ---
 # The links can't live in the loopback conf (ports don't exist at parse time),
 # so a per-instance systemd drop-in runs pw-link after the service starts —
 # which reruns on every start, including boot and PipeWire restarts.
@@ -329,7 +464,8 @@ def _write_pro_dropin(dev: VirtualDevice):
     script = (f'unset PIPEWIRE_CONFIG_DIR; for _ in {ticks}; do if {ready}; '
               f'then {links}; break; fi; sleep 0.25; done')
     text = ('# Managed by PipeWire Controller — links the Pro Audio channel '
-            'map after the loopback node appears.\n'
+            'map after the loopback node appears.  Ordinary devices need no '
+            'drop-in: WirePlumber routes those from target.object.\n'
             f"[Service]\nExecStartPost=-/bin/sh -c '{script}'\n")
     d = _dropin_dir(dev)
     d.mkdir(parents=True, exist_ok=True)
@@ -365,7 +501,7 @@ def generate(dev: VirtualDevice):
     text = spa_json.dumps(conf, header=header)
     spa_json.loads(text)          # sanity check before writing
     system.atomic_write(dev.conf_path, text)
-    if dev.kind in ('pro-map-sink', 'pro-map-source'):
+    if needs_link_dropin(dev):
         _write_pro_dropin(dev)
     else:
         _remove_pro_dropin(dev)
@@ -382,7 +518,10 @@ def apply(dev: VirtualDevice) -> tuple[bool, str]:
         return False, str(e)
     ensure_unit()
     if dev.kind in ('pro-map-sink', 'pro-map-source'):
-        system.daemon_reload()    # pick up the per-instance link drop-in
+        # Reload for either outcome: a map re-pointed from a Pro Audio card
+        # to an ordinary one has just had its drop-in removed, and systemd
+        # keeps honouring a dropped one until it is told.
+        system.daemon_reload()
     if dev.enabled:
         verb = 'enable' if dev.persistent else 'start'
         args = ('enable', '--now', dev.unit) if dev.persistent \

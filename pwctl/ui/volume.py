@@ -66,7 +66,7 @@ VOLUME_STYLES = [
     ('precision', 'Precision', 'Slider with −/+ nudge buttons — great on trackpads',
      'zoom-in-symbolic'),
     ('meter', 'LED meter', 'Studio-style segment bar — click or drag to set',
-     'power-profile-performance-symbolic'),
+     'pwctl-meter-symbolic'),
 ]
 
 

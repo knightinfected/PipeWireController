@@ -10,7 +10,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gtk  # noqa: E402
 
-from ..backend import chains, enhance, hrir, pw, system
+from ..backend import chains, enhance, headroom, hrir, pw, system
 from ..backend.templates import TEMPLATES
 from .widgets import (async_call, confirm, esc, group, icon_button, page_scroller,
                       pick_file, pill, state_style, text_viewer_dialog)
@@ -18,6 +18,19 @@ from .widgets import (async_call, confirm, esc, group, icon_button, page_scrolle
 AUDIO_FILTER = [('Impulse responses', ['*.wav', '*.flac', '*.ogg', '*.w64',
                                        '*.aiff', '*.sofa'])]
 EQ_FILTER = [('AutoEq / text', ['*.txt', '*.csv'])]
+
+# templates whose output level the Level section speaks about: the convolving
+# ones it can measure, and SOFA, where it says why it cannot
+LEVEL_NEEDS = headroom.CONVOLVING + ('sofa',)
+
+
+def _too_loud_tip(found, raw):
+    fix = ('It is an imported config, so the gain lives in its text: set '
+           f'gain = {found.suggested:.2f} in each convolver\'s config.'
+           if raw else
+           f'Edit the chain and use the suggested gain, {found.suggested:.2f}.')
+    return (f'Peaks about {found.over_db:.1f} dB over full scale on typical '
+            f'surround content, so it distorts. {fix}')
 
 
 class ChainsPage:
@@ -59,7 +72,8 @@ class ChainsPage:
     def refresh(self):
         def collect():
             metas = chains.list_chains()
-            return [(m, chains.status(m) if m.enabled else 'disabled')
+            return [(m, chains.status(m) if m.enabled else 'disabled',
+                     headroom.check(headroom.for_chain, m)[0])
                     for m in metas]
         async_call(collect, self._apply)
 
@@ -77,12 +91,12 @@ class ChainsPage:
             self.list_group.add(empty)
             self._rows.append(empty)
             return
-        for meta, state in items:
-            row = self._chain_row(meta, state)
+        for meta, state, found in items:
+            row = self._chain_row(meta, state, found)
             self.list_group.add(row)
             self._rows.append(row)
 
-    def _chain_row(self, meta, state):
+    def _chain_row(self, meta, state, found=None):
         tpl = TEMPLATES.get(meta.template)
         sub = tpl['title'] if tpl else 'Imported config'
         if meta.hrir:
@@ -91,7 +105,13 @@ class ChainsPage:
         row.add_prefix(Gtk.Image.new_from_icon_name(
             'audio-input-microphone-symbolic'
             if meta.template == 'rnnoise-source'
-            else 'audio-headphones-symbolic'))
+            else 'pwctl-chains-symbolic'))
+        # Issue #17: a chain made before the gain was measured keeps the gain
+        # it was saved with, so say so where it will be seen, enabled or not.
+        if found is not None and found.clips:
+            loud = pill('Too loud', 'warning')
+            loud.set_tooltip_text(_too_loud_tip(found, meta.is_raw))
+            row.add_suffix(loud)
         if meta.enabled:
             row.add_suffix(pill(state, state_style(state)))
 
@@ -283,15 +303,26 @@ class ChainDialog(Adw.Dialog):
         self.target_names = ['']
         self.target_row.set_model(Gtk.StringList.new(['Auto (follow default)']))
 
-        # params
+        # level (issue #17): what the chain comes out at, measured from the
+        # IR, and the gain that fixes it.  A new chain follows the measured
+        # gain until the user sets one; an existing chain keeps what it was
+        # saved with, and is only told.
+        self._updating = False
+        self._measure_gen = 0
+        self._found = None                 # headroom.Headroom, or None
+        self._why = ''                     # why not, when None
+        self._gain_auto = self.is_new
+        self._auto_checked = self.is_new
+        self.level_row = LevelRow(self._use_suggested)
         self.gain_row = Adw.SpinRow(
             title='Convolver gain',
-            subtitle='Scale the IR to avoid clipping (1.0 = unchanged)',
-            adjustment=Gtk.Adjustment(lower=0.05, upper=4.0,
-                                      step_increment=0.05),
+            subtitle='1.0 = the IR as recorded',
+            adjustment=Gtk.Adjustment(lower=0.01, upper=4.0,
+                                      step_increment=0.01, page_increment=0.1),
             digits=2)
         self.gain_row.set_value(
             (meta.params.get('gain', 1.0) if meta else 1.0))
+        self.gain_row.connect('notify::value', self._gain_changed)
         self.eq_row = Adw.ActionRow(
             title='AutoEq file',
             subtitle='ParametricEQ.txt from autoeq.app for your headphones')
@@ -330,10 +361,16 @@ class ChainDialog(Adw.Dialog):
 
         g = group('')
         for r in (self.name_row, self.tpl_row, self.tpl_desc, self.hrir_row,
-                  self.hrir_info, self.target_row, self.gain_row, self.eq_row,
-                  self.bass_gain, self.bass_freq, self.cross_gain,
-                  self.vad_row, self.edit_raw_row):
+                  self.hrir_info):
             g.add(r)
+        self.level_group = group('Level')
+        self.level_group.add(self.level_row)
+        self.level_group.add(self.gain_row)
+        rest = group('')
+        for r in (self.target_row, self.eq_row, self.bass_gain,
+                  self.bass_freq, self.cross_gain, self.vad_row,
+                  self.edit_raw_row):
+            rest.add(r)
 
         save = Gtk.Button(label='Save & apply')
         save.add_css_class('suggested-action')
@@ -342,7 +379,7 @@ class ChainDialog(Adw.Dialog):
         header.pack_end(save)
         view = Adw.ToolbarView()
         view.add_top_bar(header)
-        view.set_content(page_scroller(g))
+        view.set_content(page_scroller(g, self.level_group, rest, columns=1))
         self.set_child(view)
 
         self._load_hrir_choices()
@@ -368,9 +405,11 @@ class ChainDialog(Adw.Dialog):
             self.meta and self.meta.hrir)
         self.hrir_row.set_visible(is_conv)
         self.hrir_info.set_visible(is_conv)
-        self.gain_row.set_visible(tpl_id not in
-                                  ('parametric-eq', 'bass-boost', 'crossfeed',
-                                   'rnnoise-source', 'raw'))
+        # Only a convolver has a convolver gain.  The passthrough sink and the
+        # effect rack showed this row too and ignored it.  An imported config
+        # keeps its gain in its own text, so it gets the reading, not the knob.
+        self.gain_row.set_visible(bool(tpl) and tpl['needs'] in LEVEL_NEEDS)
+        self.level_group.set_visible(self.gain_row.get_visible())
         self.eq_row.set_visible(tpl_id == 'parametric-eq')
         self.bass_gain.set_visible(tpl_id == 'bass-boost')
         self.bass_freq.set_visible(tpl_id == 'bass-boost')
@@ -412,6 +451,7 @@ class ChainDialog(Adw.Dialog):
         self._hrir_selected()
 
     def _hrir_selected(self, *_a):
+        self._remeasure()
         path = self.selected_hrir()
         if not path:
             self.hrir_info.set_title('No IR selected')
@@ -425,6 +465,80 @@ class ChainDialog(Adw.Dialog):
             self.hrir_info.set_title('SOFA HRTF file')
         else:
             self.hrir_info.set_title(f'⚠ {info.error}')
+
+    # -------------------------------------------------------------- level --
+    def _remeasure(self):
+        """Measure what is selected now; a slower, older answer is dropped."""
+        self._measure_gen += 1
+        gen = self._measure_gen
+        tpl_id = self._current_template()
+        if tpl_id == 'raw':
+            raw = self.meta.params.get('raw_text', '')
+            if self.selected_hrir():    # the swap generate() will make
+                raw = chains._rewrite_filenames(raw, self.selected_hrir())
+
+            def work():
+                return headroom.check(headroom.for_raw, raw)
+        else:
+            path = self.selected_hrir()
+
+            def work():                 # at 1.0: the gain is applied live
+                return headroom.check(headroom.for_template, tpl_id, path)
+        async_call(work, lambda res, err: self._measured(gen, res, err))
+
+    def _measured(self, gen, res, error):
+        if gen != self._measure_gen:
+            return
+        self._found, self._why = res if res else (None, str(error))
+        found = self._found
+        raw = self._current_template() == 'raw'
+        if raw:
+            self.level_group.set_visible(found is not None)
+        elif found is not None:
+            if not self._auto_checked:
+                # an existing chain follows the measurement only if it was
+                # already sitting on it; otherwise its own value stands
+                self._auto_checked = True
+                self._gain_auto = abs(self.gain_row.get_value()
+                                      - found.suggested) < 0.005
+            if self._gain_auto:
+                self._set_gain(found.suggested)
+        self._update_level()
+
+    def _set_gain(self, value):
+        self._updating = True
+        try:
+            self.gain_row.set_value(value)
+        finally:
+            self._updating = False
+
+    def _gain_changed(self, *_a):
+        if not self._updating:
+            found = self._found
+            self._gain_auto = bool(found) and abs(
+                self.gain_row.get_value() - found.suggested) < 0.005
+        self._update_level()
+
+    def _use_suggested(self):
+        if self._found is not None:
+            self._set_gain(self._found.suggested)
+            self._gain_auto = True
+            self._update_level()
+
+    def _update_level(self):
+        found = self._found
+        raw = self._current_template() == 'raw'
+        gain = self.gain_row.get_value()
+        if found is None:
+            self.level_row.show_unknown(self._why)
+            self.gain_row.set_subtitle('1.0 = the IR as recorded')
+            return
+        peak = found.peak_db if raw else found.peak_at(gain)
+        self.level_row.show(found, peak, raw,
+                            at_suggested=abs(gain - found.suggested) < 0.005)
+        self.gain_row.set_subtitle(
+            f'{_db(headroom.db(gain))}  ·  suggested for this file: '
+            f'{found.suggested:.2f}')
 
     def selected_hrir(self):
         idx = self.hrir_row.get_selected()
@@ -495,6 +609,7 @@ class ChainDialog(Adw.Dialog):
                 return False
             self.meta.params['raw_text'] = text
             self.window.toast('Config text updated — save to apply')
+            self._remeasure()
             return True
         text_viewer_dialog(self.window, 'Edit config', raw,
                            editable=True, on_save=on_save)
@@ -551,3 +666,167 @@ class ChainDialog(Adw.Dialog):
             else:
                 self.window.toast(f'Failed: {msg}')
         async_call(work, done)
+
+
+# ----------------------------------------------------------------- level ----
+
+class HeadroomBar(Gtk.DrawingArea):
+    """Where the chain's output peaks against full scale, drawn to scale.
+
+    -24 to +24 dB with full scale (0 dB) marked and the zone past it always
+    tinted, so the one question the bar answers — does it cross that line —
+    can be read without the numbers.  Colours come from the two pen labels
+    (`set_pens`), the stylesheet-to-Cairo bridge Signal Paths' wires use.
+    """
+    RANGE = 24.0
+
+    def __init__(self):
+        super().__init__(content_height=12, hexpand=True)
+        self._db = None
+        self._ok = self._hot = None
+        self.set_draw_func(self._draw)
+
+    def set_pens(self, ok, hot):
+        self._ok, self._hot = ok, hot
+
+    def set_level(self, peak_db):
+        self._db = peak_db
+        self.queue_draw()
+
+    def _x(self, value, w):
+        r = self.RANGE
+        return (max(-r, min(r, value)) + r) / (2 * r) * w
+
+    def _draw(self, _area, cr, w, h):
+        fg = self.get_color()
+        ok = self._ok.get_color() if self._ok else fg
+        hot = self._hot.get_color() if self._hot else fg
+        x0 = self._x(0.0, w)
+
+        def pill_path():
+            r = h / 2
+            cr.new_sub_path()
+            cr.arc(r, r, r, 1.5708, 4.7124)
+            cr.arc(w - r, r, r, 4.7124, 1.5708)
+            cr.close_path()
+
+        pill_path()
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.10)
+        cr.fill()
+        cr.save()
+        pill_path()
+        cr.clip()
+        cr.rectangle(x0, 0, w - x0, h)
+        cr.set_source_rgba(hot.red, hot.green, hot.blue, 0.22)
+        cr.fill()
+        if self._db is not None:
+            c = hot if self._db > headroom.CLIP_DB else ok
+            cr.rectangle(0, 0, self._x(self._db, w), h)
+            cr.set_source_rgba(c.red, c.green, c.blue, 0.9)
+            cr.fill()
+        cr.restore()
+        cr.rectangle(round(x0) - 1, 0, 2, h)
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.85)
+        cr.fill()
+
+
+class LevelRow(Adw.PreferencesRow):
+    """The Level section's reading: a verdict, the bar, and the fix.
+
+    Deliberately self-contained — one row that takes a `headroom.Headroom`
+    and a peak — so the full UI round can move it without unpicking the
+    dialog around it.
+    """
+
+    def __init__(self, on_use_suggested):
+        super().__init__(activatable=False, focusable=False)
+        self.add_css_class('chain-level')
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6,
+                      margin_top=12, margin_bottom=12,
+                      margin_start=12, margin_end=12)
+        self.verdict = Gtk.Label(xalign=0, wrap=True)
+        self.verdict.add_css_class('chain-level-verdict')
+        box.append(self.verdict)
+
+        self.bar = HeadroomBar()
+        pens = [Gtk.Label(css_classes=[c], visible=False)
+                for c in ('chain-level-pen-ok', 'chain-level-pen-hot')]
+        self.bar.set_pens(*pens)
+        scale = Gtk.CenterBox()
+        scale.add_css_class('chain-level-scale')
+        for pos, text in (('start', f'−{HeadroomBar.RANGE:.0f} dB'),
+                          ('center', '0 dB · full scale'),
+                          ('end', f'+{HeadroomBar.RANGE:.0f} dB')):
+            getattr(scale, f'set_{pos}_widget')(Gtk.Label(label=text))
+        self.bar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                               spacing=3)
+        self.bar_box.append(self.bar)
+        self.bar_box.append(scale)
+        for pen in pens:
+            self.bar_box.append(pen)
+        box.append(self.bar_box)
+
+        self.detail = Gtk.Label(xalign=0, wrap=True)
+        self.detail.add_css_class('chain-level-detail')
+        box.append(self.detail)
+
+        self.use_btn = Gtk.Button(halign=Gtk.Align.START)
+        self.use_btn.add_css_class('pill')
+        self.use_btn.add_css_class('chain-level-use')
+        self.use_btn.connect('clicked', lambda *_: on_use_suggested())
+        box.append(self.use_btn)
+        self.set_child(box)
+
+    def _state(self, name):
+        for c in ('clips', 'fits', 'unknown'):
+            (self.verdict.add_css_class if c == name
+             else self.verdict.remove_css_class)(c)
+
+    def show_unknown(self, why):
+        self._state('unknown')
+        self.verdict.set_text('The level can’t be measured')
+        self.detail.set_text(why[:1].upper() + why[1:] + '.' if why else '')
+        self.bar_box.set_visible(False)
+        self.use_btn.set_visible(False)
+
+    def show(self, found, peak_db, raw, at_suggested):
+        clips = peak_db > headroom.CLIP_DB
+        self._state('clips' if clips else 'fits')
+        self.verdict.set_text(
+            f'Too loud: peaks {_db(peak_db, sign=False)} over full scale, '
+            'so it distorts' if clips else
+            f'Level is fine: peaks {_db(-peak_db, sign=False)} below full '
+            'scale')
+        self.bar.set_level(peak_db)
+        self.bar.set_tooltip_text(self.verdict.get_text())
+        self.bar_box.set_visible(True)
+
+        at_one = found.peak_at(1.0)
+        louder = (f'{_db(abs(at_one), sign=False)} '
+                  + ('louder' if at_one >= 0 else 'quieter'))
+        why = [(f'{found.paths} convolvers are mixed into each ear and '
+                'impulse responses aren’t recorded at unity, so at gain '
+                f'1.0 this file comes out {louder} than what goes in.')
+               if found.paths > 1 else
+               f'At gain 1.0 this file comes out {louder} than what goes in.']
+        if found.paths > 1 and found.peak > 0:
+            why.append('Measured from the file for typical surround content; '
+                       'one sound in every speaker at once can peak '
+                       f'{_db(headroom.db(found.coherent / found.peak), sign=False)}'
+                       ' higher.')
+        else:
+            why.append('Measured from the file.')
+        if raw and clips:
+            why.append('An imported config keeps its gain in its text: set '
+                       f'gain = {found.suggested:.2f} on each convolver, under '
+                       'Edit config text.')
+        self.detail.set_text(' '.join(why))
+
+        self.use_btn.set_label(f'Use the suggested gain, {found.suggested:.2f}')
+        self.use_btn.set_visible(not raw and not at_suggested)
+
+
+def _db(value, sign=True):
+    """One decimal, with a real minus sign, as the scale under the bar has."""
+    text = f'{value:+.1f}' if sign else f'{value:.1f}'
+    return text.replace('-', '−') + ' dB'

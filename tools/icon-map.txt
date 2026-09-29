@@ -1,0 +1,38 @@
+# Icons vendored from the GNOME icon-development-kit (CC0).
+#   <kit-name>  <slot>      ->  ships as pwctl/icons/.../<slot>-symbolic.svg
+#
+# The rule: verbs from the theme, nouns from our bundle.  Only domain nouns
+# (audio, routing, DSP, our own object kinds) belong here -- list-add, go-next,
+# document-edit and the rest of the freedesktop verbs stay stock so they follow
+# the user's desktop.  See UI.md 7a.
+
+# --- sidebar pages -----------------------------------------------------------
+mixer-sliders       pwctl-dashboard
+connected-dots      pwctl-paths
+sliders-vertical    pwctl-eq
+stereo-jack         pwctl-patchbay
+sound-card          pwctl-devices
+3d-box              pwctl-virtual      # picked over `puzzle`, which read as "plugin"
+speaker-front       pwctl-surround
+chain-link          pwctl-chains
+magic-wand          pwctl-effects
+library             pwctl-hrir
+network-server      pwctl-server
+stream              pwctl-streams
+padlock-closed      pwctl-policy
+bluetooth           pwctl-session
+speedometer         pwctl-monitor
+tools               pwctl-tools
+
+# --- Signal Paths strips and stages ------------------------------------------
+apps                pwctl-source-app
+mic                 pwctl-source-mic
+sound               pwctl-source-all
+sound-wave          pwctl-convolver
+branch              pwctl-xover
+
+# --- the exceptions: verbs with no working stock name ------------------------
+# view-pin is broken on Breeze, and the two below have no shared name at all.
+view-pin            pwctl-pin
+stopwatch           pwctl-latency
+signal-dots         pwctl-meter

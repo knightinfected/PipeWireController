@@ -254,7 +254,7 @@ CATALOG: list = [
             (32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000))),)),
     Template(
         id='eq-app', title='Equalizer on one app', role='source', kind='app',
-        icon='applications-multimedia-symbolic',
+        icon='pwctl-eq-symbolic',
         blurb='Shape one application without touching the rest.',
         detail='A five-band curve on a source of its own. Drag an app onto '
                'the card and only that app goes through it.',
@@ -262,7 +262,7 @@ CATALOG: list = [
             ('PK', f, 0.0, 1.0) for f in (60, 250, 1000, 4000, 12000))),)),
     Template(
         id='music', title='Music', role='source', kind='app',
-        icon='emblem-music-symbolic',
+        icon='media-playback-start-symbolic',
         blurb='A warm, unfussy curve for listening.',
         detail='A small lift at either end and a dip where most mixes get '
                'crowded. Meant to be lived with rather than measured.',

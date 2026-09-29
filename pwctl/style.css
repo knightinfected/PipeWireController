@@ -991,3 +991,61 @@ headerbar.pwctl-header:not(.pwctl-sidebar-header) > windowhandle {
 .dash-qa {
     padding: 9px 10px;
 }
+
+/* ------------------------------------------------ Filter Chains: level ---
+   The chain dialog's Level section (issue #17): a verdict, a bar drawn to
+   scale against full scale, and the fix.  The bar is Cairo, so its two hues
+   reach it through the invisible pen labels below, the same bridge as the
+   Signal Paths wires.  Palette mixes rather than @success_color: that one
+   came out a muddy grey-green on the light scheme here, and "within range"
+   has to read as green at a glance.  "Too loud" stays @warning_color so it
+   matches the list's "Too loud" pill. */
+@define-color pwctl_level_ok mix(@green_4, @window_fg_color, 0.25);
+@define-color pwctl_level_hot mix(@red_3, @window_fg_color, 0.12);
+
+.chain-level-verdict {
+    font-weight: 700;
+}
+
+.chain-level-verdict.clips {
+    color: @warning_color;
+}
+
+.chain-level-verdict.fits {
+    color: @pwctl_level_ok;
+}
+
+.chain-level-verdict.unknown {
+    color: alpha(currentColor, 0.7);
+}
+
+.chain-level-pen-ok {
+    color: @pwctl_level_ok;
+}
+
+.chain-level-pen-hot {
+    color: @pwctl_level_hot;
+}
+
+.chain-level-scale {
+    font-size: 0.8em;
+    font-feature-settings: "tnum";
+    color: alpha(currentColor, 0.55);
+}
+
+.chain-level-detail {
+    font-size: 0.9em;
+    color: alpha(currentColor, 0.72);
+}
+
+.chain-level-use {
+    margin-top: 4px;
+    padding: 4px 14px;
+    font-weight: 700;
+    background: alpha(@warning_color, 0.16);
+    color: @warning_color;
+}
+
+.chain-level-use:hover {
+    background: alpha(@warning_color, 0.26);
+}

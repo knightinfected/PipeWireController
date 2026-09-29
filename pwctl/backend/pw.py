@@ -116,6 +116,50 @@ class AudioNode:
         """
         return str(self.props.get('filter.smart', '')).lower() in ('true', '1')
 
+    @property
+    def software_kind(self) -> str:
+        """What *kind* of software device this is, for a badge beside 'virtual'.
+
+        Answered from the node's own props, never from our meta files: this is
+        read on every 3 s dashboard poll, and a meta lookup would be a stat and
+        a JSON parse per row per tick.  Two sources, and between them they
+        cover objects this app did not create:
+
+        * **`node.name`** carries our own prefixes.  `pwctl.eq.enh-…` is an
+          Equalizer, `pwctl.source.psou-…`/`pwctl.mix.pmix-…` are Signal Paths
+          strips, `effect_input.pwctl.…` is a chain from the Filter Chains page
+          (an effect rack is one too -- telling those apart needs the meta, and
+          "filter chain" is true of both).
+        * **`node.link-group`** is stamped by the module that built the node --
+          `filter-chain-<pid>-<n>` or `loopback-<pid>-<n>` -- so a hand-written
+          chain in `filter-chain.conf.d` is identified as readily as ours.
+          This is the same property `pw.Stream.is_app` and `virtual_outputs`
+          pair legs on.
+
+        Returns '' when there is nothing to add beyond "virtual" -- including
+        for our own virtual devices, where a second badge reading "virtual
+        device" would only repeat the first.
+        """
+        if not self.is_virtual:
+            return ''
+        name = self.name
+        if name.startswith('pwctl.eq.'):
+            return 'equalizer'
+        if name.startswith('pwctl.mic.'):
+            return 'mic cleanup'
+        if name.startswith(('pwctl.source.', 'pwctl.mix.', 'pwctl.xover.')):
+            return 'signal path'
+        if name.startswith('pwctl.vd-'):
+            return ''                    # "virtual" already says it
+        if name.startswith('effect_input.pwctl.'):
+            return 'filter chain'
+        group = self.props.get('node.link-group', '')
+        if group.startswith('filter-chain-'):
+            return 'filter chain'
+        if group.startswith('loopback-'):
+            return 'loopback'
+        return ''
+
 
 def _device_routes(dump) -> dict:
     """device object id -> (EnumRoute list, active Route list)."""
@@ -347,6 +391,48 @@ def list_streams(dump=None, apps_only=False) -> list[Stream]:
         streams.append(s)
     streams.sort(key=lambda s: (s.name.lower(), s.id))
     return streams
+
+
+def virtual_outputs(dump=None, nodes=None, streams=None) -> dict:
+    """{virtual sink node.name -> (output stream id, destination node id)}.
+
+    A filter chain, a loopback and a virtual device are each a *pair* of nodes
+    carrying one `node.link-group`: the sink you play into, and the playback
+    stream that carries the result back out.  Pairing on that rather than on a
+    name convention like `<name>.out` is the whole point — it finds the output
+    leg of a hand-written chain in `filter-chain.conf.d` (`effect_input.x` /
+    `effect_output.x`) just as well as one we generated, and those are exactly
+    the ones no page of ours can otherwise re-point.
+
+    Two kinds of virtual sink are deliberately absent, because neither has an
+    output anyone could choose: a virtual **microphone**'s sink leg, which
+    feeds a source rather than a sink, and a leg whose output is discarded.
+    The destination is None when the pair exists but is not linked anywhere.
+
+    Pass `nodes`/`streams` when the caller already has them — the dashboard
+    poll does, and re-parsing one pw-dump three times is the cost otherwise.
+    `streams` must be the **unfiltered** list; `apps_only=True` drops exactly
+    the legs this needs.
+    """
+    dump = dump if dump is not None else pw_dump()
+    nodes = nodes if nodes is not None else list_audio_nodes(dump)
+    streams = streams if streams is not None else list_streams(dump)
+
+    by_group = {}
+    for s in streams:
+        group = s.props.get('node.link-group')
+        if group:
+            by_group.setdefault(group, s)
+
+    outputs = {}
+    for node in nodes:
+        if not (node.is_virtual and node.is_sink):
+            continue
+        group = node.props.get('node.link-group')
+        out = by_group.get(group) if group else None
+        if out is not None:
+            outputs[node.name] = (out.id, out.target_id)
+    return outputs
 
 
 def move_stream(stream_id: int, target_serial: int) -> bool:

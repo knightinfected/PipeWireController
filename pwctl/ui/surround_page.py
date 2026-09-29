@@ -76,7 +76,7 @@ class SurroundPage:
                      'under Filter Chains',
             title_lines=1, subtitle_lines=2)
         self.vsink_row.add_prefix(
-            Gtk.Image.new_from_icon_name('application-x-addon-symbolic'))
+            Gtk.Image.new_from_icon_name('pwctl-virtual-symbolic'))
         self.vsink_pill = pill('not created', 'dim')
         self.vsink_row.add_suffix(self.vsink_pill)
         self.vsink_create = Gtk.Button(label='Create')

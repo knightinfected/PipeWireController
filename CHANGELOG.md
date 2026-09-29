@@ -107,6 +107,107 @@ nothing plays *into* a microphone.
 
 Reported in [#8](https://github.com/knightinfected/PipeWireController/issues/8).
 
+**Channel maps now work with any device, not just Pro Audio cards**
+
+You could already build a virtual device wired to *specific channels* of a
+real one — but only if that device was a sound card in the "Pro Audio"
+profile, showing raw `AUX0`, `AUX1`… channels. Every other multi-channel
+device was refused, even though the mechanism handles them perfectly.
+
+It no longer is. Pick any output or input, and map each channel of a virtual
+device onto a channel of it:
+
+- **A controller whose rear channels are its haptics.** A DualSense is a
+  four-channel audio device: the front pair is the speaker, the rear pair is
+  the haptics. Map a stereo sink onto just those two and you have an ordinary
+  output — with its own volume, and an equalizer or filter chain in front of
+  it if you want one — that reaches nothing but the haptics.
+- **One pair of a surround card.** Send something to just the rear speakers,
+  or just the centre, without touching the rest.
+- **Chosen inputs of an interface** published as a virtual microphone.
+
+Audio goes straight through, channel for channel — nothing is up- or
+downmixed, and the channels you leave out receive nothing at all.
+
+Devices you already had are untouched: existing Pro Audio maps generate
+exactly the same configuration as before and keep being linked the same way.
+Only the wording changed — the dialog now says **Channel map**, and the note
+about Pro Audio needing manual linking appears only when you actually pick a
+Pro Audio device.
+
+**Filter chains no longer fail with an error that explains nothing**
+
+On distributions that split PipeWire's plugin support into separate packages,
+adding a plugin to a Signal Path or an effect rack could produce a chain that
+simply refused to start — and the only explanation offered was systemd's
+"control process exited with error code", which names neither the cause nor
+the cure. Arch ships every piece in one package, so this was invisible here
+and reported from elsewhere.
+
+The app now establishes what this machine can actually load, before it starts
+anything:
+
+- **Plugins PipeWire cannot host here are greyed out in both pickers**, with
+  the reason on the row and the package to install where that is known.
+- **A chain that would fail is refused up front**, naming the missing piece
+  instead of leaving you in `journalctl`. Every surface that builds a chain is
+  covered, including the surround templates, the noise suppressor and
+  microphone cleanup.
+- **Plugins the app cannot wire are refused too.** Anything that is neither
+  mono nor stereo used to be offered and accepted, then run with its ports
+  dangling — no error anywhere, just wrong audio. That one was not
+  distro-specific; it had been hiding behind the louder failure.
+
+Also fixes the bundled noise suppressor's plugin path on distributions that
+keep 64-bit plugins in `/usr/lib64`.
+
+**The Debian and Ubuntu install line was missing a package**
+
+The level meters, graphs and Patchbay are drawn with cairo, and on Debian and
+Ubuntu the piece that connects cairo to the app is a package of its own,
+`python3-gi-cairo`. The install line left it out. If nothing else had
+installed cairo's Python support first, the app wouldn't start. If something
+had, the app opened, but the meters stayed flat and the Patchbay stayed empty.
+The package is in the install line now, and the app checks for it when it
+starts. If it's missing, the app says which package to install instead of
+failing quietly.
+
+Also, the app-menu entry for a git checkout now has the program's full path
+written into it, so it launches even when the desktop's `PATH` doesn't include
+`~/.local/bin` yet.
+
+**Virtual surround no longer comes out far too loud**
+
+The virtual surround templates mix eight convolvers into each ear, and HRIR
+files aren't normalised, so even one of them can come out louder than what
+went in. At the default gain of 1.0, every HeSuVi file we measured came out 5
+to 19 dB over full scale, so it distorted. The *Convolver gain* box could always fix that, but
+it started at 1.0 and nothing said it needed changing. PipeWire's own
+example config has the same gap.
+
+The right gain depends on the file (from about 0.12 to 0.55 across a whole
+HeSuVi collection), so the app now works it out from the file itself:
+
+- **New chains get the right gain automatically**, whether you make them in
+  the chain dialog or with the HRIR library's *New chain* button. The value
+  is saved with the chain, so it stays where it was put.
+- **The chain dialog has a Level section.** It shows where the chain peaks
+  against full scale on a bar that moves as you change the gain, and has a
+  button that applies the suggested gain.
+- **Chains you already have keep their gain.** Nothing about how they
+  sound changes on its own, but a chain that is too loud now shows a
+  *Too loud* tag in the list. Imported configs are measured as written, and
+  the dialog says what to change in their text.
+
+The same measurement covers the stereo and true-stereo convolver templates.
+The *Convolver gain* box now only appears for templates that have a
+convolver.
+
+---
+
+## [v0.6.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.0) — 2026-08-26
+**The dashboard is rebuilt — two views instead of five tabs, pinned favourites, and the app now ships its own icons**
+
 **libadwaita 1.7 is now the minimum**
 
 The stated requirement was 1.4, and it had been wrong for some time — Signal
@@ -119,6 +220,169 @@ listed as supported. Debian 13 (1.7.6) and Ubuntu 26.04 LTS (1.9.1) are the
 floor; Fedora 42+, openSUSE Tumbleweed and Arch are all well above it. On
 24.04 the options are 26.04, a backport, or running from a checkout against a
 newer libadwaita.
+
+Where libadwaita is too old, the app now **says so**: a window naming the
+version it found and the version it needs, and the same text in the terminal.
+Before this it crashed somewhere inside a widget, which showed nothing at all
+when it had been started from its desktop entry.
+
+**The dashboard is two views instead of five tabs**
+
+Overview and Mixer, picked from a switcher in the window header rather than
+from inside the page. The switcher stays in the header on every page, so the
+dashboard is one click away from wherever you are.
+
+Overview leads with your default output and default input, and a new
+**Favourites** card: pin any output or input, hardware or virtual, and its
+volume, mute and live meter stay on the dashboard. A favourite whose device is
+unplugged keeps its place and still reads as its own name rather than
+vanishing or turning into an ALSA device string, and its controls come back on
+their own when the device does.
+
+![The rebuilt Overview — default output and input, pinned favourites, and the view switcher in the window header](screenshots/dashboard-0.6.0.png)
+
+![Pinning a favourite — every output, input and virtual device in one list](screenshots/favorite-devices.png)
+
+The sidebar's sixteen pages are now grouped under Mix, Route, Process,
+Configure and System. Nothing was dropped in the rebuild: all sixteen pages
+are still there, and so are the solo buttons, the card configuration row with
+its warning and Reset, the port and profile dropdowns, the default star and
+the latency calculator with its live Test.
+
+The volume-style picker moved out of a floating panel over the dashboard and
+into the header bar next to Device Presets. It changes the sliders on Devices,
+the Equalizer and Signal Paths too, so it was never really a dashboard
+setting.
+
+**The top of the window reads as one band**
+
+The sidebar header and the content header sit side by side, so the lines under
+them should look like a single line across the window. They did not: they were
+six pixels apart and two different colours, in the one place your eye is most
+likely to follow a horizontal.
+
+They meet now, and both are drawn by the same mechanism, so they match in
+colour as well as in position. The band is a little taller, and the extra room
+is spent above the view switcher rather than shared around it — centred in a
+taller bar, the switcher floats with nothing to sit against. The page title is
+now the same size as the app title, too: it names the whole page, and it was
+the smallest text in a row that also held the app name and two bold buttons.
+
+**Every page uses the width you give it**
+
+Pages painted one column of about 730px however wide the window was. A wider
+window now opens another column instead, so maximizing shows you more rather
+than the same amount with more space around it.
+
+**The dashboard refreshes about six times faster**
+
+It was asking PipeWire for each endpoint's volume one command at a time, when
+the level was already there in the reply it had just been given. A refresh
+with 16 endpoints measured 463 ms before and 79 ms after.
+
+**The app brings its own icons**
+
+Icons used to come entirely from whatever icon theme you run, and that turned
+out not to be safe. On Breeze nine of them did not exist at all and rendered as
+a red "no entry" box — Signal Paths and Session & Bluetooth in the sidebar, and
+the marker on every virtual device in the Mixer. One of them,
+`utilities-system-monitor`, exists in neither Adwaita nor Breeze, so the Monitor
+page was broken for everybody on every distro. Three more rows — Equalizer,
+Streams and HRIR Library — all shared the same music note, because it was the
+closest thing either theme had.
+
+The icons for the things this app is actually about — routing, filters,
+equalizers, virtual devices, meters — now ship with it, so they look the same
+whatever desktop you are on and cannot disappear when a theme drops a name.
+Ordinary actions like add, delete, refresh and open are deliberately left
+alone: those still come from your theme and should follow it.
+
+The sidebar has sixteen distinct icons now instead of thirteen, two of which
+were red boxes.
+
+Icons are from the GNOME icon-development-kit, which is public domain.
+
+**A device row now says what kind of software device it is**
+
+The Mixer already marked anything that was not real hardware with a small
+**virtual** tag. It now adds a second one naming what the thing actually is —
+**filter chain**, **signal path**, **equalizer**, **mic cleanup** or
+**loopback** — and gives each kind its own icon, so a glance is enough.
+
+This works for things this app did not create. A filter chain you wrote by
+hand in `filter-chain.conf.d` has no settings page here, so the Mixer is the
+only place it is named at all; it now reads *virtual · filter chain* rather
+than just *virtual*.
+
+Your own virtual devices still show a single **virtual** tag, because a second
+one reading "virtual device" would only say the same thing twice.
+
+The Devices page gets the same treatment, and the icon for a given device is
+now the same wherever it is listed — Mixer, Devices and Favourites.
+
+![Mixer, Devices — every software device says what kind it is, and where its audio goes](screenshots/mixer-devices.png)
+
+**Bug: a virtual device could not be re-pointed from the Mixer**
+
+An equalizer, a filter chain or a virtual device showed up in the Mixer's
+Devices list with a volume, a mute and a solo — and no way at all to say where
+its audio should go. The only routing control that row ever had was the
+hardware **Port** selector, and a virtual device has no ports, so it was always
+hidden. Sending an app to a virtual device was a one-way trip: you could watch
+it arrive and not follow it any further.
+
+Virtual devices now carry an **Output device** picker, where a real device
+carries its port selector. Choosing one takes effect immediately — nothing is
+restarted, so whatever is playing through it keeps playing — and the choice is
+remembered, so it survives the next reboot instead of quietly reverting.
+
+It works for chains this app did not create. A hand-written filter chain in
+`filter-chain.conf.d` has no settings page here, so for those the Mixer is now
+the only place they can be re-pointed at all.
+
+Two smaller things fall out of it. An output that feeds nothing says **Not
+connected**, rather than showing the first device in the list as though that
+were where it went — and it is also how you give one a destination for the
+first time. And a device is not offered anywhere that already feeds it, which
+would be a loop.
+
+![The same list in dark mode with the LED meter style — an output that feeds nothing says so](screenshots/mixer-devices-dark.png)
+
+**Bug: the Mixer listed the app's own plumbing as if it were applications**
+
+A filter chain, a loopback and a virtual device each look like a playing
+application to the audio graph, so the Mixer listed them all. On a machine
+with a few signal paths set up, that was seven rows of infrastructure —
+"Everything output output", "Stream Mix (discarded) output" — against two real
+applications, in the one list whose whole job is to tell you what is playing.
+
+Only real applications are listed now. The plumbing is still counted on the
+Running audio objects card and still shown one node at a time in the Patchbay,
+which are the two places that are actually asking about the graph.
+
+![Mixer, Apps — four real applications, and none of the plumbing that used to sit among them](screenshots/mixer-apps.png)
+
+**Bug: whole plugin collections were missing from Effects and Signal Paths**
+
+If you had the LSP or Zam plugins installed, the app did not list them — and on
+Fedora, openSUSE or RHEL it may not have listed anything at all.
+
+Two things were wrong. An LV2 plugin can be named in its manifest either by its
+full address or by a shorthand, and only the first form was understood. LSP and
+Zam both use the shorthand, so both collections were skipped everywhere — on a
+typical install that is over two hundred plugins that were installed, working,
+and invisible. It went unnoticed for so long because LSP also ships in the
+older LADSPA format and that half was always detected, so the list never looked
+empty.
+
+The second was the search path. On Fedora and openSUSE, 64-bit plugins live in
+`/usr/lib64`, which was never looked at — on Arch that folder is just another
+name for one already scanned, so it never showed up in testing.
+
+Both are fixed, and the scan now also looks in `/usr/local/lib64`. On a
+development machine here the number of LV2 plugins found went from 92 to 322.
+
+Reported by @GileonFletcher.
 
 ---
 

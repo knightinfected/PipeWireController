@@ -34,27 +34,27 @@ from .ui.widgets import async_call, micro
 # Order within the list *is* the sidebar order; `goto()` and the startup
 # restore both look pages up by name, so regrouping is safe.
 PAGES = [
-    ('dashboard', 'Dashboard', 'view-grid-symbolic', 'Mix'),
-    ('paths', 'Signal Paths', 'network-transmit-receive-symbolic', 'Mix'),
-    ('enhance', 'Equalizer', 'audio-x-generic-symbolic', 'Mix'),
+    ('dashboard', 'Dashboard', 'pwctl-dashboard-symbolic', 'Mix'),
+    ('paths', 'Signal Paths', 'pwctl-paths-symbolic', 'Mix'),
+    ('enhance', 'Equalizer', 'pwctl-eq-symbolic', 'Mix'),
 
-    ('graph', 'Patchbay', 'network-workgroup-symbolic', 'Route'),
-    ('devices', 'Devices', 'audio-speakers-symbolic', 'Route'),
-    ('virtual', 'Virtual Devices', 'insert-object-symbolic', 'Route'),
-    ('surround', 'Surround Setup', 'audio-card-symbolic', 'Route'),
+    ('graph', 'Patchbay', 'pwctl-patchbay-symbolic', 'Route'),
+    ('devices', 'Devices', 'pwctl-devices-symbolic', 'Route'),
+    ('virtual', 'Virtual Devices', 'pwctl-virtual-symbolic', 'Route'),
+    ('surround', 'Surround Setup', 'pwctl-surround-symbolic', 'Route'),
 
-    ('chains', 'Filter Chains', 'audio-headphones-symbolic', 'Process'),
-    ('effects', 'Effects', 'applications-multimedia-symbolic', 'Process'),
-    ('hrir', 'HRIR Library', 'folder-music-symbolic', 'Process'),
+    ('chains', 'Filter Chains', 'pwctl-chains-symbolic', 'Process'),
+    ('effects', 'Effects', 'pwctl-effects-symbolic', 'Process'),
+    ('hrir', 'HRIR Library', 'pwctl-hrir-symbolic', 'Process'),
 
-    ('server', 'Server', 'preferences-system-symbolic', 'Configure'),
-    ('streams', 'Streams', 'emblem-music-symbolic', 'Configure'),
-    ('policy', 'App Policies', 'system-users-symbolic', 'Configure'),
-    ('wireplumber', 'Session & Bluetooth', 'bluetooth-active-symbolic',
+    ('server', 'Server', 'pwctl-server-symbolic', 'Configure'),
+    ('streams', 'Streams', 'pwctl-streams-symbolic', 'Configure'),
+    ('policy', 'App Policies', 'pwctl-policy-symbolic', 'Configure'),
+    ('wireplumber', 'Session & Bluetooth', 'pwctl-session-symbolic',
      'Configure'),
 
-    ('monitor', 'Monitor', 'utilities-system-monitor-symbolic', 'System'),
-    ('tools', 'Tools', 'applications-utilities-symbolic', 'System'),
+    ('monitor', 'Monitor', 'pwctl-monitor-symbolic', 'System'),
+    ('tools', 'Tools', 'pwctl-tools-symbolic', 'System'),
 ]
 
 RESTART_UNITS = {
@@ -533,6 +533,19 @@ class App(Adw.Application):
             Gtk.StyleContext.add_provider_for_display(
                 Gdk.Display.get_default(), css,
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        # Our own icons.  Every audio/routing/DSP noun is shipped with the app
+        # as `pwctl-*-symbolic`, because the system theme cannot be relied on:
+        # Adwaita and Breeze share only ~305 symbolic names and that set has no
+        # equalizer, monitor, bluetooth or waveform glyph, so nine names were
+        # rendering as `image-missing` on this machine alone.  Freedesktop
+        # *verbs* (list-add, go-next, user-trash...) stay stock on purpose --
+        # those should follow the user's desktop.  `resolve()` for the same
+        # reason the launcher uses realpath: the package is reached through a
+        # symlink in /usr/bin.
+        icons = Path(__file__).resolve().parent / 'icons'
+        if icons.is_dir():
+            Gtk.IconTheme.get_for_display(
+                Gdk.Display.get_default()).add_search_path(str(icons))
 
     def do_activate(self):
         win = self.get_active_window() or Window(self)
@@ -549,5 +562,9 @@ class App(Adw.Application):
 
 def main():
     import sys
+
+    from .compat import require
+    require()   # says so and exits if libadwaita is too old, or cairo can't draw
+
     app = App()
     return app.run(sys.argv)

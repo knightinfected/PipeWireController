@@ -16,7 +16,8 @@ from gi.repository import Adw, Gtk  # noqa: E402
 
 from ..backend import prefs, pw, rules
 from .volume import make_volume
-from .widgets import async_call, esc, group, page_scroller, pill
+from .widgets import (async_call, device_icon, esc, group, page_scroller,
+                      pill)
 
 
 class DevicesPage:
@@ -86,12 +87,12 @@ class DevicesPage:
             row = Adw.ActionRow(title=esc(node.description),
                                 subtitle=esc(node.name),
                                 title_lines=1, subtitle_lines=1)
-        icon = ('application-x-addon-symbolic' if node.is_virtual
-                else 'audio-speakers-symbolic' if node.is_sink
-                else 'audio-input-microphone-symbolic')
-        row.add_prefix(Gtk.Image.new_from_icon_name(icon))
+        row.add_prefix(Gtk.Image.new_from_icon_name(device_icon(node)))
         if node.is_virtual:
             row.add_suffix(pill('virtual', 'dim'))
+            kind = node.software_kind
+            if kind:
+                row.add_suffix(pill(kind, 'dim'))
 
         star = Gtk.Button(
             icon_name='starred-symbolic' if node.is_default

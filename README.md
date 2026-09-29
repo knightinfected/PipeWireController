@@ -18,9 +18,11 @@ level meters** on every volume control, a parametric **equalizer** and
 **microphone cleanup** ([new in v0.3.6](#new-in-v036)), a live **patchbay**,
 performance **monitoring**, **virtual devices**, routing snapshots,
 per-application **policies** and LADSPA/LV2 **effect inserts**
-([new in v0.3.0](#new-in-v030)).
+([new in v0.3.0](#new-in-v030)). The dashboard was rebuilt in **v0.6.0** — two
+views instead of five tabs, and a **Favourites** card that keeps any device's
+volume a glance away ([new in v0.6.0](#new-in-v060)).
 
-![Dashboard — Overview, with live level meters on the default endpoints](screenshots/dashboard-0.4.0.png)
+![Dashboard — Overview, with the default output and input, pinned favourites and live level meters](screenshots/dashboard-0.6.0.png)
 
 ![Signal Paths — sources on the left, mixes on the right, and the sends between them drawn as curves](screenshots/signal-paths-board-light.png)
 
@@ -71,11 +73,81 @@ More screenshots:
 [Device presets](screenshots/device-presets.png) ·
 [Volume style picker](screenshots/volume-style-picker.png)
 
-## New in v0.4.0
+## New in v0.6.0
 
-> 📋 For highlights of every release — including **v0.3.5** (card configuration
-> as its own control) and **v0.3.4** (import your existing virtual devices) —
-> see the **[changelog](CHANGELOG.md)**.
+> 📋 For highlights of every release — including **v0.5.1** (app policy fixes),
+> **v0.5.0** (the rename to `pipewire-control-center`) and **v0.3.5** (card
+> configuration as its own control) — see the **[changelog](CHANGELOG.md)**.
+
+> ⚠️ **libadwaita ≥ 1.7 is now required.** The stated requirement had been 1.4
+> and was wrong for some time; the rebuilt dashboard made it matter, because
+> the header is now built before any page is. This drops **Ubuntu 24.04 LTS**
+> (libadwaita 1.5). Where libadwaita is too old the app now says so, in a
+> window and in the terminal, instead of failing somewhere inside a widget with
+> nothing on screen at all.
+
+**The dashboard is two views, not five tabs.** Overview and Mixer, picked from
+a switcher that lives in the window header — so the dashboard is one click away
+from whatever page you are on. Overview leads with your default output and your
+default input, and a new **Favourites** card: pin any output, input or virtual
+device and its volume, mute and live meter stay on the dashboard. Unplug a
+favourite and it keeps its place under its own name rather than vanishing or
+turning into an ALSA device string, then comes back on its own.
+
+The Mixer is the other half — applications or devices, playing or recording —
+and it now lists **only real applications** under Apps. A filter chain, a
+loopback and a virtual device all look like a playing application to the audio
+graph, so they were all listed: on a machine with a few signal paths set up
+that was seven rows of plumbing against two real programs, in the one list
+whose whole job is to tell you what is playing.
+
+<p align="center">
+  <img src="screenshots/favorite-devices.png" alt="Pinning a favourite — every output, input and virtual device in one list" width="30.5%">
+  <img src="screenshots/mixer-apps.png" alt="Mixer, Apps — four real applications, and none of the plumbing that used to sit among them" width="64%">
+</p>
+
+**A device row now says what it is, and where its audio goes.** Anything that
+is not real hardware was already tagged **virtual**; it now carries a second
+tag naming what it actually is — *filter chain*, *signal path*, *equalizer*,
+*mic cleanup* or *loopback* — each with its own icon. This works for things
+this app did not create: a filter chain you wrote by hand has no settings page
+here, so the Mixer is the only place it is named at all.
+
+The same rows gained an **Output device** picker, where a real device carries
+its port selector. A virtual device has no ports, so that row previously had no
+routing control whatsoever — sending an app to an equalizer was a one-way trip.
+Choosing an output takes effect immediately, nothing is restarted, and the
+choice survives a reboot. An output that feeds nothing says **Not connected**
+rather than showing the first device in the list as though that were where it
+went.
+
+<p align="center">
+  <img src="screenshots/mixer-devices.png" alt="Mixer, Devices — every software device says what kind it is, and where its audio goes" width="51.5%">
+  <img src="screenshots/mixer-devices-dark.png" alt="The same list in dark mode with the LED meter style" width="46%">
+</p>
+
+**The app brings its own icons.** They used to come entirely from whatever icon
+theme you run, which turned out not to be safe: on Breeze nine of them did not
+exist and rendered as a red box, and one — the Monitor page's — exists in
+neither Adwaita nor Breeze, so that one was broken for everybody. The icons for
+the things this app is about now ship with it. Ordinary actions like add,
+delete and refresh are deliberately left alone, so those still follow your
+desktop.
+
+**Whole plugin collections were missing.** If you had the LSP or Zam plugins
+installed they were not listed, and on Fedora, openSUSE or RHEL there may have
+been nothing listed at all. An LV2 plugin can be named in its manifest two
+ways and only one was understood, and 64-bit plugins in `/usr/lib64` were never
+looked at. On a development machine here the count went from 92 to 322.
+Reported by [@GileonFletcher](https://github.com/GileonFletcher).
+
+**Also**: pages now open a second column instead of stretching one 730px column
+however wide the window is, the top of the window reads as a single band across
+the sidebar and the content, and the dashboard refreshes about six times
+faster (463 ms → 79 ms with 16 endpoints) by reading volumes out of a reply it
+already had.
+
+## New in v0.4.0
 
 **Signal Paths** — a new page, and the first one that is about the *shape* of
 your audio rather than about settings. A **source** is where sound enters — one
@@ -234,9 +306,10 @@ Rough list, no particular order, no promises on timing:
 - **Network audio manager** — PipeWire's network side in the GUI: RAOP/AirPlay
   sinks, streaming between machines, discovery.
 - **UI improvements overall** — the app has been extremely boring to look at.
-  The live meters in v0.3.6 and the Signal Paths board in v0.4.0 were first
-  steps, there's a lot more to do:
-  - Fix the Dashboard overview to really just be an overview.
+  The live meters in v0.3.6, the Signal Paths board in v0.4.0 and the dashboard
+  rebuild in v0.6.0 were first steps, there's a lot more to do:
+  - ~~Fix the Dashboard overview to really just be an overview.~~ — done in
+    v0.6.0.
   - Move Playback, Output Devices and Recording Devices to their own top-level
     sidebar entries.
   - …and more — I have a lot of ideas, it just takes time.
@@ -367,9 +440,8 @@ rpmbuild -ba packaging/rpm/pipewire-control-center.spec
 ### Debian 13+ / Ubuntu 26.04 LTS+
 
 ```bash
-sudo apt install pipewire pipewire-bin wireplumber pipewire-pulse \
-    gir1.2-gtk-4.0 gir1.2-adw-1 python3-gi python3-gi-cairo python3-numpy \
-    python3-soundfile
+sudo apt install pipewire wireplumber pipewire-pulse gir1.2-gtk-4.0 \
+    gir1.2-adw-1 python3-gi python3-gi-cairo python3-numpy python3-soundfile
 ```
 
 Older releases ship a libadwaita before **1.7** and won't work: Debian 12
@@ -394,9 +466,11 @@ then, install the dependencies and run from a checkout.
 
 ### Other distros
 
-Install GTK 4 + libadwaita (≥ 1.7) with GObject introspection and
-PyGObject and pycairo from your package manager, then grab the Python audio bits via
-pip if your distro doesn't package them:
+Install GTK 4 + libadwaita (≥ 1.7) with GObject introspection, PyGObject,
+pycairo, and PyGObject's cairo support from your package manager. That last
+one is a package of its own on some distros (`python3-gobject-cairo` on
+openSUSE), and without it the meters and Patchbay can't draw. Then grab the
+Python audio bits via pip if your distro doesn't package them:
 
 ```bash
 python3 -m pip install --user numpy soundfile
@@ -414,17 +488,24 @@ cd PipeWireController
 ./pipewire-control-center
 ```
 
-Optional app-menu entry (the desktop file expects `pipewire-control-center`
-on your `PATH`, which the symlink provides). The second symlink is a short
-alias — `pwcc` is quicker to type and collides with nothing:
+Optional: `pipewire-control-center` and `pwcc` commands, plus an app-menu
+entry. `pwcc` is a short alias, quicker to type, and it collides with nothing.
+The menu entry gets the full path written into it, because an app launcher
+doesn't necessarily see the same `PATH` as your terminal:
 
 ```bash
 mkdir -p ~/.local/bin ~/.local/share/applications
 ln -sf "$PWD/pipewire-control-center" ~/.local/bin/
 ln -sf "$PWD/pipewire-control-center" ~/.local/bin/pwcc
-cp io.github.knightinfected.PipeWireControlCenter.desktop \
-    ~/.local/share/applications/
+sed "s|^Exec=.*|Exec=$HOME/.local/bin/pipewire-control-center|" \
+    io.github.knightinfected.PipeWireControlCenter.desktop \
+    > ~/.local/share/applications/io.github.knightinfected.PipeWireControlCenter.desktop
 ```
+
+If a new terminal can't find `pwcc`, then `~/.local/bin` isn't on your `PATH`
+yet. On Debian and Ubuntu it's added at login, but only if the folder already
+existed, so log out and back in once. Elsewhere, add it in your shell's
+profile.
 
 ## What it does
 
@@ -578,3 +659,16 @@ never modified.
 - Thanks to **Wim Taymans**, creator of PipeWire, for reviewing the Server
   page's quantum and buffer settings — his feedback corrected the
   `link.max-buffers` description and the quantum hard-limit range in v0.3.1.
+
+- The app's own symbolic icons come from the [GNOME
+  icon-development-kit](https://gitlab.gnome.org/Teams/Design/icon-development-kit),
+  released under CC0 1.0. They are bundled so a missing theme icon can no
+  longer leave a blank space where a control should be.
+
+## License
+
+PipeWire Controller is licensed **GPL-3.0-or-later** — see [LICENSE](LICENSE).
+
+The bundled icons under `pwctl/icons/` are from the GNOME
+icon-development-kit and are **CC0 1.0** (public domain dedication). CC0
+imposes no conditions, so it does not affect the app's own licensing.

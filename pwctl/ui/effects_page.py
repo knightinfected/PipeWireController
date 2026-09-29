@@ -16,7 +16,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from ..backend import chains, enhance, plugins, pw
+from ..backend import backends, chains, enhance, plugins, pw
 from .widgets import async_call, combine_devices, confirm, group, \
     icon_button, page_scroller, pill, state_style
 
@@ -119,7 +119,7 @@ class EffectsPage:
                             subtitle=' → '.join(names) or 'empty rack',
                             title_lines=1, subtitle_lines=1)
         row.add_prefix(Gtk.Image.new_from_icon_name(
-            'applications-multimedia-symbolic'))
+            'pwctl-effects-symbolic'))
         if meta.enabled:
             row.add_suffix(pill(state, state_style(state)))
         sw = Gtk.Switch(valign=Gtk.Align.CENTER, active=meta.enabled)
@@ -298,17 +298,27 @@ class EffectDialog(Adw.Dialog):
                 more.set_child(lbl)
                 self.browser_list.append(more)
                 break
+            # The rack wires ins[:2]/outs[:2] exactly as _effect_lanes does,
+            # so it has the same two failure modes — see issue #15 and
+            # backends.plugin_problem.
+            reason = backends.plugin_problem(p)
             row = Adw.ActionRow(
                 title=p.name,
-                subtitle=f'{p.type.upper()}'
-                         + (f' · {p.maker}' if p.maker else '')
-                         + ('' if p.ports_known
-                            else ' · ports unknown (use alone)'),
+                subtitle=reason or (
+                    f'{p.type.upper()}'
+                    + (f' · {p.maker}' if p.maker else '')
+                    + ('' if p.ports_known
+                       else ' · ports unknown (use alone)')),
                 title_lines=1, subtitle_lines=1)
-            add = icon_button('list-add-symbolic', 'Add to rack',
-                              lambda *_, pl=p: self._add_plugin(pl))
-            row.add_suffix(add)
-            row.set_activatable_widget(add)
+            if reason:
+                row.set_sensitive(False)
+                row.add_suffix(Gtk.Image.new_from_icon_name(
+                    'dialog-warning-symbolic'))
+            else:
+                add = icon_button('list-add-symbolic', 'Add to rack',
+                                  lambda *_, pl=p: self._add_plugin(pl))
+                row.add_suffix(add)
+                row.set_activatable_widget(add)
             self.browser_list.append(row)
             shown += 1
 

@@ -35,6 +35,36 @@ def esc(text) -> str:
     return GLib.markup_escape_text(str(text)) if text else ''
 
 
+# One glyph per kind of software device, keyed on `pw.AudioNode.software_kind`.
+# Deliberately NOT a second classifier: this is a lookup on the value the row
+# already has, so there is exactly one place that decides what a node is, and
+# adding a kind means adding a line here and a line there.  A kind with no
+# entry -- and every one of our own virtual devices, which report '' -- falls
+# back to the generic mark, so an unknown kind degrades to today's behaviour
+# rather than to a missing icon.
+KIND_ICON = {
+    'equalizer':    'pwctl-eq-symbolic',
+    'mic cleanup':  'pwctl-source-mic-symbolic',
+    'signal path':  'pwctl-paths-symbolic',
+    'filter chain': 'pwctl-chains-symbolic',
+    'loopback':     'pwctl-virtual-symbolic',
+}
+VIRTUAL_ICON = 'pwctl-virtual-symbolic'
+
+
+def device_icon(node) -> str:
+    """The icon for one device row, hardware or software.
+
+    Shared so the Mixer, the Devices page and Favourites cannot drift apart --
+    the whole point of these marks is that the same object looks the same
+    everywhere it is listed.
+    """
+    if not node.is_virtual:
+        return ('audio-speakers-symbolic' if node.is_sink
+                else 'audio-input-microphone-symbolic')
+    return KIND_ICON.get(node.software_kind, VIRTUAL_ICON)
+
+
 def pill(text: str, style: str) -> Gtk.Label:
     """Small colored status label. style: success | warning | error | dim"""
     lbl = Gtk.Label(label=text)
