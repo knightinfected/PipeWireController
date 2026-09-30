@@ -12,15 +12,19 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from ..backend import prefs, pw, rules
+from .device_levels import sync_device_levels
 from .volume import make_volume
 from .widgets import (async_call, device_icon, esc, group, page_scroller,
                       pill)
 
 
 class DevicesPage:
+    _POLL_SECONDS = 3
+    _LOCAL_GRACE_SECONDS = 2.0
+
     def __init__(self, window):
         self.window = window
         self.volume_style = prefs.get('volume_style')
@@ -50,7 +54,44 @@ class DevicesPage:
                                     self.hidden)
         self._rows = []
         self._hidden_rows = []
-        self.widget.connect('map', lambda *_: self.refresh())
+        self._live_controls = {}
+        self._poll_timer = None
+        self._poll_busy = False
+        self.widget.connect('map', self._on_map)
+        self.widget.connect('unmap', self._on_unmap)
+
+    def _on_map(self, *_args):
+        self.refresh()
+        if self._poll_timer is None:
+            self._poll_timer = GLib.timeout_add_seconds(
+                self._POLL_SECONDS, self._poll_levels)
+
+    def _on_unmap(self, *_args):
+        if self._poll_timer is not None:
+            GLib.source_remove(self._poll_timer)
+            self._poll_timer = None
+
+    def _poll_levels(self):
+        if self._poll_busy:
+            return True
+        self._poll_busy = True
+        async_call(lambda: pw.list_audio_nodes(pw.pw_dump()),
+                   self._apply_polled_levels)
+        return True
+
+    def _apply_polled_levels(self, nodes, error):
+        self._poll_busy = False
+        if error or nodes is None:
+            return
+
+        now = GLib.get_monotonic_time() / 1e6
+        if not sync_device_levels(
+                self._live_controls, nodes, now,
+                self._LOCAL_GRACE_SECONDS):
+            # A node appeared, vanished or was recreated. Rebuild once so its
+            # callbacks target the current PipeWire id; ordinary volume polls
+            # keep the existing rows and their expanded state intact.
+            self.refresh()
 
     def refresh(self):
         def collect():
@@ -65,6 +106,7 @@ class DevicesPage:
         for row, parent in self._rows:
             parent.remove(row)
         self._rows = []
+        self._live_controls = {}
         for node in nodes:
             parent = self.sinks if node.is_sink else self.sources
             row = self._device_row(node, rule_data, cards)
@@ -113,10 +155,24 @@ class DevicesPage:
 
         # Goes through make_volume like every other volume control, so this
         # page follows the chosen volume style and shows the live level too.
-        updating = {'v': False}
+        live = {
+            'node_id': node.id,
+            'volume': None,
+            'mute': None,
+            'updating': False,
+            'local_ts': 0.0,
+        }
+
+        def touch():
+            live['local_ts'] = GLib.get_monotonic_time() / 1e6
+
+        def set_volume(value):
+            touch()
+            async_call(lambda: pw.set_volume(node.id, value))
+
         vol = make_volume(
             self.volume_style,
-            lambda value: async_call(lambda: pw.set_volume(node.id, value)),
+            set_volume,
             compact=True)
         vol.set_value(node.volume if node.volume is not None else 1.0)
         vol.set_meter(node.serial)
@@ -128,7 +184,8 @@ class DevicesPage:
         mute.set_active(node.muted)
 
         def mute_toggled(b):
-            if not updating['v']:
+            if not live['updating']:
+                touch()
                 active = b.get_active()
                 async_call(lambda: pw.set_mute(node.id, active))
         mute.connect('toggled', mute_toggled)
@@ -136,6 +193,9 @@ class DevicesPage:
         row.add_suffix(vol.widget)
         row.add_suffix(mute)
         row.add_suffix(star)
+        live['volume'] = vol
+        live['mute'] = mute
+        self._live_controls[node.name] = live
 
         if is_hw:
             try:
