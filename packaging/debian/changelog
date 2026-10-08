@@ -1,7 +1,15 @@
-pipewire-control-center (0.5.0) unstable; urgency=medium
+pipewire-control-center (0.6.1) unstable; urgency=medium
 
-  * Initial Debian packaging.
+  * New upstream release. See CHANGELOG.md.
+  * First release published as a .deb, attached to the GitHub release.
+
+ -- knightinfected <hmzmahmood5@gmail.com>  Thu, 08 Oct 2026 02:55:37 -0400
+
+pipewire-control-center (0.6.0+git20260926) unstable; urgency=medium
+
+  * Initial Debian packaging, built and installed on Debian 13 and
+    Ubuntu 26.04. A snapshot of main after 0.6.0, for testing.
   * Renamed from pipewire-controller: an unrelated project holds that name on
     PyPI and installs the same /usr/bin binary and .desktop filename.
 
- -- knightinfected <hmzmahmood5@gmail.com>  Wed, 12 Aug 2026 15:53:49 -0400
+ -- knightinfected <hmzmahmood5@gmail.com>  Sat, 26 Sep 2026 20:53:50 -0400

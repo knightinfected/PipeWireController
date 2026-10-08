@@ -2,7 +2,8 @@ Source: pipewire-control-center
 Section: sound
 Priority: optional
 Maintainer: knightinfected <hmzmahmood5@gmail.com>
-Build-Depends: debhelper-compat (= 13)
+Build-Depends: debhelper-compat (= 13),
+               dh-sequence-python3
 Standards-Version: 4.7.0
 Homepage: https://github.com/knightinfected/PipeWireController
 Rules-Requires-Root: no
@@ -10,6 +11,7 @@ Rules-Requires-Root: no
 Package: pipewire-control-center
 Architecture: all
 Depends: ${misc:Depends},
+         ${python3:Depends},
          python3 (>= 3.10),
          python3-gi,
          python3-gi-cairo,
@@ -20,8 +22,14 @@ Depends: ${misc:Depends},
          pipewire (>= 1.0),
          pipewire-bin,
          wireplumber (>= 0.5)
+# libspa-0.2-modules-extra exists only on Ubuntu, which moves PipeWire's LV2,
+# SOFA and loudness backends into it; Debian ships them in the base package,
+# and apt skips a Recommends it cannot find. xdg-utils backs the Tools page's
+# open-folder buttons.
 Recommends: pipewire-pulse,
-            pulseaudio-utils
+            pulseaudio-utils,
+            libspa-0.2-modules-extra,
+            xdg-utils
 Suggests: lsp-plugins-lv2,
           carla
 Conflicts: pipewire-controller

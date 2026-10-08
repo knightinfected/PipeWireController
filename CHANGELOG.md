@@ -107,6 +107,57 @@ nothing plays *into* a microphone.
 
 Reported in [#8](https://github.com/knightinfected/PipeWireController/issues/8).
 
+## [v0.6.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.1) — 2026-10-08
+**A `.deb` for Debian 13 and Ubuntu 26.04, channel maps for any device, and fixes for virtual surround that came out far too loud and filter chains that would not start**
+
+**A `.deb` for Debian 13 and Ubuntu 26.04**
+
+Debian and Ubuntu users no longer need a git checkout. Each release now comes
+with a `.deb` attached:
+
+```bash
+sudo apt install ./pipewire-control-center_0.6.1_all.deb
+```
+
+apt pulls in everything the app needs, including the cairo bridge its meters
+draw with. It installs the same files in the same places as the AUR package:
+the app under `/usr/share/pipewire-control-center/`, the
+`pipewire-control-center` and `pwcc` commands, and an app-menu entry.
+`apt remove` takes it all off again, and neither touches your chains or
+settings in `~/.config`. There's no apt repository, so it doesn't update
+itself. Install the next release's `.deb` the same way.
+
+It needs libadwaita 1.7, so it's for Debian 13 and Ubuntu 26.04 LTS or newer.
+On Ubuntu 24.04, apt refuses it and names the libadwaita version it needs,
+rather than installing an app that can't start.
+
+**Virtual surround no longer comes out far too loud**
+
+The virtual surround templates mix eight convolvers into each ear, and HRIR
+files aren't normalised, so even one of them can come out louder than what
+went in. At the default gain of 1.0, every HeSuVi file we measured came out 5
+to 19 dB over full scale, so it distorted. The *Convolver gain* box could always fix that, but
+it started at 1.0 and nothing said it needed changing. PipeWire's own
+example config has the same gap.
+
+The right gain depends on the file (from about 0.12 to 0.55 across a whole
+HeSuVi collection), so the app now works it out from the file itself:
+
+- **New chains get the right gain automatically**, whether you make them in
+  the chain dialog or with the HRIR library's *New chain* button. The value
+  is saved with the chain, so it stays where it was put.
+- **The chain dialog has a Level section.** It shows where the chain peaks
+  against full scale on a bar that moves as you change the gain, and has a
+  button that applies the suggested gain.
+- **Chains you already have keep their gain.** Nothing about how they
+  sound changes on its own, but a chain that is too loud now shows a
+  *Too loud* tag in the list. Imported configs are measured as written, and
+  the dialog says what to change in their text.
+
+The same measurement covers the stereo and true-stereo convolver templates.
+The *Convolver gain* box now only appears for templates that have a
+convolver.
+
 **Channel maps now work with any device, not just Pro Audio cards**
 
 You could already build a virtual device wired to *specific channels* of a
@@ -161,6 +212,14 @@ anything:
 Also fixes the bundled noise suppressor's plugin path on distributions that
 keep 64-bit plugins in `/usr/lib64`.
 
+This matters most on **Ubuntu 26.04**. It keeps PipeWire's LV2, SOFA and
+loudness support in a separate package, `libspa-0.2-modules-extra`, which
+installing PipeWire doesn't pull in, so an LV2 effect there stopped its chain
+from starting. Those plugins are now greyed out with that package named, and
+the `.deb` installs it for you. The package the app names is the one your
+distribution actually uses: Fedora's names on Fedora, Ubuntu's on Ubuntu and
+the distributions built on it, and a plain description everywhere else.
+
 **The Debian and Ubuntu install line was missing a package**
 
 The level meters, graphs and Patchbay are drawn with cairo, and on Debian and
@@ -176,32 +235,12 @@ Also, the app-menu entry for a git checkout now has the program's full path
 written into it, so it launches even when the desktop's `PATH` doesn't include
 `~/.local/bin` yet.
 
-**Virtual surround no longer comes out far too loud**
+**The Fedora install line was missing two packages**
 
-The virtual surround templates mix eight convolvers into each ear, and HRIR
-files aren't normalised, so even one of them can come out louder than what
-went in. At the default gain of 1.0, every HeSuVi file we measured came out 5
-to 19 dB over full scale, so it distorted. The *Convolver gain* box could always fix that, but
-it started at 1.0 and nothing said it needed changing. PipeWire's own
-example config has the same gap.
-
-The right gain depends on the file (from about 0.12 to 0.55 across a whole
-HeSuVi collection), so the app now works it out from the file itself:
-
-- **New chains get the right gain automatically**, whether you make them in
-  the chain dialog or with the HRIR library's *New chain* button. The value
-  is saved with the chain, so it stays where it was put.
-- **The chain dialog has a Level section.** It shows where the chain peaks
-  against full scale on a bar that moves as you change the gain, and has a
-  button that applies the suggested gain.
-- **Chains you already have keep their gain.** Nothing about how they
-  sound changes on its own, but a chain that is too loud now shows a
-  *Too loud* tag in the list. Imported configs are measured as written, and
-  the dialog says what to change in their text.
-
-The same measurement covers the stereo and true-stereo convolver templates.
-The *Convolver gain* box now only appears for templates that have a
-convolver.
+On Fedora 44, a git checkout installed with the README's `dnf` line didn't
+start: GTK needs a typelib from `gobject-introspection`, which `python3-gobject`
+no longer pulls in there. The line also left out `pipewire-utils`, which holds
+`pw-dump` and the other PipeWire tools the app runs. Both are in the line now.
 
 ---
 

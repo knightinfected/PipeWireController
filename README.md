@@ -6,8 +6,8 @@
 [![Donate via PayPal](https://img.shields.io/badge/PayPal-support%20this%20project-00457C?logo=paypal&logoColor=white)](https://paypal.me/hmzknight)
 
 A native GTK4/libadwaita control center for PipeWire — for any Linux distro
-running PipeWire (packaged on the AUR, install instructions for Fedora,
-Ubuntu/Debian and others below).
+running PipeWire (packaged on the AUR and as a `.deb` for Debian/Ubuntu,
+install instructions for Fedora and others below).
 Everything under PipeWire's *Configuration* documentation — clock/quantum
 tuning, stream processing, session policy, filter chains, HRIR virtual
 surround — exposed as toggles and dropdowns, plus **Signal Paths** for building
@@ -417,8 +417,8 @@ sudo pacman -S --needed pipewire wireplumber pipewire-pulse gtk4 libadwaita \
 ### Fedora
 
 ```bash
-sudo dnf install pipewire pipewire-utils wireplumber pipewire-pulseaudio \
-    gtk4 libadwaita python3-gobject python3-cairo python3-numpy python3-soundfile
+sudo dnf install pipewire pipewire-utils wireplumber pipewire-pulseaudio gtk4 \
+    libadwaita gobject-introspection python3-gobject python3-numpy python3-soundfile
 ```
 
 Then run from a checkout (see [Run](#run)), or build an RPM — there is a spec
@@ -430,33 +430,54 @@ rpmbuild -ba packaging/rpm/pipewire-control-center.spec
 ```
 
 > [!WARNING]
-> **The Debian and RPM packaging is work in progress.** It is developed on an
-> Arch machine, so neither has been through a real `rpmbuild` or
-> `dpkg-buildpackage` yet — only the install steps have been checked. Running
-> from a checkout is the reliable route until that changes. If you do build
-> one, [an issue](https://github.com/knightinfected/PipeWireController/issues)
+> **The RPM packaging is work in progress.** It is developed on an Arch
+> machine, so it hasn't been through a real `rpmbuild` yet — only the install
+> steps have been checked. Running from a checkout is the reliable route until
+> that changes. If you do build one,
+> [an issue](https://github.com/knightinfected/PipeWireController/issues)
 > saying what broke is genuinely useful.
 
 ### Debian 13+ / Ubuntu 26.04 LTS+
+
+**Easiest: the `.deb`.** Download it from the
+[latest release](https://github.com/knightinfected/PipeWireController/releases/latest)
+(the file name carries the version), then, in the folder you saved it to:
+
+```bash
+sudo apt install ./pipewire-control-center_0.6.1_all.deb
+```
+
+The `./` matters, or apt goes looking online for a package by that name. That
+pulls in everything it needs and adds the `pipewire-control-center` and `pwcc`
+commands and an app-menu entry, so skip the Run section below. It doesn't
+update itself, so install the next release's `.deb` the same way.
+`sudo apt remove pipewire-control-center` takes it off again. Your chains and
+settings in `~/.config` stay either way.
+
+Ran it from a git checkout before, with the menu entry? Remove that first, or
+the menu will keep opening the old copy:
+
+```bash
+rm -f ~/.local/bin/pipewire-control-center ~/.local/bin/pwcc \
+    ~/.local/share/applications/io.github.knightinfected.PipeWireControlCenter.desktop
+```
+
+**Or run it from a git checkout.** Install the dependencies:
 
 ```bash
 sudo apt install pipewire wireplumber pipewire-pulse gir1.2-gtk-4.0 \
     gir1.2-adw-1 python3-gi python3-gi-cairo python3-numpy python3-soundfile
 ```
 
+On Ubuntu, also install `libspa-0.2-modules-extra` if you want LV2 plugins and
+the SOFA surround templates: Ubuntu keeps PipeWire's support for them in that
+separate package. Debian ships it in the base packages, and the `.deb` pulls it
+in for you.
+
 Older releases ship a libadwaita before **1.7** and won't work: Debian 12
 (bookworm) has 1.2.2 and **Ubuntu 24.04 LTS has 1.5.0**. Debian 13 (1.7.6) and
-Ubuntu 26.04 LTS (1.9.1) are the floor.
-
-Then run from a checkout (see [Run](#run)), or build a `.deb` — the packaging
-lives in [`packaging/debian/`](packaging/debian/). It carries the same
-**work-in-progress** caveat as the RPM above:
-
-```bash
-sudo apt install devscripts debhelper
-cp -r packaging/debian debian && dpkg-buildpackage -us -uc -b
-sudo apt install ../pipewire-control-center_*_all.deb
-```
+Ubuntu 26.04 LTS (1.9.1) are the floor, and on anything older the `.deb`
+refuses to install rather than leaving an app that can't start.
 
 ### openSUSE
 
