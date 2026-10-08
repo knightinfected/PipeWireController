@@ -415,8 +415,8 @@ sudo pacman -S --needed pipewire wireplumber pipewire-pulse gtk4 libadwaita \
 ### Fedora
 
 ```bash
-sudo dnf install pipewire wireplumber pipewire-pulseaudio gtk4 libadwaita \
-    python3-gobject python3-numpy python3-soundfile
+sudo dnf install pipewire pipewire-utils wireplumber pipewire-pulseaudio gtk4 \
+    libadwaita gobject-introspection python3-gobject python3-numpy python3-soundfile
 ```
 
 ### Debian 13+ / Ubuntu 26.04 LTS+

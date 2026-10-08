@@ -150,6 +150,13 @@ The same measurement covers the stereo and true-stereo convolver templates.
 The *Convolver gain* box now only appears for templates that have a
 convolver.
 
+**The Fedora install line was missing two packages**
+
+On Fedora 44, a git checkout installed with the README's `dnf` line didn't
+start: GTK needs a typelib from `gobject-introspection`, which `python3-gobject`
+no longer pulls in there. The line also left out `pipewire-utils`, which holds
+`pw-dump` and the other PipeWire tools the app runs. Both are in the line now.
+
 ---
 
 ## [v0.6.0](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.0) — 2026-08-26
