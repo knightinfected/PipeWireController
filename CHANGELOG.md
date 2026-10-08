@@ -25,6 +25,27 @@ and commit log.
 
 ## Unreleased
 
+**A `.deb` for Debian 13 and Ubuntu 26.04**
+
+Debian and Ubuntu users no longer need a git checkout. Each release now comes
+with a `.deb` attached:
+
+```bash
+sudo apt install ./pipewire-control-center_0.6.1_all.deb
+```
+
+apt pulls in everything the app needs, including the cairo bridge its meters
+draw with. It installs the same files in the same places as the AUR package:
+the app under `/usr/share/pipewire-control-center/`, the
+`pipewire-control-center` and `pwcc` commands, and an app-menu entry.
+`apt remove` takes it all off again, and neither touches your chains or
+settings in `~/.config`. There's no apt repository, so it doesn't update
+itself. Install the next release's `.deb` the same way.
+
+It needs libadwaita 1.7, so it's for Debian 13 and Ubuntu 26.04 LTS or newer.
+On Ubuntu 24.04, apt refuses it and names the libadwaita version it needs,
+rather than installing an app that can't start.
+
 **Channel maps now work with any device, not just Pro Audio cards**
 
 You could already build a virtual device wired to *specific channels* of a
@@ -78,6 +99,14 @@ anything:
 
 Also fixes the bundled noise suppressor's plugin path on distributions that
 keep 64-bit plugins in `/usr/lib64`.
+
+This matters most on **Ubuntu 26.04**. It keeps PipeWire's LV2, SOFA and
+loudness support in a separate package, `libspa-0.2-modules-extra`, which
+installing PipeWire doesn't pull in, so an LV2 effect there stopped its chain
+from starting. Those plugins are now greyed out with that package named, and
+the `.deb` installs it for you. The package the app names is the one your
+distribution actually uses: Fedora's names on Fedora, Ubuntu's on Ubuntu and
+the distributions built on it, and a plain description everywhere else.
 
 **The Debian and Ubuntu install line was missing a package**
 
