@@ -1,3 +1,10 @@
+pipewire-control-center (0.6.1) unstable; urgency=medium
+
+  * New upstream release. See CHANGELOG.md.
+  * First release published as a .deb, attached to the GitHub release.
+
+ -- knightinfected <hmzmahmood5@gmail.com>  Thu, 08 Oct 2026 02:55:37 -0400
+
 pipewire-control-center (0.6.0+git20260926) unstable; urgency=medium
 
   * Initial Debian packaging, built and installed on Debian 13 and
