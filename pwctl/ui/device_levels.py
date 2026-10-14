@@ -4,19 +4,21 @@
 def sync_device_levels(controls, nodes, now, grace_seconds):
     """Apply node volume/mute values without replacing existing row widgets.
 
+    ``controls`` is keyed by ``(node.id, node.serial)``. ``node.name`` is not
+    unique in PipeWire, and a freed id is handed to the next new object, so
+    only the pair names one live node.
+
     Return ``False`` when node membership or object ids changed so the caller
     can rebuild the rows and their callbacks once.
     """
-    current = {node.name: node for node in nodes}
-    expected = {name: state['node_id'] for name, state in controls.items()}
-    observed = {name: node.id for name, node in current.items()}
-    if expected != observed:
+    current = {(node.id, node.serial): node for node in nodes}
+    if set(controls) != set(current):
         return False
 
-    for name, state in controls.items():
+    for key, state in controls.items():
         if now - state['local_ts'] < grace_seconds:
             continue
-        node = current[name]
+        node = current[key]
         if node.volume is not None:
             state['volume'].set_value(node.volume)
         state['updating'] = True

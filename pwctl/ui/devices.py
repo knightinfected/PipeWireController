@@ -17,13 +17,12 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from ..backend import prefs, pw, rules
 from .device_levels import sync_device_levels
 from .volume import make_volume
-from .widgets import (async_call, device_icon, esc, group, page_scroller,
-                      pill)
+from .widgets import (LOCAL_GRACE, async_call, device_icon, esc, group,
+                      page_scroller, pill)
 
 
 class DevicesPage:
     _POLL_SECONDS = 3
-    _LOCAL_GRACE_SECONDS = 2.0
 
     def __init__(self, window):
         self.window = window
@@ -86,8 +85,7 @@ class DevicesPage:
 
         now = GLib.get_monotonic_time() / 1e6
         if not sync_device_levels(
-                self._live_controls, nodes, now,
-                self._LOCAL_GRACE_SECONDS):
+                self._live_controls, nodes, now, LOCAL_GRACE):
             # A node appeared, vanished or was recreated. Rebuild once so its
             # callbacks target the current PipeWire id; ordinary volume polls
             # keep the existing rows and their expanded state intact.
@@ -156,7 +154,6 @@ class DevicesPage:
         # Goes through make_volume like every other volume control, so this
         # page follows the chosen volume style and shows the live level too.
         live = {
-            'node_id': node.id,
             'volume': None,
             'mute': None,
             'updating': False,
@@ -195,7 +192,7 @@ class DevicesPage:
         row.add_suffix(star)
         live['volume'] = vol
         live['mute'] = mute
-        self._live_controls[node.name] = live
+        self._live_controls[(node.id, node.serial)] = live
 
         if is_hw:
             try:

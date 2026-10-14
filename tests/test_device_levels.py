@@ -15,9 +15,8 @@ class Control:
         self.values.append(value)
 
 
-def state(node_id=4, touched=0.0):
+def state(touched=0.0):
     return {
-        'node_id': node_id,
         'volume': Control(),
         'mute': Control(),
         'updating': False,
@@ -25,29 +24,45 @@ def state(node_id=4, touched=0.0):
     }
 
 
+def node(name='headphones', node_id=4, serial=40, volume=0.35, muted=True):
+    return SimpleNamespace(name=name, id=node_id, serial=serial,
+                           volume=volume, muted=muted)
+
+
 class DeviceLevelSyncTests(TestCase):
     def test_external_volume_and_mute_update_existing_controls(self):
-        controls = {'headphones': state()}
-        node = SimpleNamespace(name='headphones', id=4, volume=0.35,
-                               muted=True)
+        controls = {(4, 40): state()}
 
-        self.assertTrue(sync_device_levels(controls, [node], 10.0, 2.0))
-        self.assertEqual(controls['headphones']['volume'].values, [0.35])
-        self.assertEqual(controls['headphones']['mute'].values, [True])
-        self.assertFalse(controls['headphones']['updating'])
+        self.assertTrue(sync_device_levels(controls, [node()], 10.0, 2.0))
+        self.assertEqual(controls[(4, 40)]['volume'].values, [0.35])
+        self.assertEqual(controls[(4, 40)]['mute'].values, [True])
+        self.assertFalse(controls[(4, 40)]['updating'])
 
     def test_recent_local_change_is_not_overwritten(self):
-        controls = {'headphones': state(touched=9.0)}
-        node = SimpleNamespace(name='headphones', id=4, volume=0.35,
-                               muted=True)
+        controls = {(4, 40): state(touched=9.0)}
 
-        self.assertTrue(sync_device_levels(controls, [node], 10.0, 2.0))
-        self.assertEqual(controls['headphones']['volume'].values, [])
-        self.assertEqual(controls['headphones']['mute'].values, [])
+        self.assertTrue(sync_device_levels(controls, [node()], 10.0, 2.0))
+        self.assertEqual(controls[(4, 40)]['volume'].values, [])
+        self.assertEqual(controls[(4, 40)]['mute'].values, [])
 
     def test_recreated_node_requests_a_row_rebuild(self):
-        controls = {'headphones': state(node_id=4)}
-        node = SimpleNamespace(name='headphones', id=9, volume=0.35,
-                               muted=True)
+        controls = {(4, 40): state()}
 
-        self.assertFalse(sync_device_levels(controls, [node], 10.0, 2.0))
+        self.assertFalse(sync_device_levels(
+            controls, [node(node_id=9, serial=90)], 10.0, 2.0))
+
+    def test_reused_id_requests_a_row_rebuild(self):
+        # Same id, new object: PipeWire hands a freed id to the next node.
+        controls = {(4, 40): state()}
+
+        self.assertFalse(sync_device_levels(
+            controls, [node(serial=41)], 10.0, 2.0))
+
+    def test_nodes_sharing_a_name_are_tracked_separately(self):
+        controls = {(4, 40): state(), (5, 50): state()}
+        nodes = [node(node_id=4, serial=40, volume=0.1),
+                 node(node_id=5, serial=50, volume=0.2)]
+
+        self.assertTrue(sync_device_levels(controls, nodes, 10.0, 2.0))
+        self.assertEqual(controls[(4, 40)]['volume'].values, [0.1])
+        self.assertEqual(controls[(5, 50)]['volume'].values, [0.2])
