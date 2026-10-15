@@ -56,6 +56,7 @@ class DevicesPage:
         self._live_controls = {}
         self._poll_timer = None
         self._poll_busy = False
+        self._default_ts = 0.0          # when the user last clicked a star
         self.widget.connect('map', self._on_map)
         self.widget.connect('unmap', self._on_unmap)
 
@@ -85,7 +86,8 @@ class DevicesPage:
 
         now = GLib.get_monotonic_time() / 1e6
         if not sync_device_levels(
-                self._live_controls, nodes, now, LOCAL_GRACE):
+                self._live_controls, nodes, now, LOCAL_GRACE,
+                default_held=now - self._default_ts < LOCAL_GRACE):
             # A node appeared, vanished or was recreated. Rebuild once so its
             # callbacks target the current PipeWire id; ordinary volume polls
             # keep the existing rows and their expanded state intact.
@@ -134,21 +136,39 @@ class DevicesPage:
             if kind:
                 row.add_suffix(pill(kind, 'dim'))
 
-        star = Gtk.Button(
-            icon_name='starred-symbolic' if node.is_default
-            else 'non-starred-symbolic',
-            tooltip_text='Default device' if node.is_default
-            else 'Make default')
+        star = Gtk.Button()
         star.add_css_class('flat')
-        if node.is_default:
-            star.add_css_class('star-active')
         star.set_valign(Gtk.Align.CENTER)
 
+        def paint_star(is_default):
+            star.set_icon_name('starred-symbolic' if is_default
+                               else 'non-starred-symbolic')
+            star.set_tooltip_text('Default device' if is_default
+                                  else 'Make default')
+            if is_default:
+                star.add_css_class('star-active')
+            else:
+                star.remove_css_class('star-active')
+        paint_star(node.is_default)
+
         def make_default(_b):
-            async_call(lambda: pw.set_default(node.id),
-                       lambda ok, e: (self.window.toast(
-                           f'Default set to {node.description}' if ok and not e
-                           else 'Could not set default'), self.refresh()))
+            # Paint it now and hold it for LOCAL_GRACE: the graph only shows
+            # the new default a little after wpctl returns, so a poll landing
+            # in between would put the star back.  Repainting in place, not
+            # rebuilding, keeps an expanded row open.
+            self._default_ts = GLib.get_monotonic_time() / 1e6
+            for other in self._live_controls.values():
+                if other['is_sink'] == node.is_sink:
+                    other['star'](other['star'] is paint_star)
+
+            def done(ok, error):
+                if ok and not error:
+                    self.window.toast(f'Default set to {node.description}')
+                    return
+                self.window.toast('Could not set default')
+                self._default_ts = 0.0
+                self._poll_levels()     # put the star back where it really is
+            async_call(lambda: pw.set_default(node.id), done)
         star.connect('clicked', make_default)
 
         # Goes through make_volume like every other volume control, so this
@@ -156,6 +176,8 @@ class DevicesPage:
         live = {
             'volume': None,
             'mute': None,
+            'star': paint_star,
+            'is_sink': node.is_sink,
             'updating': False,
             'local_ts': 0.0,
         }

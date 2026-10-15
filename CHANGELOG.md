@@ -23,6 +23,25 @@ and commit log.
 
 ---
 
+## Unreleased
+
+**Bug: the Devices page did not follow changes made outside it**
+
+Turn the volume down with your headphones' buttons, the desktop's volume
+widget or another app, and the Devices page kept showing the old level until
+you went to another page and back. Mute and the default-device star went stale
+the same way. The page read the audio graph once, when you opened it, and never
+again.
+
+It now checks every three seconds while it is on screen, and moves the controls
+that are already there instead of redrawing the page — so a device you have
+expanded stays expanded, a slider you are dragging is not pulled back, and the
+level meters keep running. Making a device the default no longer folds up the
+one you had open, either.
+
+Thanks to @iibaranov-IG for the fix (#20), and to @The-M1k3y for the report
+(#19).
+
 ## [v0.6.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.1) — 2026-10-08
 **A `.deb` for Debian 13 and Ubuntu 26.04, channel maps for any device, and fixes for virtual surround that came out far too loud and filter chains that would not start**
 
