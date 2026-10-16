@@ -14,7 +14,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from ..backend import prefs, pw, rules
+from ..backend import livestate, prefs, pw, rules
 from .device_levels import sync_device_levels
 from .volume import make_volume
 from .widgets import (LOCAL_GRACE, async_call, device_icon, esc, group,
@@ -22,7 +22,7 @@ from .widgets import (LOCAL_GRACE, async_call, device_icon, esc, group,
 
 
 class DevicesPage:
-    _POLL_SECONDS = 3
+    _POLL_SECONDS = 3       # only when livestate cannot listen
 
     def __init__(self, window):
         self.window = window
@@ -56,20 +56,90 @@ class DevicesPage:
         self._live_controls = {}
         self._poll_timer = None
         self._poll_busy = False
+        self._live = None               # livestate subscription while mapped
+        self._rebuild_next = False      # the next delivery rebuilds the rows
+        self._last_nodes = None         # what the last delivery said
+        self._grace_id = None
         self._default_ts = 0.0          # when the user last clicked a star
         self.widget.connect('map', self._on_map)
         self.widget.connect('unmap', self._on_unmap)
 
     def _on_map(self, *_args):
+        # The graph comes from livestate when something changes; the 3 s
+        # poll is only for a machine where it cannot listen.
+        if self._live is None:
+            self._live = livestate.subscribe(self._on_graph)
+        if self._live is not None:
+            self._rebuild_next = True       # its first delivery builds the rows
+            return
         self.refresh()
         if self._poll_timer is None:
             self._poll_timer = GLib.timeout_add_seconds(
                 self._POLL_SECONDS, self._poll_levels)
 
     def _on_unmap(self, *_args):
+        if self._live is not None:
+            livestate.unsubscribe(self._live)
+            self._live = None
+        if self._grace_id is not None:
+            GLib.source_remove(self._grace_id)
+            self._grace_id = None
         if self._poll_timer is not None:
             GLib.source_remove(self._poll_timer)
             self._poll_timer = None
+
+    def _on_graph(self, dump):
+        """A fresh pw-dump from livestate: the graph changed, or we asked.
+
+        Rows are updated in place from it, or rebuilt from the same dump, on
+        the main loop and in delivery order, so an older read can never land
+        on top of a newer one.
+        """
+        nodes = pw.list_audio_nodes(dump)
+        self._last_nodes = nodes
+        if self._rebuild_next or not self._sync(nodes):
+            self._rebuild_next = False
+            self._apply((nodes, pw.card_map(dump), rules.load()), None)
+        self._watch_grace()
+
+    def _sync(self, nodes):
+        now = GLib.get_monotonic_time() / 1e6
+        return sync_device_levels(
+            self._live_controls, nodes, now, LOCAL_GRACE,
+            default_held=now - self._default_ts < LOCAL_GRACE)
+
+    def _watch_grace(self):
+        """Apply the last delivery again once every hold has run out.
+
+        A delivery that lands while a slider is being dragged, or just after
+        a star click, leaves that control alone.  The poll's next tick used to
+        correct it; with events there may be no next delivery.
+        """
+        if self._grace_id is not None:
+            GLib.source_remove(self._grace_id)
+            self._grace_id = None
+        if self._live is None:
+            return                          # the poll's next tick does it
+        holds = [st['local_ts'] for st in self._live_controls.values()]
+        until = max(holds + [self._default_ts]) + LOCAL_GRACE
+        left = until - GLib.get_monotonic_time() / 1e6
+        if left > 0:
+            self._grace_id = GLib.timeout_add(int(left * 1000) + 50,
+                                              self._grace_over)
+
+    def _grace_over(self):
+        self._grace_id = None
+        self._resync()
+        return GLib.SOURCE_REMOVE
+
+    def _resync(self):
+        """Put every control back where the graph has it."""
+        if self._live is None:
+            self._poll_levels()
+            return
+        if self._last_nodes is not None and not self._sync(self._last_nodes):
+            self.refresh()
+        self._watch_grace()
 
     def _poll_levels(self):
         if self._poll_busy:
@@ -84,16 +154,20 @@ class DevicesPage:
         if error or nodes is None:
             return
 
-        now = GLib.get_monotonic_time() / 1e6
-        if not sync_device_levels(
-                self._live_controls, nodes, now, LOCAL_GRACE,
-                default_held=now - self._default_ts < LOCAL_GRACE):
+        if not self._sync(nodes):
             # A node appeared, vanished or was recreated. Rebuild once so its
             # callbacks target the current PipeWire id; ordinary volume polls
             # keep the existing rows and their expanded state intact.
             self.refresh()
 
     def refresh(self):
+        if self._live is not None:
+            # Through livestate, so the rebuild stays in order with its
+            # deliveries.  Rules are read when the dump lands.
+            self._rebuild_next = True
+            livestate.refresh()
+            return
+
         def collect():
             dump = pw.pw_dump()
             return pw.list_audio_nodes(dump), pw.card_map(dump), rules.load()
@@ -167,7 +241,7 @@ class DevicesPage:
                     return
                 self.window.toast('Could not set default')
                 self._default_ts = 0.0
-                self._poll_levels()     # put the star back where it really is
+                self._resync()          # put the star back where it really is
             async_call(lambda: pw.set_default(node.id), done)
         star.connect('clicked', make_default)
 

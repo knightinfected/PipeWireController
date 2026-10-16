@@ -11,7 +11,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from .backend import graph, levels, prefs, presets, pw, system, units
+from .backend import (graph, levels, livestate, prefs, presets, pw, system,
+                      units)
 from .ui.chains_page import ChainsPage
 from .ui.dashboard import Dashboard
 from .ui.devices import DevicesPage
@@ -535,7 +536,9 @@ class App(Adw.Application):
         Adw.Application.do_startup(self)
         # Meters are child processes and outlive a crash or a kill, so clear
         # out anything an earlier run left behind before starting new ones.
+        # The same goes for livestate's two listeners.
         levels.reap_orphans()
+        livestate.reap_orphans()
         # ...and make sure this run leaves nothing behind either: a plain
         # `kill` (or Ctrl-C) would otherwise skip every Gtk shutdown path.
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -566,11 +569,12 @@ class App(Adw.Application):
         win.present()
 
     def _on_signal(self):
-        self.quit()                 # runs do_shutdown, which stops the meters
+        self.quit()     # runs do_shutdown: stops the meters and listeners
         return GLib.SOURCE_REMOVE
 
     def do_shutdown(self):
         levels.stop_all()
+        livestate.stop()
         Adw.Application.do_shutdown(self)
 
 

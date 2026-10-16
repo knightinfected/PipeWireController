@@ -25,6 +25,56 @@ and commit log.
 
 ## Unreleased
 
+**The app starts listening instead of asking every few seconds**
+
+Until now, every page that shows live audio state kept itself current by
+asking again on a timer. It re-read the whole audio graph every three
+seconds, and asked systemd about each audio service every five, whether or
+not anything had changed. So a change made somewhere else (your headphones'
+buttons, the desktop's volume widget, another app, a device plugged in) took
+up to three seconds to show. And the app kept starting small processes the
+whole time it was open, nearly all of them to learn that nothing had
+happened.
+
+This release starts replacing those timers with listeners. The app hears
+about a change when it happens, and does almost nothing in between. On the
+Devices page with nothing happening, it used to start 76 processes a minute,
+and now starts 2. Its share of the CPU there, counting the work PipeWire does
+on its behalf, went from about 5.4 % of a core to about 2.4 %. Most of what's
+left is the level meters.
+
+- **Devices** listens to PipeWire. A change shows within about a tenth of a
+  second instead of up to three seconds. The page reads the graph again only
+  when something changes, plus once every 30 seconds as a safety check, and
+  dragging a slider makes it re-read at most twice a second.
+- **Service status** is read from systemd directly, without starting a
+  process, and a failure arrives as systemd's own notification. See "A failed
+  audio service is noticed at once" below.
+- **Default devices and clock settings** are read from the snapshot of the
+  graph each page already takes. See "Fewer processes on every refresh" below.
+
+Also worth knowing:
+
+- **Restarting the audio services is handled.** The listeners go away with
+  PipeWire and come back with it, and the page waits until the devices are
+  back before it redraws, so it doesn't flash a half-empty list. After a
+  restart of PipeWire, PipeWire-Pulse and WirePlumber together, the page
+  showed every device again in under a second.
+- **It works the same on PipeWire 1.0**, which reports a default-device
+  change differently, through a channel that falls silent once WirePlumber
+  restarts on its own. The app notices and reconnects, so a new default
+  still shows at once there.
+- **Two small background processes** run while a page that listens is open:
+  `pw-dump` and `pw-metadata`, named `pwctl-livestate-graph` and
+  `pwctl-livestate-meta` in a process list. They stop when you leave the page
+  or close the app. If the app crashes, its next start cleans them up, as it
+  already did for the level meters.
+- **If the app can't listen**, for example because `pw-dump` is missing, the
+  page checks every three seconds, as before.
+- **For now this is the Devices page.** The Dashboard, Signal Paths and the
+  Patchbay still re-read every three seconds, and move over next. The Monitor
+  keeps its timer on purpose, because its graphs sample at a steady rate.
+
 **Bug: the Devices page did not follow changes made outside it**
 
 Turn the volume down with your headphones' buttons, the desktop's volume
@@ -33,7 +83,8 @@ you went to another page and back. Mute and the default-device star went stale
 the same way. The page read the audio graph once, when you opened it, and never
 again.
 
-It now checks every three seconds while it is on screen, and moves the controls
+It now follows the audio graph while it is on screen, and a change shows within
+about a tenth of a second (how, in the entry above). It moves the controls
 that are already there instead of redrawing the page — so a device you have
 expanded stays expanded, a slider you are dragging is not pulled back, and the
 level meters keep running. Making a device the default no longer folds up the
