@@ -145,6 +145,10 @@ class ProcSample:
 
 
 def service_pid(unit: str) -> int:
+    from . import units
+    pid = units.main_pid(unit)        # D-Bus; None means ask systemctl
+    if pid is not None:
+        return pid
     rc, out, _ = sysctl_user('show', '-p', 'MainPID', '--value', unit)
     try:
         return int(out.strip())

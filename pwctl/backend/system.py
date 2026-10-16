@@ -52,7 +52,16 @@ def sysctl_user(*args, timeout=15):
 
 
 def unit_state(unit: str) -> str:
-    """active | inactive | failed | activating | unknown..."""
+    """active | inactive | failed | activating | unknown...
+
+    Asked over D-Bus when systemd is on the session bus, which gives the same
+    answer as `systemctl is-active` without starting it (see units.py);
+    `systemctl` when it is not.
+    """
+    from . import units
+    state = units.active_state(unit)
+    if state is not None:
+        return state
     rc, out, _ = sysctl_user('is-active', unit)
     state = out.strip() or 'unknown'
     return state

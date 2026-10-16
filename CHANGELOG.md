@@ -67,6 +67,17 @@ already in the snapshot of the audio graph the page had just taken, and are
 now read from there. A Dashboard refresh starts two fewer processes, and
 Devices and Signal Paths one fewer, each about 8 ms of CPU.
 
+**A failed audio service is noticed at once**
+
+To notice PipeWire, WirePlumber or PipeWire-Pulse failing, the app asked
+systemd about all three every five seconds, on every page: three processes
+each time. It now listens to systemd instead, so the notification comes
+within a fraction of a second. A service that fails and is started again
+between two checks is no longer missed either. Every other place that shows
+whether a service or chain is running also reads it without starting
+`systemctl`. Where systemd is not on the session bus, the old checks still
+run.
+
 ## [v0.6.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.1) — 2026-10-08
 **A `.deb` for Debian 13 and Ubuntu 26.04, channel maps for any device, and fixes for virtual surround that came out far too loud and filter chains that would not start**
 

@@ -11,7 +11,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from .backend import graph, levels, prefs, presets, pw, system
+from .backend import graph, levels, prefs, presets, pw, system, units
 from .ui.chains_page import ChainsPage
 from .ui.dashboard import Dashboard
 from .ui.devices import DevicesPage
@@ -63,6 +63,10 @@ RESTART_UNITS = {
               lambda: system.restart_unit('pipewire-pulse.service')),
     'wireplumber': ('WirePlumber', system.restart_wireplumber),
 }
+
+# The services whose failure raises a desktop notification.
+WATCHED_SERVICES = ('pipewire.service', 'wireplumber.service',
+                    'pipewire-pulse.service')
 
 
 class Window(Adw.ApplicationWindow):
@@ -218,6 +222,11 @@ class Window(Adw.ApplicationWindow):
         self._watch_links = None       # set of (out_name, port, in_name, port)
         self._watch_states: dict[str, str] = {}
         self._watch_busy = False
+        # Service failures come from systemd's own signals when it is on the
+        # session bus: at once, and including a failure that is restarted
+        # before a poll would have looked.  The 5 s poll below covers them
+        # only when it is not.  Links stay on the poll (DR-004 step 4).
+        self._unit_watch = units.watch(WATCHED_SERVICES, self._service_state)
         GLib.timeout_add_seconds(5, self._watch_tick)
 
     # ------------------------------------------------------------ advanced --
@@ -416,10 +425,21 @@ class Window(Adw.ApplicationWindow):
         import time
         self._last_patch_ts = time.monotonic()
 
+    def _service_state(self, unit, state):
+        """A service's state, from the signal or from the poll."""
+        prev = self._watch_states.get(unit)
+        self._watch_states[unit] = state
+        if (state == 'failed' and prev not in (None, 'failed')
+                and prefs.get('notify_services')):
+            self.notify_user('Audio service failed',
+                             f'{unit} entered the failed state — '
+                             'check the Monitor page.')
+
     def _watch_tick(self):
         import time
         want_links = bool(prefs.get('notify_links'))
-        want_services = bool(prefs.get('notify_services'))
+        want_services = (bool(prefs.get('notify_services'))
+                         and self._unit_watch is None)
         if (not want_links and not want_services) or self._watch_busy:
             return True
         self._watch_busy = True
@@ -427,8 +447,7 @@ class Window(Adw.ApplicationWindow):
         def collect():
             states = {}
             if want_services:
-                for unit in ('pipewire.service', 'wireplumber.service',
-                             'pipewire-pulse.service'):
+                for unit in WATCHED_SERVICES:
                     states[unit] = system.unit_state(unit)
             links, names = None, {}
             if want_links:
@@ -452,12 +471,7 @@ class Window(Adw.ApplicationWindow):
                 return
             states, links, names = result
             for unit, state in states.items():
-                prev = self._watch_states.get(unit)
-                if state == 'failed' and prev not in (None, 'failed'):
-                    self.notify_user('Audio service failed',
-                                     f'{unit} entered the failed state — '
-                                     'check the Monitor page.')
-                self._watch_states[unit] = state
+                self._service_state(unit, state)
             if links is not None:
                 prev_links = self._watch_links
                 self._watch_links = links
