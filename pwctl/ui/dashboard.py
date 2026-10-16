@@ -25,7 +25,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from ..backend import chains, enhance, paths, prefs, pw, surround, system, virtual
+from ..backend import (chains, enhance, paths, prefs, pw, surround, system,
+                       units, virtual)
 from .volume import VOLUME_STYLES, make_volume
 from .widgets import (LOCAL_GRACE, ColumnBox, GraceMixin, RowSync, async_call,
                       device_icon, esc, micro,
@@ -1215,6 +1216,8 @@ class Dashboard:
         self._calc_init = False
         self._tick_n = 0
         self._slow = {}          # last slow-tier result, reused between ticks
+        self._unit_watch = None  # systemd signals for SERVICES while mapped
+        self._live_states = {}   # unit -> state, from those signals
         self._local_ts = 0.0
         self.filter_text = ''
         self.volume_style = prefs.get('volume_style')
@@ -1838,11 +1841,70 @@ class Dashboard:
         self.refresh()
         if not self._timer:
             self._timer = GLib.timeout_add_seconds(3, self._tick)
+        # The services' state, as systemd changes it.  Without this the pills
+        # and the status line moved only on the slow tier, up to ~12 s after a
+        # restart.  None (systemd not on the session bus) leaves the slow tier
+        # to do it, as before.
+        if self._unit_watch is None:
+            self._unit_watch = units.watch([u for u, _ in SERVICES],
+                                           self._on_unit_state)
 
     def _on_unmap(self, *_a):
         if self._timer:
             GLib.source_remove(self._timer)
             self._timer = None
+        units.unwatch(self._unit_watch)
+        self._unit_watch = None
+        self._live_states = {}
+
+    def _on_unit_state(self, unit, state):
+        self._live_states[unit] = state
+        self._paint_services()
+
+    def _paint_services(self):
+        """The service pills and the status line, from the newest states.
+
+        A signal is newer than a slow-tier read, which may have started before
+        it, so while the watch is live its states win.
+        """
+        states = dict(self._slow.get('states', {}))
+        states.update(self._live_states)
+        for unit, (_row, p) in self.svc_rows.items():
+            state = states.get(unit, 'unknown')
+            p.set_label(state)
+            for c in list(p.get_css_classes()):
+                if c.startswith('pill-'):
+                    p.remove_css_class(c)
+            p.add_css_class(f'pill-{state_style(state)}')
+
+        # -- status hero -------------------------------------------------
+        bad = [label for unit, label in SERVICES
+               if states.get(unit) not in ('active', None)]
+        unknown = not states
+        if unknown:
+            tone, headline = 'dim', 'Checking services…'
+        elif bad:
+            tone = 'err'
+            headline = (f'{bad[0]} is not running' if len(bad) == 1
+                        else f'{len(bad)} audio services are not running')
+        else:
+            tone, headline = 'ok', 'Audio is running'
+        for c in ('ok', 'warn', 'err', 'dim'):
+            self.hero_dot.remove_css_class(c)
+        self.hero_dot.add_css_class(tone)
+        self.hero_title.set_label(headline)
+        self.hero_sub.set_label(' · '.join(
+            f'{label} {states.get(unit, "?")}' for unit, label in SERVICES))
+
+        # -- alert -------------------------------------------------------
+        if bad:
+            self.alert_text.set_label(
+                f'{", ".join(bad)} not running — audio will not work until '
+                'the service is back.')
+            self.alert_btn.set_label('Open Monitor')
+            self.alert.set_visible(True)
+        else:
+            self.alert.set_visible(False)
 
     def _tick(self):
         # A tick that finds a collect in flight is skipped, not queued: the
@@ -1931,35 +1993,8 @@ class Dashboard:
         if 'states' in data:
             self._slow = {'states': data['states'],
                           'inventory': data['inventory']}
-        states = self._slow.get('states', {})
         inventory = self._slow.get('inventory', {})
-
-        for unit, (_row, p) in self.svc_rows.items():
-            state = states.get(unit, 'unknown')
-            p.set_label(state)
-            for c in list(p.get_css_classes()):
-                if c.startswith('pill-'):
-                    p.remove_css_class(c)
-            p.add_css_class(f'pill-{state_style(state)}')
-
-        # -- status hero -------------------------------------------------
-        bad = [label for unit, label in SERVICES
-               if states.get(unit) not in ('active', None)]
-        unknown = not states
-        if unknown:
-            tone, headline = 'dim', 'Checking services…'
-        elif bad:
-            tone = 'err'
-            headline = (f'{bad[0]} is not running' if len(bad) == 1
-                        else f'{len(bad)} audio services are not running')
-        else:
-            tone, headline = 'ok', 'Audio is running'
-        for c in ('ok', 'warn', 'err', 'dim'):
-            self.hero_dot.remove_css_class(c)
-        self.hero_dot.add_css_class(tone)
-        self.hero_title.set_label(headline)
-        self.hero_sub.set_label(' · '.join(
-            f'{label} {states.get(unit, "?")}' for unit, label in SERVICES))
+        self._paint_services()
 
         s = data['settings']
         drv = data['driver']
@@ -1985,16 +2020,6 @@ class Dashboard:
             self.calc_quantum.set_value(quantum)
             if rate in self.CALC_RATES:
                 self.calc_rate.set_selected(self.CALC_RATES.index(rate))
-
-        # -- alert -------------------------------------------------------
-        if bad:
-            self.alert_text.set_label(
-                f'{", ".join(bad)} not running — audio will not work until '
-                'the service is back.')
-            self.alert_btn.set_label('Open Monitor')
-            self.alert.set_visible(True)
-        else:
-            self.alert.set_visible(False)
 
         # -- default endpoints -------------------------------------------
         self._last_nodes = data['nodes']

@@ -73,10 +73,12 @@ To notice PipeWire, WirePlumber or PipeWire-Pulse failing, the app asked
 systemd about all three every five seconds, on every page: three processes
 each time. It now listens to systemd instead, so the notification comes
 within a fraction of a second. A service that fails and is started again
-between two checks is no longer missed either. Every other place that shows
-whether a service or chain is running also reads it without starting
-`systemctl`. Where systemd is not on the session bus, the old checks still
-run.
+between two checks is no longer missed either. On the Dashboard, the
+service status and the "not running" warning now change as the service does.
+After a restart from the Dashboard they used to take up to 12 seconds.
+Every other place that shows whether a service or chain is running also
+reads it without starting `systemctl`. Where systemd is not on the session
+bus, the old checks still run.
 
 ## [v0.6.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.1) — 2026-10-08
 **A `.deb` for Debian 13 and Ubuntu 26.04, channel maps for any device, and fixes for virtual surround that came out far too loud and filter chains that would not start**
