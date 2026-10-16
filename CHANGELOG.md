@@ -42,6 +42,22 @@ one you had open, either.
 Thanks to @iibaranov-IG for the fix (#20), and to @The-M1k3y for the report
 (#19).
 
+**Bug: a new default device took a while to show on the Dashboard**
+
+Making a device the default, with the star in the Mixer or from the Default
+output and Default input cards, now shows at the click. The star and the card
+used to wait until the page next read the audio graph: half a second at
+best, and up to three seconds when that read was skipped because the page
+was already busy reading. If the switch fails, the page now says so and puts
+the star back. It used to report success either way.
+
+That skipped read affected more than the default. On the Dashboard, Signal
+Paths and the Patchbay, a refresh asked for while the page was busy was
+dropped and waited for the next three-second poll. It now runs as soon as the
+busy one finishes, so a stream you move or a cable you patch no longer
+sometimes takes seconds to show. The Dashboard also takes its first look
+120 ms after an action instead of 500 ms.
+
 ## [v0.6.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.1) — 2026-10-08
 **A `.deb` for Debian 13 and Ubuntu 26.04, channel maps for any device, and fixes for virtual surround that came out far too loud and filter chains that would not start**
 

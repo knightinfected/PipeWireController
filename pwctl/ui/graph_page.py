@@ -581,6 +581,7 @@ class GraphPage:
         self.window = window
         self._timer = None
         self._busy = False
+        self._again = False      # a refresh was asked for while one ran
 
         self.area = GraphArea(self)
         sw = Gtk.ScrolledWindow(hexpand=True, vexpand=True,
@@ -668,17 +669,26 @@ class GraphPage:
             self._timer = None
 
     def _tick(self):
-        if not (self.area.drag_node or self.area.drag_port):
+        # Skipped, not queued, when a snapshot is in flight: the next tick is
+        # 3 s away, and queueing would make a slow machine poll nonstop.
+        if not (self.area.drag_node or self.area.drag_port or self._busy):
             self.refresh()
         return True
 
     def refresh(self):
         if self._busy:
+            # The snapshot in flight may predate the patch this call is about
+            # (a link made or removed), so take one more when it lands rather
+            # than drop the call until the next tick.
+            self._again = True
             return
         self._busy = True
 
         def done(g, error):
             self._busy = False
+            if self._again:
+                self._again = False
+                self.refresh()
             if error or g is None:
                 return
             self.area.set_graph(g)

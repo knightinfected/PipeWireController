@@ -16,6 +16,7 @@ and the saved `dashboard_tab` pref both accept them and resolve onto the new
 
 from __future__ import annotations
 
+import dataclasses
 import os
 
 import gi
@@ -26,8 +27,8 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from ..backend import chains, enhance, paths, prefs, pw, surround, system, virtual
 from .volume import VOLUME_STYLES, make_volume
-from .widgets import (ColumnBox, GraceMixin, RowSync, async_call, device_icon,
-                      esc, micro,
+from .widgets import (LOCAL_GRACE, ColumnBox, GraceMixin, RowSync, async_call,
+                      device_icon, esc, micro,
                       page_scroller, pill, state_style)
 
 SERVICES = [('pipewire.service', 'PipeWire'),
@@ -49,6 +50,14 @@ _LEGACY_TABS = {
 # shell out (systemctl per object), so they run every Nth tick instead of every
 # tick — the fast half is one pw-dump, which now carries the volumes too.
 SLOW_EVERY = 4
+
+# When to look at the graph again after an action.  Early, because a default
+# change is in the graph ~60 ms after wpctl returns (measured), and a profile
+# switch or a chain restart is over within 90 ms on ALSA.  Then again at the
+# 500 ms this page always waited, for whatever has not been timed: streams
+# following a new default, a Bluetooth profile, a stream move.
+SOON_MS = 120
+SETTLE_MS = 500
 
 
 def _app_icon(name):
@@ -418,10 +427,17 @@ class _DeviceRow(_VolumeRowBase):
                        f'Port: {label}' if ok and not e else 'Port change failed'))
 
     def _on_default(self, _btn):
-        nid, window = self.node_id, self.tab.dash.window
-        async_call(lambda: pw.set_default(nid),
-                   lambda ok, e: (window.toast('Default device changed'),
-                                  self.tab.dash.refresh_soon()))
+        self.tab.dash.set_default(self.node_id, self.tab.sinks)
+
+    def paint_star(self, is_default):
+        self.star.set_icon_name('starred-symbolic' if is_default
+                                else 'non-starred-symbolic')
+        self.star.set_tooltip_text('Default device' if is_default
+                                   else 'Make default')
+        if is_default:
+            self.star.add_css_class('star-active')
+        else:
+            self.star.remove_css_class('star-active')
 
     def update(self, node, outs=None):
         """`outs` is (output stream id, current destination id, choices) for a
@@ -473,14 +489,7 @@ class _DeviceRow(_VolumeRowBase):
                 self.port_dd.set_selected(
                     idx if idx is not None else Gtk.INVALID_LIST_POSITION)
 
-            self.star.set_icon_name('starred-symbolic' if node.is_default
-                                    else 'non-starred-symbolic')
-            self.star.set_tooltip_text('Default device' if node.is_default
-                                       else 'Make default')
-            if node.is_default:
-                self.star.add_css_class('star-active')
-            else:
-                self.star.remove_css_class('star-active')
+            self.paint_star(node.is_default)
             self.set_levels(node.volume, node.muted)
         finally:
             self.updating = False
@@ -918,10 +927,7 @@ class _EndpointCard:
 
     def _pick(self, _row, node_id, dlg):
         dlg.close()
-        window = self.dash.window
-        async_call(lambda: pw.set_default(node_id),
-                   lambda ok, e: (window.toast('Default device changed'),
-                                  self.dash.refresh_soon()))
+        self.dash.set_default(node_id, self.sink)
 
     def update(self, node, nodes, in_grace):
         self._nodes = nodes
@@ -1202,7 +1208,10 @@ class Dashboard:
         self.window = window
         self._timer = None
         self._busy = False
-        self._soon = None
+        self._again = False      # a refresh was asked for while one ran
+        self._soon = {}          # wait in ms -> its pending timer
+        self._last_nodes = []    # what the last refresh drew, for a local paint
+        self._held_default = {}  # is_sink -> (node id, when it was clicked)
         self._calc_init = False
         self._tick_n = 0
         self._slow = {}          # last slow-tier result, reused between ticks
@@ -1685,7 +1694,7 @@ class Dashboard:
         async_call(system.restart_pipewire,
                    lambda r, e: (self.window.toast(
                        'Audio restarted' if not e else f'Restart failed: {e}'),
-                       self.refresh_soon()))
+                       self.refresh_soon(early=False)))
 
     # --------------------------------------------------- latency calculator --
     CALC_RATES = [44100, 48000, 88200, 96000, 176400, 192000]
@@ -1766,8 +1775,63 @@ class Dashboard:
                                   + (f': {detail}' if detail else ''))
             else:
                 self.window.toast(f'{label} restarted')
-            self.refresh_soon()
+            self.refresh_soon(early=False)
         async_call(lambda: system.restart_unit(unit), done)
+
+    # ------------------------------------------------------- default device --
+    def set_default(self, node_id, sink):
+        """Make a device the default, and show it at the click.
+
+        The graph only has the new default a little after wpctl returns, so
+        without this the star and the card waited for the next refresh to
+        move.  It is painted now and held until a refresh confirms it, for
+        LOCAL_GRACE at most: a poll that started before the click would
+        otherwise put the old default back for a moment.
+        """
+        self._held_default[sink] = (node_id, GLib.get_monotonic_time() / 1e6)
+        self._paint_default(self._with_held_default(self._last_nodes))
+
+        def done(ok, error):
+            if ok and not error:
+                self.window.toast('Default device changed')
+            else:
+                self.window.toast('Could not set default')
+                self._held_default.pop(sink, None)
+                self._paint_default(self._with_held_default(self._last_nodes))
+            self.refresh_soon()
+        async_call(lambda: pw.set_default(node_id), done)
+
+    def _with_held_default(self, nodes):
+        """`nodes` with a just-clicked default shown as the default.
+
+        A hold ends when the graph agrees with it or LOCAL_GRACE runs out,
+        whichever is first, so a default changed elsewhere straight after is
+        not ignored for long.
+        """
+        now = GLib.get_monotonic_time() / 1e6
+        for sink, (nid, ts) in list(self._held_default.items()):
+            same_way = [n for n in nodes if n.is_sink == sink]
+            if (now - ts >= LOCAL_GRACE
+                    or any(n.id == nid and n.is_default for n in same_way)):
+                del self._held_default[sink]
+                continue
+            nodes = [dataclasses.replace(n, is_default=(n.id == nid))
+                     if n.is_sink == sink else n for n in nodes]
+        return nodes
+
+    def _paint_default(self, nodes):
+        """Repaint only what shows which device is the default."""
+        if not nodes:            # nothing drawn yet, so nothing to repaint
+            return
+        for ep, sink in ((self.out_card, True), (self.in_card, False)):
+            node = next((n for n in nodes
+                         if n.is_sink == sink and n.is_default), None)
+            ep.update(node, nodes, self.local_grace)
+        default_ids = {n.id for n in nodes if n.is_default}
+        for tab in (self.outputs, self.inputs):
+            for row in tab.rows.values():
+                if isinstance(row, _DeviceRow):
+                    row.paint_star(row.node_id in default_ids)
 
     # -------------------------------------------------------------- refresh --
     def _on_map(self, *_a):
@@ -1781,22 +1845,40 @@ class Dashboard:
             self._timer = None
 
     def _tick(self):
-        self.refresh()
+        # A tick that finds a collect in flight is skipped, not queued: the
+        # next one is 3 s away, and queueing it would turn a slow machine's
+        # poll into a continuous one.
+        if not self._busy:
+            self.refresh()
         return True
 
-    def refresh_soon(self):
-        """One quick refresh shortly after an action (move/default/port)."""
-        if self._soon:
-            return
+    def refresh_soon(self, early=True):
+        """Look again shortly after an action (move/default/port/profile).
 
-        def fire():
-            self._soon = None
+        At SOON_MS and at SETTLE_MS (see there), so nothing shows later than
+        it did with the single 500 ms look.  A restart skips the early one:
+        devices come back one at a time over ~300 ms, and a look in the
+        middle would draw half of them.  Another action before these fire
+        starts both waits again, so the looks come after the last action.
+        """
+        for tid in self._soon.values():
+            GLib.source_remove(tid)
+        self._soon = {}
+
+        def fire(ms):
+            self._soon.pop(ms, None)
             self.refresh()
             return False
-        self._soon = GLib.timeout_add(500, fire)
+        for ms in ((SOON_MS, SETTLE_MS) if early else (SETTLE_MS,)):
+            self._soon[ms] = GLib.timeout_add(ms, fire, ms)
 
     def refresh(self):
         if self._busy:
+            # The collect in flight may have read the graph before the change
+            # this call is about.  Run once more when it lands: a dropped call
+            # used to wait for the next tick, up to 3 s.  One flag, so any
+            # number of calls meanwhile still costs a single extra collect.
+            self._again = True
             return
         self._busy = True
         # The slow tier shells out once per service and once per managed
@@ -1841,6 +1923,9 @@ class Dashboard:
 
     def _apply(self, data, error):
         self._busy = False
+        if self._again:
+            self._again = False
+            self.refresh()
         if error or not data:
             return
         if 'states' in data:
@@ -1912,7 +1997,8 @@ class Dashboard:
             self.alert.set_visible(False)
 
         # -- default endpoints -------------------------------------------
-        nodes = data['nodes']
+        self._last_nodes = data['nodes']
+        nodes = self._with_held_default(data['nodes'])
         in_grace = self.local_grace
         for ep, want_sink in ((self.out_card, True), (self.in_card, False)):
             node = next((n for n in nodes

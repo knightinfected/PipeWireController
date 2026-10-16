@@ -908,6 +908,7 @@ class PathsPage:
         self._focus_timer = 0
         self._poll = 0                  # periodic refresh while on screen
         self._busy = False              # a collect() is already in flight
+        self._again = False             # ...and another was asked for meanwhile
         self._soon = 0                  # extra refresh after a unit restart
         self._dragging = False
         self._sig = None                # last rendered structural signature
@@ -1191,7 +1192,10 @@ class PathsPage:
             self._poll = 0
 
     def _tick(self):
-        self.refresh()
+        # Skipped, not queued, when a collect is in flight: the next tick is
+        # POLL_SEC away, and queueing would make a slow machine poll nonstop.
+        if not self._busy:
+            self.refresh()
         return True
 
     def refresh_soon(self):
@@ -1215,6 +1219,9 @@ class PathsPage:
 
     def refresh(self):
         if self._busy:
+            # The collect in flight may predate the change this call is about,
+            # so run once more when it lands rather than drop the call.
+            self._again = True
             return
         self._busy = True
 
@@ -1249,6 +1256,9 @@ class PathsPage:
 
     def _apply(self, payload, error):
         self._busy = False
+        if self._again:
+            self._again = False
+            self.refresh()
         if error or payload is None:
             return
         self._strips, self._states, self._nodes, self._streams = payload
