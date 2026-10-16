@@ -20,8 +20,43 @@ SETTINGS_KEYS = (
 )
 
 
-def read_settings() -> dict:
-    """Runtime settings from the `settings` metadata (pw-metadata -n settings)."""
+def _dump_metadata(dump, name):
+    """{key: value} for the `name` metadata's subject-0 entries in a pw-dump.
+
+    None when the dump has no such object (pw-dump failed, or the list is not
+    a whole dump): that is "cannot tell", and the readers below then ask
+    pw-metadata as they always did.  pw-dump has already parsed the values,
+    so a JSON object arrives as a dict and a plain number as a number.
+    """
+    for obj in dump or ():
+        if (obj.get('type') == 'PipeWire:Interface:Metadata'
+                and (obj.get('props') or {}).get('metadata.name') == name):
+            return {e.get('key'): e.get('value')
+                    for e in obj.get('metadata') or ()
+                    if e.get('subject') == 0}
+    return None
+
+
+def _meta_text(value) -> str:
+    """A value from the dump, as text, the way pw-metadata gives it.
+
+    pw-dump has turned numbers into numbers, and their exact text is gone:
+    '0256' comes back '256' and '1.50' as '1.5' (measured on 1.0.5, 1.4.2
+    and 1.6.2).  Whatever int() makes of the one, it makes of the other.
+    """
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+def read_settings(dump=None) -> dict:
+    """Runtime settings from the `settings` metadata, as text.
+
+    Read from `dump` when it carries them, which saves the Dashboard a
+    pw-metadata process on every refresh.  Numbers are normalised then (see
+    _meta_text), so a page that shows the text itself should not pass one.
+    """
+    meta = _dump_metadata(dump, 'settings')
+    if meta is not None:
+        return {k: _meta_text(v) for k, v in meta.items()}
     rc, out, _ = run(['pw-metadata', '-n', 'settings'])
     vals = {}
     if rc == 0:
@@ -35,8 +70,30 @@ def set_setting(key: str, value) -> bool:
     return rc == 0
 
 
-def read_default_names() -> dict:
-    """Default sink/source node names from the `default` metadata."""
+_DEFAULT_KEY = re.compile(r'default\.[\w.]+')
+
+
+def read_default_names(dump=None) -> dict:
+    """Default sink/source node names from the `default` metadata.
+
+    Read from `dump` when it carries that metadata, which saves a pw-metadata
+    process on every list_audio_nodes() call, and takes the defaults from the
+    same moment as the nodes they point at.
+    """
+    meta = _dump_metadata(dump, 'default')
+    if meta is not None:
+        res = {}
+        for key, value in meta.items():
+            if not _DEFAULT_KEY.fullmatch(key or ''):
+                continue
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except ValueError:
+                    continue
+            if isinstance(value, dict):
+                res[key] = value.get('name')
+        return res
     rc, out, _ = run(['pw-metadata', '-n', 'default'])
     res = {}
     if rc == 0:
@@ -195,7 +252,7 @@ def dump_volume(obj) -> tuple[float, bool] | None:
 
 def list_audio_nodes(dump=None) -> list[AudioNode]:
     dump = dump if dump is not None else pw_dump()
-    defaults = read_default_names()
+    defaults = read_default_names(dump)
     def_sink = defaults.get('default.audio.sink')
     def_source = defaults.get('default.audio.source')
     routes = _device_routes(dump)

@@ -1889,8 +1889,8 @@ class Dashboard:
 
         def collect():
             data = {}
-            data['settings'] = pw.read_settings()
             dump = pw.pw_dump()
+            data['settings'] = pw.read_settings(dump)
             data['driver'] = pw.driver_clock(dump)
             data['nodes'] = pw.list_audio_nodes(dump)
             # Apps only: everything the Dashboard draws from this list — the

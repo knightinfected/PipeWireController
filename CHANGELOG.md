@@ -58,6 +58,15 @@ busy one finishes, so a stream you move or a cable you patch no longer
 sometimes takes seconds to show. The Dashboard also takes its first look
 120 ms after an action instead of 500 ms.
 
+**Fewer processes on every refresh**
+
+To find out which devices are the defaults, every page that lists devices
+started a separate `pw-metadata` process each time it refreshed, and the
+Dashboard started a second one for the clock settings. Both answers were
+already in the snapshot of the audio graph the page had just taken, and are
+now read from there. A Dashboard refresh starts two fewer processes, and
+Devices and Signal Paths one fewer, each about 8 ms of CPU.
+
 ## [v0.6.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.1) — 2026-10-08
 **A `.deb` for Debian 13 and Ubuntu 26.04, channel maps for any device, and fixes for virtual surround that came out far too loud and filter chains that would not start**
 
