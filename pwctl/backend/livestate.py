@@ -30,9 +30,12 @@ The listeners exit when PipeWire restarts (rc 0, after announcing every
 object as removed).  Each is respawned with backoff (100 ms -> 2 s), and
 until the graph has been quiet for 300 ms (2 s at most) after that, rings
 wait, because the first dump after a restart is partial (5, then 7, then 9
-audio nodes by 294 ms).  A graph listener that keeps failing to start puts
-a 3 s timer behind the same interface, and a 30 s re-read runs regardless,
-for any gap nobody has found yet.
+audio nodes by 294 ms).  A graph listener that keeps failing to start, or
+that starts and says nothing for 5 s (stalled, or printing in a shape the
+line framer can't split), puts a 3 s timer behind the same interface.  After
+ten failed starts in a row a listener is retried every 30 s instead of every
+2 s, so one that can never run costs two processes a minute, not thirty.  A
+30 s re-read runs regardless, for any gap nobody has found yet.
 
 subscribe() answers None when `pw-dump` is not installed: the caller keeps
 its own timer.  Nothing is cached.  Call everything from the main thread;
@@ -71,13 +74,30 @@ QUIET_MS, CAP_MS = 50, 500                  # bursts end <= 90 ms, gaps <= 24
 MIN_GAP_MS = 500
 SETTLE_QUIET_MS, SETTLE_CAP_MS = 300, 2000  # after a listener died
 BACKOFF_MS, BACKOFF_MAX_MS = 100, 2000
+# The graph listener prints the whole graph first: 59 ms median, 144 ms at
+# worst with the machine 4x overloaded (measured 2026-10-17).  One still
+# silent after this has stalled, or its framing changed: no change it sees
+# would ever ring, so it counts as a failed start.
+PRIME_S = 5
 SAFETY_S = 30
 FALLBACK_AFTER = 3          # failed graph starts in a row before the timer
 FALLBACK_S = 3
+# ~11 s of backoff.  Past it the server is up and the listener can't run, or
+# the server has been gone a while; either way the fallback timer delivers.
+SLOW_AFTER = 10
+SLOW_RETRY_S = 30
 
 
 def _now_ms() -> int:
     return GLib.get_monotonic_time() // 1000
+
+
+def respawn_delay_ms(fails: int) -> int:
+    """The wait before restarting a listener after `fails` failed starts in
+    a row: 100 ms doubling to 2 s, then SLOW_RETRY_S from SLOW_AFTER on."""
+    if fails >= SLOW_AFTER:
+        return SLOW_RETRY_S * 1000
+    return min(BACKOFF_MS * 2 ** (max(fails, 1) - 1), BACKOFF_MAX_MS)
 
 
 def _short(kind) -> str | None:
@@ -200,6 +220,7 @@ class _Child:
         self.gen = gen
         self.proc = None
         self.primed = False         # it has said something since it started
+        self.prime_src = 0          # the graph listener's deadline for that
 
 
 class _Bell:
@@ -218,7 +239,8 @@ class _Bell:
         self.last_dump = -MIN_GAP_MS    # ms, when the last dump started
         self.safety_src = 0
         self.fallback_src = 0
-        self.stats = {'dumps': 0, 'delivered': 0, 'spawns': 0, 'rings': 0}
+        self.stats = {'dumps': 0, 'delivered': 0, 'spawns': 0, 'rings': 0,
+                      'stalls': 0}
 
     # ------------------------------------------------------------ children --
     def _spawn(self, kind) -> bool:
@@ -233,6 +255,11 @@ class _Bell:
             return False
         self.children[kind] = child
         self.stats['spawns'] += 1
+        if kind == 'graph':
+            # Not the metadata listener: with no `default` metadata yet (no
+            # sink, measured) it is silent and still correct.
+            child.prime_src = GLib.timeout_add(
+                PRIME_S * 1000, self._prime_due, child)
         reader = self._read_graph if kind == 'graph' else self._read_meta
         threading.Thread(target=reader, args=(child,), daemon=True).start()
         return True
@@ -286,6 +313,7 @@ class _Bell:
                 and self.children.get(child.kind) is child)
 
     def _primed(self, child):
+        _drop_source(child, 'prime_src')
         if self._current(child):
             child.primed = True
             self.fails[child.kind] = 0
@@ -301,6 +329,19 @@ class _Bell:
             self._ring()
         return False
 
+    def _prime_due(self, child):
+        child.prime_src = 0
+        if self._current(child) and not child.primed:
+            # Alive and silent.  Kill it: its exit counts as a failed start
+            # and respawns it.  Counted so this one exit starts the fallback
+            # timer, rather than leaving the page on the 30 s re-read while
+            # two more stalls run out their deadlines.
+            self.stats['stalls'] += 1
+            self.fails[child.kind] = max(self.fails[child.kind],
+                                         FALLBACK_AFTER - 1)
+            _kill(child.proc)
+        return False
+
     def _rebind_meta(self, graph):
         # WirePlumber made a new `default` metadata: the running pw-metadata
         # is bound to the old one and will never speak again.  Restart it; a
@@ -311,6 +352,7 @@ class _Bell:
         return False
 
     def _exited(self, child):
+        _drop_source(child, 'prime_src')
         if not self._current(child):
             return False
         del self.children[child.kind]
@@ -330,10 +372,8 @@ class _Bell:
                 and not self.fallback_src):
             self.fallback_src = GLib.timeout_add_seconds(
                 FALLBACK_S, self._fallback_tick)
-        n = max(self.fails[kind], 1)
-        delay = min(BACKOFF_MS * 2 ** (n - 1), BACKOFF_MAX_MS)
-        self.respawn_src[kind] = GLib.timeout_add(delay, self._respawn,
-                                                  kind, self.gen)
+        self.respawn_src[kind] = GLib.timeout_add(
+            respawn_delay_ms(self.fails[kind]), self._respawn, kind, self.gen)
 
     def _respawn(self, kind, gen):
         self.respawn_src[kind] = 0
@@ -440,14 +480,19 @@ class _Bell:
                 GLib.source_remove(src)
             self.respawn_src[kind] = 0
         for attr in ('safety_src', 'fallback_src'):
-            if getattr(self, attr):
-                GLib.source_remove(getattr(self, attr))
-                setattr(self, attr, 0)
+            _drop_source(self, attr)
         self._close_window()
         self.dumping = self.again = False
         self.settling = False
         for child in children:
+            _drop_source(child, 'prime_src')
             _kill(child.proc)
+
+
+def _drop_source(obj, attr):
+    if getattr(obj, attr):
+        GLib.source_remove(getattr(obj, attr))
+        setattr(obj, attr, 0)
 
 
 def _kill(proc):
