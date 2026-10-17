@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=PipeWire Controller
-Comment=Configure PipeWire, filter chains and HRIR virtual surround without editing files
+Comment=Mix, route, process and tune your audio without editing config files
 Exec=pipewire-control-center
 Icon=audio-card
 Terminal=false
