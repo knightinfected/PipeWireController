@@ -56,9 +56,9 @@ body:
     attributes:
       label: System info
       description: |
-        Paste the output of this **one command** (it just prints versions — copy the whole result):
+        Paste the output of this **one command** (it just prints versions, and works in any shell — copy the whole result):
         ```
-        { . /etc/os-release; echo "distro: $PRETTY_NAME"; echo "pipewire: $(pipewire --version | tail -1)"; echo "wireplumber: $(wireplumber --version | tail -1)"; }
+        sh -c '. /etc/os-release; echo "distro: $PRETTY_NAME"; echo "pipewire: $(pipewire --version | tail -1)"; echo "wireplumber: $(wireplumber --version | tail -1)"'
         ```
         Also tell us the **PipeWire Controller version** (it's in the app under **Tools → About**).
       render: text
