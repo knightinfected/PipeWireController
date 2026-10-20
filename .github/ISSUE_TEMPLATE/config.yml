@@ -3,3 +3,6 @@ contact_links:
   - name: 📌 Known issues & status
     url: https://github.com/knightinfected/PipeWireController/issues/1
     about: Check here first — your problem may already be tracked, with a status.
+  - name: 📦 Can't install it?
+    url: https://github.com/knightinfected/PipeWireController#requirements
+    about: Check your distro is new enough first. The app needs libadwaita 1.7+ and WirePlumber 0.5+, so Debian 12, Ubuntu 24.04 and Linux Mint 22 are too old.
