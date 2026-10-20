@@ -98,6 +98,10 @@ paru -S pipewire-control-center   # or: yay -S pipewire-control-center
 <details>
 <summary><b>Debian 13+, Ubuntu 26.04 LTS+</b> (.deb)</summary>
 
+Debian 12, Ubuntu 24.04 and Linux Mint 22 are too old, and apt will refuse the
+package. To check yours first, run `apt-cache policy gir1.2-adw-1`: the
+*Candidate* line needs to show 1.7 or newer.
+
 Download the `.deb` from the [latest release](https://github.com/knightinfected/PipeWireController/releases/latest),
 then, in the folder you saved it to:
 
@@ -161,7 +165,8 @@ Optional extras: `noise-suppression-for-voice` (the RNNoise mic template),
 ### Requirements
 
 PipeWire 1.0+, WirePlumber 0.5+ and **libadwaita 1.7+**, which rules out
-Debian 12 and Ubuntu 24.04. Python 3.10+, and no build step.
+Debian 12, Ubuntu 24.04 and Linux Mint 22 (built on Ubuntu 24.04). Python
+3.10+, and no build step.
 
 ## Questions
 
