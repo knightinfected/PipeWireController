@@ -162,6 +162,9 @@ writer for it didn't follow PipeWire's rules in a few places:
   can read differently. Numbers are also read the way PipeWire's config
   reader reads them: `0x10` is 16 rather than text, and `inf` and `nan` are
   words rather than numbers.
+- **Swapping the HRIR file of an imported chain** to a file whose path holds
+  a `"` or a `\` gave PipeWire a cut-off file name, or a config it refused.
+  The path is now written so PipeWire reads it back whole.
 
 **Configs PipeWire would refuse are caught before they're used**
 

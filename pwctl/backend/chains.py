@@ -163,11 +163,19 @@ def stamp_gain(meta: ChainMeta) -> float | None:
 
 # ------------------------------------------------------------- generation --
 
+# A quoted filename, escaped quotes and all, that is not one of PipeWire's
+# builtin IRs (/hilbert, /dirac, /ir:...).
+_FILENAME_RE = re.compile(
+    r'(filename\s*=\s*)"(?![/]hilbert|[/]dirac|[/]ir:)(?:[^"\\]|\\.)*"')
+
+
 def _rewrite_filenames(conf_text: str, new_path: str) -> str:
     """Swap every convolver/spatializer filename in a raw conf (regex-based,
-    so the user's own comments and formatting are preserved)."""
-    pat = re.compile(r'(filename\s*=\s*)"(?![/]hilbert|[/]dirac|[/]ir:)[^"]*"')
-    return pat.sub(lambda m: f'{m.group(1)}"{new_path}"', conf_text)
+    so the user's own comments and formatting are preserved).  The new path
+    is quoted the way PipeWire reads it back: a `"` or `\\` in it would
+    otherwise cut the filename short or make PipeWire refuse the conf."""
+    return _FILENAME_RE.sub(
+        lambda m: m.group(1) + spa_json.quote(new_path), conf_text)
 
 
 def generate(meta: ChainMeta):
