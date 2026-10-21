@@ -211,8 +211,11 @@ class ChainsPage:
                   'Drop-ins detected in your pipewire config folders.')
         for path in found:
             info = chains.sniff_conf(path)
+            sub = esc(path)
+            if info['error']:
+                sub += '\n' + esc(f'PipeWire would refuse it: {info["error"]}')
             row = Adw.ActionRow(
-                title=info['name'], subtitle=str(path),
+                title=esc(info['name']), subtitle=sub, subtitle_lines=2,
                 sensitive=info['valid'])
             btn = Gtk.Button(label='Import')
             btn.set_valign(Gtk.Align.CENTER)
@@ -247,10 +250,12 @@ class ChainsPage:
         def picked(path):
             meta = chains.import_conf(path)
             if meta:
-                self.window.toast(f'Imported {meta.name}')
+                self.window.toast(esc(f'Imported {meta.name}'))
                 self.refresh()
-            else:
-                self.window.toast('Not a valid filter-chain config')
+                return
+            err = chains.sniff_conf(path)['error']
+            self.window.toast(esc(f'PipeWire would refuse this config: {err}')
+                              if err else 'Not a valid filter-chain config')
         pick_file(self.window, 'Import filter-chain .conf', picked,
                   filters=[('PipeWire configs', ['*.conf'])])
 
@@ -605,7 +610,7 @@ class ChainDialog(Adw.Dialog):
             try:
                 spa_json.loads(text)
             except spa_json.SpaJsonError as e:
-                self.window.toast(f'Invalid SPA JSON: {e}')
+                self.window.toast(esc(f'Invalid SPA JSON: {e}'))
                 return False
             self.meta.params['raw_text'] = text
             self.window.toast('Config text updated — save to apply')

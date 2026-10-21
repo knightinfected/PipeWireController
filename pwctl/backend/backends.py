@@ -248,7 +248,12 @@ def explain(conf) -> str:
     Written to replace systemd's "control process exited with error code",
     which is what the user sees today and names neither the cause nor the cure.
     """
-    missing = missing_backends(conf)
+    from pwctl import spa_json
+    try:
+        missing = missing_backends(conf)
+    except spa_json.SpaJsonError as e:
+        return (f'The generated config has an error PipeWire refuses ({e}). '
+                f'Saving it again from the app rewrites it.')
     if not missing:
         return ''
     parts = []

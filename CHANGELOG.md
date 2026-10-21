@@ -163,6 +163,25 @@ writer for it didn't follow PipeWire's rules in a few places:
   reader reads them: `0x10` is 16 rather than text, and `inf` and `nan` are
   words rather than numbers.
 
+**Configs PipeWire would refuse are caught before they're used**
+
+The app's check of a config now refuses what PipeWire refuses: an unknown
+escape such as `\x`, a raw tab or line break inside quotes, or an accented
+letter or backslash outside quotes. PipeWire skips a file like that
+entirely. Before, the app accepted it and the filter chain or device then
+failed without saying why. Now:
+
+- **The raw config editor** says what is wrong and on which line, and
+  doesn't save.
+- **Importing** shows such a file greyed out with the reason, and choosing
+  one from a file says why it can't be imported.
+- **The Settings pages** no longer show values from a drop-in PipeWire
+  skips.
+- **Configs you already have keep working.** An imported chain that only ran
+  because the app rewrote it still gets rewritten the same way, and the
+  app's own settings files are read as before and written back in the form
+  PipeWire accepts.
+
 ## [v0.6.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.1) — 2026-10-08
 **A `.deb` for Debian 13 and Ubuntu 26.04, channel maps for any device, and fixes for virtual surround that came out far too loud and filter chains that would not start**
 

@@ -12,6 +12,11 @@ numbers.  A number keeps the text it was written as, and the serializer writes
 that text back, so a parsed file keeps its numbers exactly.  That matters
 because PipeWire stores a value's text and each reader decides what it means:
 the daemon reads its clock settings with atoi(), so `0x400` is 0 there.
+
+By default the parser also refuses what PipeWire refuses: an unknown escape, a
+raw control character inside quotes, or a backslash or non-ASCII character
+outside them.  PipeWire skips a drop-in like that entirely.  `strict=False`
+accepts them, for re-reading text the app stored before this check existed.
 """
 
 from __future__ import annotations
@@ -54,6 +59,11 @@ _ESCAPES = {'n': '\n', 'r': '\r', 'b': '\b', 't': '\t', 'f': '\f',
 _HEX = set('0123456789abcdefABCDEF')
 
 
+def _refuse(text: str, i: int, what: str):
+    line = text.count('\n', 0, i) + 1
+    raise SpaJsonError(f'line {line}: {what}')
+
+
 def _hex4(text: str, i: int):
     s = text[i:i + 4]
     if len(s) == 4 and all(ch in _HEX for ch in s):
@@ -61,7 +71,7 @@ def _hex4(text: str, i: int):
     return None
 
 
-def _string(text: str, i: int):
+def _string(text: str, i: int, strict: bool):
     """Decode the string whose opening quote is at i -> (value, next index).
 
     Mirrors spa_json_parse_stringn: a malformed \\u keeps the 'u', and a
@@ -73,6 +83,9 @@ def _string(text: str, i: int):
     while j < n and text[j] != '"':
         ch = text[j]
         if ch != '\\' or j + 1 >= n:
+            if strict and ord(ch) < 32:
+                _refuse(text, j, f'control character {ch!r} inside quotes '
+                                 f'(write it as an escape)')
             buf.append(ch)
             j += 1
             continue
@@ -80,6 +93,8 @@ def _string(text: str, i: int):
         if esc != 'u':
             if esc in _ESCAPES:
                 buf.append(_ESCAPES[esc])
+            elif strict:
+                _refuse(text, j, f'unknown escape \\{esc}')
             else:
                 buf.append(esc)
             j += 2
@@ -104,7 +119,7 @@ def _string(text: str, i: int):
     return ''.join(buf), j + 1
 
 
-def _tokenize(text: str):
+def _tokenize(text: str, strict: bool):
     tokens = []
     i, n = 0, len(text)
     while i < n:
@@ -118,11 +133,13 @@ def _tokenize(text: str):
             tokens.append(('=' if c == ':' else c, c))
             i += 1
         elif c == '"':
-            val, i = _string(text, i)
+            val, i = _string(text, i, strict)
             tokens.append(('str', val))
         else:
             j = i
             while j < n and text[j] not in _BARE_END:
+                if strict and (text[j] == '\\' or not 32 <= ord(text[j]) <= 126):
+                    _refuse(text, j, f'{text[j]!r} outside quotes')
                 j += 1
             tokens.append(('bare', text[i:j]))
             i = j
@@ -217,9 +234,9 @@ class _Parser:
             arr.append(self.parse_value())
 
 
-def loads(text: str):
+def loads(text: str, strict: bool = True):
     """Parse SPA JSON text. Top level may be a bare object body."""
-    tokens = _tokenize(text)
+    tokens = _tokenize(text, strict)
     if not tokens:
         return {}
     p = _Parser(tokens)
@@ -234,9 +251,9 @@ def loads(text: str):
     return p.parse_object(until=None)
 
 
-def load_file(path):
+def load_file(path, strict: bool = True):
     with open(path, 'r', encoding='utf-8', errors='replace') as f:
-        return loads(f.read())
+        return loads(f.read(), strict)
 
 
 _SAFE_BARE = set('abcdefghijklmnopqrstuvwxyz'

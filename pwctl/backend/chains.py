@@ -188,8 +188,12 @@ def generate(meta: ChainMeta):
 
 def _wrap_raw(raw: str, meta: ChainMeta) -> str:
     """Imported drop-ins only contain context.modules; a standalone process
-    also needs the base modules. Merge them if missing."""
-    data = spa_json.loads(raw)
+    also needs the base modules. Merge them if missing.
+
+    Read leniently: the raw text may predate the strict check, and the
+    rewrite below turns what PipeWire would refuse into what it accepts.
+    Imports and the raw editor check strictly before text gets stored."""
+    data = spa_json.loads(raw, strict=False)
     mods = data.get('context.modules')
     if not isinstance(mods, list):
         raise spa_json.SpaJsonError('no context.modules section found')
@@ -328,10 +332,12 @@ def clone(meta: ChainMeta) -> ChainMeta:
 def sniff_conf(path) -> dict:
     """Inspect an existing filter-chain .conf: name + IR files it references."""
     text = Path(path).read_text(encoding='utf-8', errors='replace')
-    info = {'text': text, 'name': Path(path).stem, 'irs': [], 'valid': False}
+    info = {'text': text, 'name': Path(path).stem, 'irs': [], 'valid': False,
+            'error': ''}
     try:
         data = spa_json.loads(text)
-    except spa_json.SpaJsonError:
+    except spa_json.SpaJsonError as e:
+        info['error'] = str(e)
         return info
     mods = data.get('context.modules')
     if not isinstance(mods, list):

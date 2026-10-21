@@ -644,11 +644,15 @@ def sniff_conf(path) -> dict:
     and null-audio-sink adapters.  Returns {'name', 'devices': [spec, …],
     'valid'} — `valid` is True when at least one device was recognised.
     """
-    info = {'name': Path(path).stem, 'devices': [], 'valid': False}
+    info = {'name': Path(path).stem, 'devices': [], 'valid': False,
+            'error': ''}
     try:
         text = Path(path).read_text(encoding='utf-8', errors='replace')
         data = spa_json.loads(text)
-    except (OSError, spa_json.SpaJsonError):
+    except OSError:
+        return info
+    except spa_json.SpaJsonError as e:
+        info['error'] = str(e)
         return info
     if not isinstance(data, dict):
         return info

@@ -81,7 +81,10 @@ def read_our_dropin(conf_name: str, dirs=PW_DIRS) -> dict:
     if not p.is_file():
         return {}
     try:
-        return spa_json.load_file(p)
+        # Lenient: a drop-in an older version wrote with a raw control
+        # character is read whole and written back escaped.  Reading it as {}
+        # would drop every other override on the next write.
+        return spa_json.load_file(p, strict=False)
     except spa_json.SpaJsonError:
         return {}
 

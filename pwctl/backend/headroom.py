@@ -287,7 +287,7 @@ def for_template(template: str, hrir: str, hrir_channels: int = 0,
 def for_raw(raw_text: str) -> Headroom:
     """An imported config, measured as written."""
     try:
-        data = spa_json.loads(raw_text)
+        data = spa_json.loads(raw_text, strict=False)     # as _wrap_raw reads it
     except spa_json.SpaJsonError as e:
         raise Unmeasurable(f'the config does not parse: {e}') from None
     graphs = [(m.get('args') or {}).get('filter.graph')

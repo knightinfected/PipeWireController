@@ -175,10 +175,12 @@ class VirtualPage:
             kinds = ' · '.join(dict.fromkeys(
                 virtual.KINDS.get(d['kind'], d['kind']).split(' (')[0]
                 for d in info['devices']))
-            row = Adw.ActionRow(title=', '.join(d['name']
-                                                for d in info['devices'])
-                                or info['name'],
-                                subtitle=f'{kinds}\n{path}',
+            first = (esc(f'PipeWire would refuse it: {info["error"]}')
+                     if info['error'] else esc(kinds))
+            row = Adw.ActionRow(title=esc(', '.join(d['name']
+                                                    for d in info['devices'])
+                                          or info['name']),
+                                subtitle=f'{first}\n{esc(path)}',
                                 subtitle_lines=2, sensitive=info['valid'])
             btn = Gtk.Button(label='Import', valign=Gtk.Align.CENTER)
 
@@ -209,16 +211,25 @@ class VirtualPage:
                   initial_folder=str(virtual.IMPORT_DIRS[0]))
 
     def _do_import(self, path):
-        def done(devs, error):
+        def work():
+            devs = virtual.import_conf(path)
+            return devs, ('' if devs else virtual.sniff_conf(path)['error'])
+
+        def done(result, error):
+            devs, refused = result if result else ([], '')
+            if refused:
+                self.window.toast(esc(f'PipeWire would refuse that config: '
+                                      f'{refused}'))
+                return
             if error or not devs:
                 self.window.toast('No virtual device found in that config')
                 return
             names = ', '.join(d.name for d in devs)
-            self.window.toast(f'Imported {names} (disabled) — restart '
-                              'PipeWire, then enable it')
+            self.window.toast(esc(f'Imported {names} (disabled) — restart '
+                                  'PipeWire, then enable it'))
             self.window.flag_restart('pipewire')
             self.refresh()
-        async_call(lambda: virtual.import_conf(path), done)
+        async_call(work, done)
 
 
 class VirtualDialog(Adw.Window):
