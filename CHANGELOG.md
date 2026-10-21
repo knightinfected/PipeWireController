@@ -142,6 +142,27 @@ opens, and none of those releases open a window at all on libadwaita 1.5.
 The message now names v0.3.6, the last release that runs on libadwaita 1.5
 or 1.6, and on anything older it no longer suggests a release.
 
+**Bug: a name with a tab or line break in it stopped the device from
+starting**
+
+Config files are written in PipeWire's own format, and the app's reader and
+writer for it didn't follow PipeWire's rules in a few places:
+
+- **A name with a tab or line break** (easy to paste into a name field) was
+  written into the config as it was. PipeWire refuses a config like that
+  entirely, so the filter chain, virtual device or equalizer never started,
+  even though the app's own check before saving passed it. Such characters
+  are now written in the escaped form PipeWire reads back.
+- **Importing a config** that writes a character as an escape, such as
+  `\u00e9` for "é", showed and kept a garbled name. One with a `\n` escape
+  was turned into a config PipeWire refuses. Both now come through as
+  PipeWire reads them.
+- **Numbers keep the exact text they were written with** when an imported
+  config is saved again. Before, `1_000` came back as `1000`, which PipeWire
+  can read differently. Numbers are also read the way PipeWire's config
+  reader reads them: `0x10` is 16 rather than text, and `inf` and `nan` are
+  words rather than numbers.
+
 ## [v0.6.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.1) — 2026-10-08
 **A `.deb` for Debian 13 and Ubuntu 26.04, channel maps for any device, and fixes for virtual surround that came out far too loud and filter chains that would not start**
 
