@@ -23,6 +23,14 @@ import sys
 # this number; checking members as well as classes throws ~60 false positives.
 MIN_ADW = (1, 7)
 
+# The newest release that still runs below MIN_ADW, and what it needs. Measured
+# on 2026-10-20 in ubuntu:24.04 (libadwaita 1.5.0): v0.3.6 starts and every page
+# opens, while v0.4.0 to v0.6.1 open no window at all, because Signal Paths
+# (new in v0.4.0) is built with the window and needs Adw.WrapBox. v0.3.6's own
+# floor is 1.5 (Adw.Dialog and Adw.AlertDialog), derived from the GIR as above,
+# so below 1.5 no release is worth naming.
+OLDER_RELEASE = ('v0.3.6', (1, 5))
+
 REPO = 'https://github.com/knightinfected/PipeWireController'
 
 
@@ -72,16 +80,18 @@ def problem(found: tuple[int, ...] | None = None, _probe: bool = True):
     if found[:2] >= MIN_ADW:
         return None
 
-    return ('This version needs a newer libadwaita',
-            'PipeWire Controller needs libadwaita %s or newer.\n'
+    body = ('PipeWire Controller needs libadwaita %s or newer.\n'
             'This system has libadwaita %s.\n\n'
             'libadwaita comes from your distribution, not from this app. '
             'Debian 13, Ubuntu 26.04 LTS, Fedora 42, openSUSE Tumbleweed and '
             'Arch all ship 1.7 or newer; Ubuntu 24.04 LTS and Debian 12 do '
-            'not.\n\n'
-            'Releases before v0.6.0 do start on an older libadwaita, but the '
-            'Signal Paths page will not open.'
-            % (_fmt(MIN_ADW), _fmt(found)))
+            'not.' % (_fmt(MIN_ADW), _fmt(found)))
+    release, needs = OLDER_RELEASE
+    if found[:2] >= needs:
+        body += ('\n\nThe last release that runs on this libadwaita is %s, '
+                 'from before Signal Paths was added. It has none of the '
+                 'features or fixes since.' % release)
+    return ('This version needs a newer libadwaita', body)
 
 
 def cairo_problem():

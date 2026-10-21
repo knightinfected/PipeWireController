@@ -131,6 +131,17 @@ Every other place that shows whether a service or chain is running also
 reads it without starting `systemctl`. Where systemd is not on the session
 bus, the old checks still run.
 
+**Bug: the "needs a newer libadwaita" message pointed at releases that don't
+start either**
+
+On a system with libadwaita older than 1.7, such as Ubuntu 24.04 LTS or
+Linux Mint 22, the app explains why it can't start. That message said
+releases before v0.6.0 would still start there, with only Signal Paths
+missing. They don't: from v0.4.0 on, Signal Paths is built when the window
+opens, and none of those releases open a window at all on libadwaita 1.5.
+The message now names v0.3.6, the last release that runs on libadwaita 1.5
+or 1.6, and on anything older it no longer suggests a release.
+
 ## [v0.6.1](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.1) — 2026-10-08
 **A `.deb` for Debian 13 and Ubuntu 26.04, channel maps for any device, and fixes for virtual surround that came out far too loud and filter chains that would not start**
 
