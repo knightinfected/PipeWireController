@@ -13,6 +13,8 @@ DR-002 / DR-005 in the vault hold the design and the measurements.
 
 from __future__ import annotations
 
+import re
+
 MAX_VOL = 1.5           # the sliders' top end (150%), shared with ui.volume
 LEVEL_EPS = 1e-4        # channels closer than this count as level
 
@@ -25,11 +27,28 @@ CHANNEL_NAMES = {
 }
 
 
+_AUX = re.compile(r'AUX(\d+)$')
+
+
 def channel_name(position: str, index: int) -> str:
-    """'FL' -> 'Front left'; AUX3 and anything unknown is shown as-is."""
+    """'FL' -> 'Front left', 'AUX3' -> 'AUX 3'; anything unknown as-is."""
     if not position or position == 'UNK':
         return f'Channel {index + 1}'
+    aux = _AUX.match(position)
+    if aux:
+        return f'AUX {aux.group(1)}'
     return CHANNEL_NAMES.get(position, position)
+
+
+def is_left_right(positions, count: int) -> bool:
+    """Is this a pair a Balance slider makes sense for?
+
+    Two channels, neither of them a generic AUX channel.  A Pro Audio node's
+    pair is AUX0/AUX1: often two independent outputs of an interface, never
+    "left and right" by declaration, so it gets two channel sliders and no
+    balance (measured 2026-10-22 on this machine's card in pro-audio).
+    """
+    return count == 2 and not any(_AUX.match(p or '') for p in positions)
 
 
 def clamp(value: float) -> float:
@@ -139,6 +158,10 @@ class Levels:
     @property
     def level(self) -> bool:
         return is_level(self.chans)
+
+    @property
+    def left_right(self) -> bool:
+        return is_left_right(self.positions, self.count)
 
     def name(self, index: int) -> str:
         pos = self.positions[index] if index < len(self.positions) else ''

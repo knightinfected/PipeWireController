@@ -34,7 +34,8 @@ on, or AUX 0 to AUX 7 on a Pro Audio card. Use it to even out speakers that
 sit at different distances, turn down one side of a pair of headphones, or
 set two outputs of an audio interface to different levels. **Reset** puts
 every channel back to the same level. The Devices page has the same controls
-when you expand a device.
+when you expand a device. A pair of AUX channels gets two sliders and no
+Balance, because on a Pro Audio card they are often two separate outputs.
 
 - **Every other volume slider keeps your balance.** The main slider in the
   Mixer, the Overview's default-output card, Favourites, the Equalizer and

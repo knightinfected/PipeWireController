@@ -47,8 +47,8 @@ from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
 from ..backend import backends, balance, levels, path_templates, paths, \
     plugins, prefs, pw, rules, virtual
 from .volume import make_volume
-from .widgets import async_call, confirm, esc, group, icon_button, \
-    pick_file, pick_folder, pill, state_style
+from .widgets import LOCAL_GRACE, async_call, confirm, esc, group, \
+    icon_button, pick_file, pick_folder, pill, state_style
 
 _PLUGIN_CACHE: dict = {'all': None}
 
@@ -902,6 +902,8 @@ class PathsPage:
         self._nodes: list = []
         self._streams: list = []
         self._vols: dict = {}
+        # strip.id -> (balance.Levels, (node id, serial), [last touch])
+        self._chans: dict = {}
         self._cards: dict = {}          # strip.id -> card widget
         self._chips: dict = {}          # stage id -> chip widget
         self._rails: dict = {}          # strip.id -> chain rail widget
@@ -1265,6 +1267,7 @@ class PathsPage:
         if error or payload is None:
             return
         self._strips, self._states, self._nodes, self._streams = payload
+        self._sync_channels()
         # A rebuild replaces every card, which cancels a drag in flight, closes
         # the dialog's parent chip and restarts the level meters.  The poll
         # exists to catch the graph changing underneath, so it only rebuilds
@@ -1272,6 +1275,22 @@ class PathsPage:
         if self._signature() == self._sig or self._dragging or self._editing:
             return
         self._render()
+
+    def _sync_channels(self):
+        """Keep each strip's channel copy current; never the slider itself.
+
+        The board leaves a volume slider alone on a poll (see `_signature`),
+        but a master drag here scales from this copy, so it has to follow a
+        balance set on another page or in another app.  Otherwise the drag
+        would put the old balance back.  Skipped for a strip touched within
+        LOCAL_GRACE, so a delivery from before the drag can't override it.
+        """
+        now = GLib.get_monotonic_time() / 1e6
+        current = {(n.id, n.serial): n for n in self._nodes}
+        for chans, key, touched in self._chans.values():
+            node = current.get(key)
+            if node is not None and now - touched[0] >= LOCAL_GRACE:
+                chans.update(node.channels, node.channel_map)
 
     def _render(self):
         """Rebuild the board from what is already in memory.
@@ -1286,6 +1305,7 @@ class PathsPage:
         """
         self._sig = self._signature()
         self._vols = {}
+        self._chans = {}
         self._cards = {}
         self._chips = {}
         self._rails = {}
@@ -1854,14 +1874,23 @@ class PathsPage:
                                 active=node.muted, valign=Gtk.Align.CENTER,
                                 css_classes=['flat', 'circular'],
                                 tooltip_text='Mute')
-        mute.connect('toggled', lambda b, n=node: pw.set_mute(n.id,
-                                                              b.get_active()))
+
+        def mute_toggled(btn, n=node):
+            active = btn.get_active()       # read here, not in the thread
+            async_call(lambda: pw.set_mute(n.id, active))
+        mute.connect('toggled', mute_toggled)
         box.append(mute)
         chans = balance.Levels(node.channels, node.channel_map)
-        ctl = make_volume(self.volume_style,
-                          lambda v, n=node: pw.set_channel_volumes(
-                              n.id, chans.set_master(v), serial=n.serial,
-                              media_class=n.media_class))
+        touched = [0.0]
+        self._chans[strip.id] = (chans, (node.id, node.serial), touched)
+
+        def set_volume(value, n=node):
+            # keeps the balance; off the main loop like every other write
+            touched[0] = GLib.get_monotonic_time() / 1e6
+            values = chans.set_master(value)
+            async_call(lambda: pw.set_channel_volumes(
+                n.id, values, serial=n.serial, media_class=n.media_class))
+        ctl = make_volume(self.volume_style, set_volume)
         ctl.set_value(node.volume if node.volume is not None else 1.0)
         if node.serial and node.serial > 0 and not levels.at_capacity():
             ctl.set_meter(node.serial)

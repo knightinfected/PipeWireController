@@ -201,6 +201,14 @@ class DevicesPage:
         if is_hw or multichannel:
             row = Adw.ExpanderRow(title=esc(node.description),
                                   subtitle=esc(node.name))
+            if not is_hw:
+                # These were ActionRows with one line each before they got
+                # channels; without it the two-column layout letter-wraps
+                # "Surround HRTFdb" one letter per line (UI.md; seen on the
+                # live graph 2026-10-22).  Hardware rows keep the two-line
+                # wrap they always had.
+                row.set_title_lines(1)
+                row.set_subtitle_lines(1)
             if rule:
                 row.add_suffix(pill('customized', 'warning'))
         else:
@@ -311,15 +319,27 @@ class DevicesPage:
             def channels_written(values):
                 write(values)
                 vol.set_value(levels.master)
-            panel = ChannelPanel(levels, self.volume_style, channels_written,
-                                 compact=True)
-            live['panel'] = panel
+
+            # The box goes in now, so the channels stay above the settings
+            # rows; the panel itself is built on first expand, as the Mixer
+            # does.  Built eagerly it nearly doubled a rebuild (27 -> 49 ms,
+            # 641 -> 1192 widgets for 8 stereo devices, measured 2026-10-22).
+            # `levels` follows every delivery either way, so a late panel
+            # opens on current values.
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
                           margin_top=10, margin_bottom=12,
                           margin_start=12, margin_end=12)
             box.append(micro('Channel levels'))
-            box.append(panel.widget)
             row.add_row(box)
+
+            def build_panel(*_a):
+                if live['panel'] is not None or not row.get_expanded():
+                    return
+                panel = ChannelPanel(levels, self.volume_style,
+                                     channels_written, compact=True)
+                live['panel'] = panel
+                box.append(panel.widget)
+            row.connect('notify::expanded', build_panel)
 
         if is_hw:
             try:

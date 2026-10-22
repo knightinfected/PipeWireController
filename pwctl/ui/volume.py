@@ -569,7 +569,7 @@ class ChannelPanel:
         self._reset.add_css_class('flat')
         self._reset.connect('clicked', self._on_reset)
 
-        if lv.count == 2:
+        if lv.left_right:
             bal = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,
                                            -1.0, 1.0, 0.01)
             bal.set_draw_value(False)
