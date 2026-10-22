@@ -133,6 +133,14 @@ class AudioNode:
     serial: int = -1
     ports: list = field(default_factory=list)   # [(route_index, description, available)]
     active_port: int | None = None
+    # `info.state` from the dump: 'running', 'idle', 'suspended', 'creating'
+    # or 'error'; '' when the dump does not say.
+    state: str = ''
+    # The negotiated format while the node runs, from its `Format` param:
+    # {'rate': 48000, 'channels': 2, 'format': 'S32LE'}.  Empty while it is
+    # suspended, because PipeWire clears the param then (measured
+    # 2026-10-22: every suspended node in the dump has `Format: []`).
+    fmt: dict = field(default_factory=dict)
 
     @property
     def is_sink(self):
@@ -377,8 +385,24 @@ def list_audio_nodes(dump=None) -> list[AudioNode]:
         if vol:
             node.volume, node.muted = vol
         node.channels, node.channel_map = dump_channels(obj, route)
+        node.state, node.fmt = _node_state(obj)
         nodes.append(node)
     return nodes
+
+
+def _node_state(obj) -> tuple[str, dict]:
+    """(info.state, the running format) out of one dump object."""
+    info = obj.get('info') or {}
+    state = info.get('state') or ''
+    if not isinstance(state, str):
+        state = ''
+    fmt = {}
+    formats = (info.get('params') or {}).get('Format') or []
+    first = formats[0] if formats and isinstance(formats[0], dict) else {}
+    for key in ('rate', 'channels', 'format'):
+        if first.get(key) is not None:
+            fmt[key] = first[key]
+    return state, fmt
 
 
 def card_map(dump=None) -> dict[int, tuple[str, str]]:
