@@ -144,6 +144,11 @@ class ColumnBox(Gtk.Widget):
     IDEAL = 600      # the width a column wants
     MIN_COL = 520    # the narrowest worth opening another column for
     MAX_COL = 720    # and the width past which one is never stretched
+    # MIN_COL and MAX_COL are taste, not limits.  The real limit is the
+    # content: a column is never narrower than the widest child it may hold
+    # (`_content_floor`), whatever these say.  Before 2026-10-22 MIN_COL alone
+    # decided, so a page whose content needed 538 px was split into two
+    # 520-536 px columns and GTK clipped the right edge of every row.
     # A column holding less than this fraction of the tallest one reads as an
     # orphan, so that column count is rejected.  0.3 was picked against the
     # real pages: it keeps Server's three (its short column is 0.34) and
@@ -183,22 +188,41 @@ class ColumnBox(Gtk.Widget):
     def _visible(self):
         return [c for c in self._kids if c.get_visible()]
 
+    @staticmethod
+    def _min_width(child):
+        return child.measure(Gtk.Orientation.HORIZONTAL, -1)[0]
+
+    def _content_floor(self, kids=None):
+        """The widest minimum of any child that goes into a column.
+
+        Bands are left out: a band is as wide as all the columns together, so
+        it never has to fit in one.  GTK caches measurements until a child
+        asks for a resize, so asking on every layout pass is cheap.
+        """
+        kids = self._visible() if kids is None else kids
+        return max([0] + [self._min_width(c) for c in kids
+                          if c not in self._spans])
+
     def _fits(self, width):
-        """Most columns this width can carry, before content is considered."""
+        """Most columns this width can carry without squeezing any child."""
         kids = self._visible()
         if not kids:
             return 0
         # Judged against the narrowest column worth having, not the ideal one
         # — otherwise a 1400px window sits at one 760px column with 400px
-        # beside it, which is the original bug in miniature.
-        n = (width + self._spacing) // (self._min_col + self._spacing)
+        # beside it, which is the original bug in miniature — and never
+        # against less than the content needs.
+        floor = max(self._min_col, self._content_floor(kids))
+        n = (width + self._spacing) // (floor + self._spacing)
         return max(1, min(self._max_columns, len(kids), int(n)))
 
     def _geometry(self, width, ncols):
         """(column width, x of the first column) for a given column count."""
         sp = self._spacing
-        colw = max(int(min(self._max_col, (width - (ncols - 1) * sp) // ncols)),
-                   1)
+        # The cap stops a column stretching, but it must never cut one below
+        # what its content needs: that is a clipped row, not a tidy one.
+        cap = max(self._max_col, self._content_floor())
+        colw = max(int(min(cap, (width - (ncols - 1) * sp) // ncols)), 1)
         total = ncols * colw + (ncols - 1) * sp
         return colw, max(0, (width - total) // 2)
 
@@ -259,8 +283,13 @@ class ColumnBox(Gtk.Widget):
         for child in kids:
             if child in self._spans:
                 flush()
-                h = child.measure(Gtk.Orientation.VERTICAL, full)[1]
-                out.append((child, x0, y_base, full, h))
+                # As wide as the columns, unless the band itself needs more
+                # (possible when the columns are capped narrower than the
+                # box); then it takes what it needs, centred, up to the box.
+                bw = min(width, max(full, self._min_width(child)))
+                bx = x0 if bw == full else max(0, (width - bw) // 2)
+                h = child.measure(Gtk.Orientation.VERTICAL, bw)[1]
+                out.append((child, bx, y_base, bw, h))
                 y_base += h + sp
             else:
                 run.append(child)
@@ -303,7 +332,8 @@ class ColumnBox(Gtk.Widget):
             # real width instead of a natural 728.
             mn = max(c.measure(orientation, -1)[0] for c in kids)
             ncols = min(self._max_columns, len(kids))
-            nat = ncols * self._ideal + (ncols - 1) * self._spacing
+            ideal = max(self._ideal, self._content_floor(kids))
+            nat = ncols * ideal + (ncols - 1) * self._spacing
             return mn, max(mn, nat), -1, -1
         width = for_size if for_size > 0 else self.do_measure(
             Gtk.Orientation.HORIZONTAL, -1)[1]
