@@ -25,6 +25,34 @@ and commit log.
 
 ## Unreleased
 
+**The Devices page, redesigned**
+
+Every output and input is now a card that shows what the device is doing,
+not just how loud it is.
+
+- **Where the sound is.** A card names the port (Speakers, Headphones) and
+  how the device is connected: Built-in, USB, HDMI, or Bluetooth with its
+  codec. Switch ports with one click; an unplugged one is greyed out.
+- **What's playing.** Every app playing through a device shows on its card.
+  Click an app to move it to another device, or drag it onto that device's
+  card. An app recording what a device plays shows there too.
+- **Where a virtual device sends its sound**, and which ones send into a
+  device, so a chain of devices can be followed at a glance. You can change
+  where a virtual device sends from its card.
+- **The sound card's profile**, with a warning and a one-click fix when the
+  profile gives no sound, such as HDMI with nothing plugged in. A sound card
+  that is switched off keeps a card of its own with the way to turn it back
+  on, so it never just disappears from the page. On a Bluetooth headset,
+  that's also where you turn its microphone on.
+- **Whether it's running**, and its format while it plays
+  (48 kHz · 24-bit · stereo).
+- **Test** plays a short chime on an output, left then right.
+- **Settings** for a hardware device (its name, hiding it, sample rate,
+  buffering, when it suspends) open in their own window, grouped by what
+  they're for, with a way to reset them.
+- The default output and input are ringed, and a filter finds a device by
+  name.
+
 **Balance, and a volume for each channel**
 
 Every output, input and app in the Mixer has a **Channels** button next to
@@ -34,7 +62,7 @@ on, or AUX 0 to AUX 7 on a Pro Audio card. Use it to even out speakers that
 sit at different distances, turn down one side of a pair of headphones, or
 set two outputs of an audio interface to different levels. **Reset** puts
 every channel back to the same level. The Devices page has the same controls
-when you expand a device. A pair of AUX channels gets two sliders and no
+under each card's Channels button. A pair of AUX channels gets two sliders and no
 Balance, because on a Pro Audio card they are often two separate outputs.
 
 - **Every other volume slider keeps your balance.** The main slider in the
