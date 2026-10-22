@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from dataclasses import dataclass, field
 
 from . import balance, levels
@@ -671,11 +672,18 @@ def set_channel_volumes(node_id, values: list[float], serial: int | None = None,
       (hardware in `default-routes`, everything else in `stream-properties`).
       pactl refuses a wrong-length array, unlike `pw-cli`.  The integer form
       is `(n / 65536) ** 3` raw, so a rescale doesn't walk in 1% steps.
-    * **`pw-cli` only when no pipewire-pulse answers.**  It applies live, and
-      on hardware it is not saved.
+    * **`pw-cli` only when no pipewire-pulse answers** (no `pactl` binary,
+      or no server), and then to the right object (measured 2026-10-22):
+      a node on a card with an active Route gets the **card's Route** written
+      (`save: true`), as pipewire-pulse does.  Writing such a node's own
+      Props changes only the numbers it reports: no mixer, no software
+      volume, nothing saved, on ALSA and Bluetooth alike.  A node with no
+      route (virtual, chains, Pro Audio) gets its Props, which there is
+      exactly what pactl does and is saved too.  See `_fallback_write`.
     """
     if not values:
         return False
+    seq = _next_write(node_id)
     vals = [balance.clamp(v) for v in values]
     if balance.is_level(vals):
         rc, _, _ = run(['wpctl', 'set-volume', str(node_id), f'{vals[0]:.2f}'])
@@ -692,10 +700,73 @@ def set_channel_volumes(node_id, values: list[float], serial: int | None = None,
             # a different channel count.  pw-cli would average the array.
             return False
 
+    return _fallback_write(node_id, vals, seq)
+
+
+# The pw-cli fallback is slower than the other writers (a pw-dump to find the
+# route, then pw-cli: ~30 ms against a drag's 8-16 ms steps), so a drag's
+# threads can overlap there.  Each write takes a number on entry; the fallback
+# writes one at a time and drops a write a newer one for the same node has
+# already replaced, so the device ends on the drag's last value.
+_WRITE_LOCK = threading.Lock()
+_FALLBACK_LOCK = threading.Lock()
+_LATEST: dict = {}
+
+
+def _next_write(node_id) -> int:
+    with _WRITE_LOCK:
+        _LATEST[node_id] = _LATEST.get(node_id, 0) + 1
+        return _LATEST[node_id]
+
+
+def _superseded(node_id, seq) -> bool:
+    with _WRITE_LOCK:
+        return _LATEST.get(node_id, 0) != seq
+
+
+def _card_route(node_id, dump=None):
+    """(card object id, active Route) for a node on a card, else None.
+
+    Read from a fresh dump at write time: card and route ids change with
+    every profile switch, so nothing here is remembered.
+    """
+    dump = dump if dump is not None else pw_dump()
+    obj = next((o for o in dump if o.get('id') == node_id
+                and o.get('type') == 'PipeWire:Interface:Node'), None)
+    if obj is None:
+        return None
+    props = (obj.get('info') or {}).get('props') or {}
+    node = AudioNode(id=node_id, name=props.get('node.name', ''),
+                     description='', media_class=props.get('media.class', ''),
+                     props=props)
+    route = _active_route(node, _device_routes(dump))
+    if route is None:
+        return None
+    return int(props['device.id']), route
+
+
+def _fallback_write(node_id, vals, seq) -> bool:
+    """The pw-cli write, to the card's Route when the node has one."""
     raw = ', '.join(f'{v ** 3:.6f}' for v in vals)
-    rc, _, _ = run(['pw-cli', 'set-param', str(node_id), 'Props',
-                    '{ channelVolumes: [ %s ] }' % raw])
-    return rc == 0
+    target = _card_route(node_id)
+    with _FALLBACK_LOCK:
+        if _superseded(node_id, seq):
+            return True                 # a newer write for this node follows
+        if target is None:
+            rc, _, _ = run(['pw-cli', 'set-param', str(node_id), 'Props',
+                            '{ channelVolumes: [ %s ] }' % raw])
+            return rc == 0
+        card_id, route = target
+        have = ((route.get('props') or {}).get('channelVolumes') or [])
+        if have and len(have) != len(vals):
+            # pactl refuses a wrong-length array; a short one written here
+            # would be averaged (as pw-cli does on Props), so refuse too.
+            return False
+        rc, _, _ = run(['pw-cli', 'set-param', str(card_id), 'Route',
+                        '{ index: %d, device: %d, props: { channelVolumes: '
+                        '[ %s ] }, save: true }'
+                        % (route['index'], route['device'], raw)])
+        return rc == 0
 
 
 def set_mute(node_id, mute: bool) -> bool:
