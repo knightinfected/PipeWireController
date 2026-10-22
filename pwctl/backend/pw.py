@@ -201,32 +201,67 @@ def _device_routes(dump) -> dict:
     return routes
 
 
+def _card_slot(node: AudioNode):
+    """(device id, card.profile.device) for a node on a card, else None."""
+    try:
+        return (int(node.props['device.id']),
+                int(node.props['card.profile.device']))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _active_route(node: AudioNode, routes: dict) -> dict | None:
+    """The card's active Route for this node, or None.
+
+    None for anything not on a card (virtual devices, chains) and for nodes
+    whose card has no route for them (every Pro Audio node).
+    """
+    slot = _card_slot(node)
+    if slot is None:
+        return None
+    _enum, active = routes.get(slot[0], ([], []))
+    want = 'Output' if node.is_sink else 'Input'
+    return next((r for r in active
+                 if r.get('device') == slot[1]
+                 and r.get('direction') == want), None)
+
+
 def _attach_ports(node: AudioNode, routes: dict):
     """Fill node.ports / node.active_port from its device's Route params."""
-    try:
-        dev_id = int(node.props['device.id'])
-        card_dev = int(node.props['card.profile.device'])
-    except (KeyError, TypeError, ValueError):
+    slot = _card_slot(node)
+    if slot is None:
         return
-    enum, active = routes.get(dev_id, ([], []))
+    enum, _active = routes.get(slot[0], ([], []))
     want = 'Output' if node.is_sink else 'Input'
     node.ports = [(r['index'], r.get('description', f'Route {r["index"]}'),
                    r.get('available', 'unknown'))
                   for r in enum
                   if r.get('direction') == want
-                  and card_dev in (r.get('devices') or [])]
-    node.active_port = next((r['index'] for r in active
-                             if r.get('device') == card_dev
-                             and r.get('direction') == want), None)
+                  and slot[1] in (r.get('devices') or [])]
+    route = _active_route(node, routes)
+    node.active_port = route['index'] if route else None
 
 
-def dump_volume(obj) -> tuple[float, bool] | None:
+def dump_volume(obj, route: dict | None = None) -> tuple[float, bool] | None:
     """(volume, muted) straight out of a pw-dump object, or None.
 
     The values are already in the dump we just fetched — every node's
     `info.params.Props` carries them — so reading them here replaces one
     `wpctl get-volume` subprocess *per node and per stream, per poll*.  On a
     16-endpoint system that measured 463 ms -> 63 ms for a dashboard refresh.
+
+    **A node on a card is read from its active `route`** (its device's Route
+    param), when the caller passes one and it carries volumes.  That is what
+    wpctl, pactl and WirePlumber's saved state all use, and the node's own
+    Props can disagree with it: after **any profile switch on an ALSA card**
+    the recreated nodes report `channelVolumes` 1.0 and `mute` false, while
+    the route and the ALSA mixer keep the saved level and mute (only the
+    software share of a level, `softVolumes`, is lost from the node).  The
+    node catches up only when the level or mute really changes; a write of
+    the same value leaves it behind (measured 2026-10-22, PipeWire
+    1.6.9 / WirePlumber 0.5.18, `docs.local/probes/2026-10-22-route-volume/`).
+    Bluetooth and a fresh session were in step.  Nodes with no route
+    (virtual, chains, streams, Pro Audio) are read from their Props.
 
     Two things about the payload, both established by measurement against
     `wpctl get-volume` on PipeWire 1.6.8 rather than read anywhere:
@@ -239,11 +274,15 @@ def dump_volume(obj) -> tuple[float, bool] | None:
       i.e. cbrt of `[0]`, *not* of the loudest channel.  Writes need no
       conversion — `wpctl set-volume` already takes the cubic value.
     """
-    params = (obj.get('info') or {}).get('params') or {}
-    props = params.get('Props') or []
-    if not props:
-        return None
-    entry = props[0] or {}
+    route_props = (route or {}).get('props') or {}
+    if route_props.get('channelVolumes'):
+        entry = route_props
+    else:
+        params = (obj.get('info') or {}).get('params') or {}
+        props = params.get('Props') or []
+        if not props:
+            return None
+        entry = props[0] or {}
     chans = entry.get('channelVolumes')
     if not chans:
         return None
@@ -273,7 +312,7 @@ def list_audio_nodes(dump=None) -> list[AudioNode]:
             is_default=(name == def_sink if mclass == 'Audio/Sink'
                         else name == def_source))
         _attach_ports(node, routes)
-        vol = dump_volume(obj)
+        vol = dump_volume(obj, _active_route(node, routes))
         if vol:
             node.volume, node.muted = vol
         nodes.append(node)

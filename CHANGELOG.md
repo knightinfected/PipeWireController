@@ -109,6 +109,21 @@ busy one finishes, so a stream you move or a cable you patch no longer
 sometimes takes seconds to show. The Dashboard also takes its first look
 120 ms after an action instead of 500 ms.
 
+**Bug: after a sound card changed profile, its volume showed as 100%**
+
+Switch a sound card, such as your computer's built-in audio, to another
+profile and back (Pro Audio, Off, output only, or any other), and the app
+showed that card's speakers and microphone at 100% and unmuted, whatever
+they were really set to. `wpctl`, `pactl` and your desktop's volume control
+still showed the real level. But the first drag of the slider started from
+100%, so it could make the sound louder than it was, and a muted card could
+look unmuted. This had been the case since v0.6.0.
+
+The app now reads a sound card's volume and mute from the card itself, the
+way `wpctl` does. Bluetooth, virtual devices and Pro Audio weren't
+affected. A device preset or routing snapshot saved while a card was in this
+state stored 100% for it: save it again to store the real level.
+
 **Fewer processes on every refresh**
 
 To find out which devices are the defaults, every page that lists devices
