@@ -609,6 +609,11 @@ class ChannelPanel:
             ctl = make_volume(self.style,
                               lambda v, idx=i: self._on_channel(idx, v),
                               compact=self.compact)
+            if not self.compact and not self.align:
+                # Standing alone (the Devices card's popover): nothing to line
+                # up with, so the control takes the width.  The Mixer always
+                # passes `align` and is unaffected.
+                ctl.widget.set_hexpand(True)
             pct = Gtk.Label(xalign=1, width_chars=5)
             pct.add_css_class('numeric')
             pct.add_css_class('dim-label')

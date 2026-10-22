@@ -171,6 +171,22 @@ class ColumnBox(Gtk.Widget):
         self._kids.append(child)
         if span:
             self._spans.add(child)
+        self.queue_resize()
+
+    def remove(self, child: Gtk.Widget):
+        if child not in self._kids:
+            return
+        self._kids.remove(child)
+        self._spans.discard(child)
+        child.unparent()
+        self.queue_resize()
+
+    def remove_all(self):
+        for child in list(self._kids):
+            child.unparent()
+        self._kids = []
+        self._spans = set()
+        self.queue_resize()
 
     def do_dispose(self):
         # A Gtk.Widget subclass must unparent its children itself, or GTK
