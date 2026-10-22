@@ -26,11 +26,12 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from ..backend import balance, endpoints, pw, surround, testsound  # noqa: E402
 from .volume import ChannelPanel, make_volume  # noqa: E402
-from .widgets import LOCAL_GRACE, async_call, device_icon, micro, pill  # noqa: E402
+from .widgets import (LOCAL_GRACE, async_call, device_icon,  # noqa: E402
+                      drag_source, drop_target, micro, pill)
 
 MAX_CHIPS = 4           # past this a row says "+N" instead of wrapping
 
@@ -275,6 +276,13 @@ class DeviceCard:
         self._build_volume(node)
         self._build_details(node, ctx)
         self._build_foot(node)
+        # An app chip dragged from another card lands here: the move the
+        # chip's own menu makes, as a gesture.
+        drop_target(self.widget, GObject.TYPE_STRING,
+                    lambda value, _x, _y: self.page.drop_on(self, value),
+                    on_motion=lambda value, _x, _y: self._hover(value),
+                    on_leave=lambda: self.widget.remove_css_class(
+                        'drop-into'))
         self.set_rule(rule)
         self.paint_star(node.is_default)
         self.paint(node, ctx)
@@ -493,6 +501,12 @@ class DeviceCard:
         self.widget.insert_action_group('dev', group)
         return menu
 
+    def _hover(self, value):
+        ok = self.page.accepts(self, value)
+        if ok:
+            self.widget.add_css_class('drop-into')
+        return ok
+
     # -- painting ----------------------------------------------------------
     def set_rule(self, rule):
         self.rule = rule or {}
@@ -546,7 +560,8 @@ class DeviceCard:
         if self.sends_row is not None:
             self._paint_sends(node, act, ctx)
         self._paint_from(act)
-        self._paint_apps(act, ctx)
+        if self.page.dragging is None:      # never under the chip in flight
+            self._paint_apps(act, ctx)
         self.filter_text = ' '.join((
             node.description, node.name, endpoints.subtitle(node))).lower()
 
@@ -664,8 +679,13 @@ class DeviceCard:
             else:
                 tip = (f'{s.name}: {s.media}' if s.media and s.media != s.name
                        else s.name)
-            chip.set_tooltip_text(tip + ' (click to move it)')
+            chip.set_tooltip_text(tip + ' (click, or drag it onto another '
+                                  'device, to move it)')
             chip.set_popover(self._move_popover(s, recording, ctx))
+            drag_source(chip, lambda st=s: f'stream:{st.id}',
+                        on_begin=lambda st=s: self.page.drag_started(st),
+                        on_end=self.page.drag_ended,
+                        dragging_css='dev-dragging')
             chips.append(chip)
         self._chips(self.apps_box, key, chips,
                     'Nothing playing' if self.sink else 'Nothing recording')

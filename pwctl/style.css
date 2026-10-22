@@ -1284,3 +1284,26 @@ button.dev-fix:hover {
 .dev-offer button.dev-fix:hover {
     background: alpha(@green_4, 0.26);
 }
+
+/* Dragging an app chip onto another device.  The class is repeated so it
+   outranks `.dev-card.out.is-default` (three classes), the way the Signal
+   Paths drop rules do (UI.md §3, specificity). */
+.dev-card.dev-card.drop-ready {
+    border-style: dashed;
+    border-color: alpha(@pwctl_drop, 0.75);
+}
+
+.dev-card.dev-card.drop-into {
+    border-style: solid;
+    border-color: @pwctl_drop;
+    background-color: mix(@card_bg_color, @blue_3, 0.14);
+    box-shadow: 0 0 0 2px alpha(@pwctl_drop, 0.35);
+}
+
+.dev-card.dev-card.drop-no {
+    opacity: 0.5;
+}
+
+menubutton.dev-chip.dev-dragging {
+    opacity: 0.45;
+}

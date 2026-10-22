@@ -66,8 +66,8 @@ class _Band:
         self.widget.add_css_class('dev-band')
         self.title = micro(title)
         self.title.add_css_class('dev-band-title')
-        self.count = Gtk.Label()
-        self.count.add_css_class('dev-band-count')
+        self.count = Gtk.Label(valign=Gtk.Align.CENTER)    # not the row's
+        self.count.add_css_class('dev-band-count')        # height (Hidden)
         self.widget.append(self.title)
         self.widget.append(self.count)
 
@@ -96,6 +96,8 @@ class DevicesPage:
         self._rebuild_next = False      # the next delivery rebuilds the cards
         self._grace_id = None
         self._default_ts = 0.0          # when the user last clicked a star
+        self.dragging = None            # the stream an app chip is carrying
+        self._held_rebuild = False      # a rebuild that waited for the drop
 
         self.box = ColumnBox(spacing=16, max_columns=3)
         self.box.set_margin_top(18)
@@ -203,6 +205,11 @@ class DevicesPage:
         data = collect(dump)
         self._data = data
         if self._rebuild_next or not self._sync(data):
+            if self.dragging is not None:
+                # A rebuild would destroy the chip being dragged; it waits
+                # for the drop (UI.md §9: no rebuild during a drag).
+                self._held_rebuild = True
+                return
             self._rebuild_next = False
             self._rebuild(data, rules.load())
         self._watch_grace()
@@ -284,6 +291,9 @@ class DevicesPage:
             return
         self._data = data
         if not self._sync(data):
+            if self.dragging is not None:
+                self._held_rebuild = True
+                return
             # An endpoint appeared, vanished or was recreated.  Rebuild once
             # so its callbacks target the current PipeWire id; ordinary polls
             # keep the cards, their popovers and their meters.
@@ -387,6 +397,55 @@ class DevicesPage:
             self._resync()          # put the stars back where they really are
         async_call(lambda: pw.set_default(node.id), done)
         self._watch_grace()
+
+    # -- dragging an app chip onto another card -----------------------------
+    def _stream(self, value):
+        """The stream a drag payload names, from the last delivery."""
+        if not isinstance(value, str) or not value.startswith('stream:'):
+            return None
+        try:
+            sid = int(value.split(':', 1)[1])
+        except ValueError:
+            return None
+        streams = (self._data or {}).get('streams', [])
+        return next((st for st in streams if st.id == sid), None)
+
+    def accepts(self, card, value):
+        stream = value if not isinstance(value, str) else self._stream(value)
+        if stream is None or not isinstance(card, DeviceCard):
+            return False
+        if card.node.id == stream.target_id:
+            return False                        # already there
+        # playback goes to an output; a recorder takes an input or the
+        # monitor of an output, as its own chip menu offers
+        return card.sink if stream.is_playback else True
+
+    def drag_started(self, stream):
+        # Say where it can land before it is dropped (UI.md §1, direct
+        # manipulation): every card that would take it, and dim the rest.
+        self.dragging = stream
+        for card in self._cards.values():
+            if isinstance(card, DeviceCard):
+                card.widget.add_css_class('drop-ready' if self.accepts(
+                    card, stream) else 'drop-no')
+
+    def drag_ended(self):
+        was = self.dragging
+        self.dragging = None
+        for card in self._cards.values():
+            for css in ('drop-ready', 'drop-no', 'drop-into'):
+                card.widget.remove_css_class(css)
+        if was is not None and self._held_rebuild:
+            self._held_rebuild = False
+            GLib.idle_add(lambda: (self.refresh(), False)[1])
+
+    def drop_on(self, card, value):
+        stream = self._stream(value)
+        self.drag_ended()
+        if stream is None or not self.accepts(card, stream):
+            return False
+        self.move_stream(stream, card.node)
+        return True
 
     def move_stream(self, stream, target):
         def done(ok, error):
