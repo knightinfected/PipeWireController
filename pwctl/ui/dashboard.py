@@ -25,9 +25,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from ..backend import (balance, chains, enhance, paths, prefs, pw, surround,
-                       system,
-                       units, virtual)
+from ..backend import (balance, chains, endpoints, enhance, paths, prefs, pw,
+                       reroute, surround, system, units, virtual)
 from .volume import VOLUME_STYLES, ChannelPanel, make_volume
 from .widgets import (LOCAL_GRACE, ColumnBox, GraceMixin, RowSync, async_call,
                       device_icon, esc, micro,
@@ -365,46 +364,9 @@ class _StreamRow(_VolumeRowBase):
             self.updating = False
 
 
-def _remember_output(node_name: str, target_name: str) -> str:
-    """Record a new output on whichever of our objects publishes this sink.
-
-    Moving the stream takes effect at once, but an object that carries its own
-    target in its generated conf goes straight back to it the next time its
-    unit restarts — so the *stored* target has to move too or the change
-    quietly undoes itself on the next reboot.  `save_meta` writes it without
-    regenerating or restarting, which matters: restarting removes the sink and
-    tears down every stream feeding it, and the whole point here is to re-point
-    a device while audio keeps playing through it.
-
-    Returns a note to append to the toast, or ''.  A hand-written chain in
-    `filter-chain.conf.d` belongs to nobody and needs no note — nothing will
-    overwrite the move.
-    """
-    for items, setter in (
-            (chains.list_chains(),
-             lambda o, t: (setattr(o, 'target', t), chains.save_meta(o))),
-            (enhance.list_enhancements(),
-             lambda o, t: (o.params.__setitem__('target', t),
-                           enhance.save_meta(o))),
-            (virtual.list_devices(),
-             lambda o, t: (setattr(o, 'target', t), virtual.save_meta(o)))):
-        for obj in items:
-            if obj.node_name == node_name:
-                setter(obj, target_name)
-                return ''
-
-    for strip in paths.list_strips():
-        if strip.node_name != node_name:
-            continue
-        # A strip feeding several outputs is a fan, and which leg the user
-        # meant is not answerable from one dropdown — so move it live and say
-        # where the permanent version of the setting lives.
-        if len(strip.outputs) > 1:
-            return ' (until restart — set outputs in Signal Paths)'
-        strip.outputs = [target_name]
-        paths.save_meta(strip)
-        return ''
-    return ''
+# Moved to the backend on 2026-10-22 so the Devices page re-points an output
+# through the same code; the name stays for this module's callers.
+_remember_output = reroute.remember_output
 
 
 class _DeviceRow(_VolumeRowBase):
@@ -684,21 +646,17 @@ class _CardConfigRow(Gtk.ListBoxRow, GraceMixin):
             # Reset appears whenever the card produces no usable output/input
             # in this list's direction (unavailable OR Off/wrong-direction) and
             # a working profile exists to fall back to.
+            # The rule itself lives in `endpoints.profile_state`, shared
+            # with the Devices page's cards since 2026-10-22.
             want_sink = self.tab.sinks
-            avail = next((a for pidx, _d, a in card_obj.profiles
-                          if pidx == card_obj.active_profile), 'unknown')
-            has_sink, has_src = card_obj.dirs.get(card_obj.active_profile,
-                                                  (False, False))
-            unavailable = avail == 'no'
-            no_output = not (has_sink if want_sink else has_src)
-            can_fix = surround.working_profile(
-                card_obj, sink=want_sink) is not None
+            state = endpoints.profile_state(card_obj, want_sink)
+            unavailable = state.unavailable
             self.warn.set_visible(unavailable)
             self.warn.set_tooltip_text(
                 'This profile is unavailable — no output until you switch.'
                 if want_sink else
                 'This profile is unavailable — no input until you switch.')
-            self.reset.set_visible((unavailable or no_output) and can_fix)
+            self.reset.set_visible(state.stuck)
         finally:
             self.updating = False
 
