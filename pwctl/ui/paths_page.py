@@ -47,8 +47,9 @@ from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango  # noqa: E402
 from ..backend import backends, balance, levels, path_templates, paths, \
     plugins, prefs, pw, rules, virtual
 from .volume import make_volume
-from .widgets import LOCAL_GRACE, async_call, confirm, esc, group, \
-    icon_button, pick_file, pick_folder, pill, state_style
+from .widgets import LOCAL_GRACE, async_call, confirm, drag_source, \
+    drop_target, esc, group, icon_button, pick_file, pick_folder, pill, \
+    state_style
 
 _PLUGIN_CACHE: dict = {'all': None}
 
@@ -321,86 +322,8 @@ def clear_drop(widget):
         widget.remove_css_class(c)
 
 
-def drag_source(widget, make_payload, icon=None, offset=(0, 0),
-                on_begin=None, on_end=None):
-    """Let `widget` start a drag carrying whatever `make_payload()` returns.
-
-    The controller runs in the capture phase because a stage chip is a real
-    button: its own click gesture sits in the bubble phase and was installed
-    first, so a bubble-phase drag source would only ever see presses it had
-    already lost.
-
-    `on_begin`/`on_end` bracket the whole gesture, which is how the board
-    lights up every place the thing being carried could land.  Without that,
-    "can I drop here?" can only be answered by trying it.
-    """
-    src = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
-    src.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-    hot = [0.0, 0.0]
-
-    def prepare(_s, x, y):
-        hot[0], hot[1] = x, y
-        payload = make_payload()
-        if payload is None:
-            return None
-        return Gdk.ContentProvider.new_for_value(
-            GObject.Value(type(payload), payload))
-
-    def begin(s, _drag):
-        widget.add_css_class('path-dragging')
-        s.set_icon(Gtk.WidgetPaintable.new(icon or widget),
-                   int(hot[0]) + offset[0], int(hot[1]) + offset[1])
-        if on_begin:
-            on_begin()
-
-    def end(*_a):
-        widget.remove_css_class('path-dragging')
-        if on_end:
-            on_end()
-        return False
-
-    src.connect('prepare', prepare)
-    src.connect('drag-begin', begin)
-    # Both endings have to be caught: a drop fires drag-end, a drag abandoned
-    # over nothing fires drag-cancel, and the board must come back either way.
-    src.connect('drag-end', end)
-    src.connect('drag-cancel', end)
-    widget.add_controller(src)
-    return src
-
-
-def drop_target(widget, gtype, on_drop, on_motion=None, on_leave=None):
-    """Accept drags of one payload type.
-
-    `on_motion(payload, x, y)` returns whether the drop would do anything and
-    is where the indicator is drawn; returning False greys the cursor, so the
-    pointer says "not here" before the button is released rather than after.
-    """
-    tgt = Gtk.DropTarget.new(gtype, Gdk.DragAction.MOVE)
-    tgt.set_preload(True)          # so motion can look at what is coming
-
-    def motion(_t, x, y):
-        value = tgt.get_value()
-        if value is None:          # not loaded yet — assume it will do
-            return Gdk.DragAction.MOVE
-        ok = True if on_motion is None else on_motion(value, x, y)
-        return Gdk.DragAction.MOVE if ok else 0
-
-    def leave(_t):
-        if on_leave:
-            on_leave()
-
-    def drop(_t, value, x, y):
-        if on_leave:
-            on_leave()
-        return bool(on_drop(value, x, y))
-
-    tgt.connect('enter', motion)
-    tgt.connect('motion', motion)
-    tgt.connect('leave', leave)
-    tgt.connect('drop', drop)
-    widget.add_controller(tgt)
-    return tgt
+# drag_source / drop_target live in widgets.py since 2026-10-22, shared
+# with the Devices page; imported above under the same names.
 
 
 def context_menu(anchor, items, x, y):
