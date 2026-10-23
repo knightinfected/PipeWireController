@@ -27,7 +27,7 @@ from .ui.settings_pages import ServerPage, StreamsPage, WirePlumberPage
 from .ui.surround_page import SurroundPage
 from .ui.tools_page import ToolsPage
 from .ui.virtual_page import VirtualPage
-from .ui.widgets import async_call, micro
+from .ui.widgets import async_call, esc, micro
 
 # (name, title, icon, section).  Sixteen rows in one flat list read as
 # "this is complicated" before a single click, so they are grouped — but every
@@ -601,7 +601,14 @@ class Window(Adw.ApplicationWindow):
 
     # ------------------------------------------------------------ feedback --
     def toast(self, message, timeout=3):
-        self.toaster.add_toast(Adw.Toast(title=message, timeout=timeout))
+        """Show `message` as plain text.
+
+        A toast's title is Pango markup, so a bare '&' or '<' (a device
+        called "Game & Chat", an error from PipeWire) would make the whole
+        title fail to parse and the toast show up blank.  Escaped here, once,
+        so callers never pass markup.
+        """
+        self.toaster.add_toast(Adw.Toast(title=esc(message), timeout=timeout))
 
     def flag_restart(self, which: str):
         self._pending_restarts.add(which)

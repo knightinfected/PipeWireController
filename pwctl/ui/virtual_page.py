@@ -218,15 +218,15 @@ class VirtualPage:
         def done(result, error):
             devs, refused = result if result else ([], '')
             if refused:
-                self.window.toast(esc(f'PipeWire would refuse that config: '
-                                      f'{refused}'))
+                self.window.toast(f'PipeWire would refuse that config: '
+                                  f'{refused}')
                 return
             if error or not devs:
                 self.window.toast('No virtual device found in that config')
                 return
             names = ', '.join(d.name for d in devs)
-            self.window.toast(esc(f'Imported {names} (disabled) — restart '
-                                  'PipeWire, then enable it'))
+            self.window.toast(f'Imported {names} (disabled) — restart '
+                              'PipeWire, then enable it')
             self.window.flag_restart('pipewire')
             self.refresh()
         async_call(work, done)

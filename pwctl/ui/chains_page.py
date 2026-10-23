@@ -250,11 +250,11 @@ class ChainsPage:
         def picked(path):
             meta = chains.import_conf(path)
             if meta:
-                self.window.toast(esc(f'Imported {meta.name}'))
+                self.window.toast(f'Imported {meta.name}')
                 self.refresh()
                 return
             err = chains.sniff_conf(path)['error']
-            self.window.toast(esc(f'PipeWire would refuse this config: {err}')
+            self.window.toast(f'PipeWire would refuse this config: {err}'
                               if err else 'Not a valid filter-chain config')
         pick_file(self.window, 'Import filter-chain .conf', picked,
                   filters=[('PipeWire configs', ['*.conf'])])
@@ -610,7 +610,7 @@ class ChainDialog(Adw.Dialog):
             try:
                 spa_json.loads(text)
             except spa_json.SpaJsonError as e:
-                self.window.toast(esc(f'Invalid SPA JSON: {e}'))
+                self.window.toast(f'Invalid SPA JSON: {e}')
                 return False
             self.meta.params['raw_text'] = text
             self.window.toast('Config text updated — save to apply')
