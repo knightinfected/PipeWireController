@@ -44,12 +44,17 @@ not just how loud it is.
   that is switched off keeps a card of its own with the way to turn it back
   on, so it never just disappears from the page. On a Bluetooth headset,
   that's also where you turn its microphone on.
-- **Whether it's running**, and its format while it plays
-  (48 kHz · 24-bit · stereo).
+- **Whether it's running, and its format**, under the device's name: the
+  sample rate and bit depth while it plays, and its channel layout (Stereo,
+  5.1, 7.1).
+- **Fold what you don't need.** A card folds down to its name and volume,
+  and a heading folds its whole section (all the outputs, say). The page
+  remembers what you folded.
 - **Test** plays a short chime on an output, left then right.
 - **Settings** for a hardware device (its name, hiding it, sample rate,
-  buffering, when it suspends) open in their own window, grouped by what
-  they're for, with a way to reset them.
+  buffering, when it suspends) open from the gear beside its name, in their
+  own window, grouped by what they're for, with a way to reset them. Hover
+  a setting to see what it does.
 - The default output and input are ringed, and a filter finds a device by
   name.
 
