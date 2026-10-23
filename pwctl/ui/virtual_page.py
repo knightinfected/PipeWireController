@@ -138,12 +138,10 @@ class VirtualPage:
             return
 
         def done(result, e):
+            # Success says nothing: the switch already shows it.
             ok, err = result if result else (False, str(e or ''))
             if not ok:
                 self.window.toast(f'Failed: {err}' if err else 'Failed')
-            else:
-                self.window.toast(
-                    f'{dev.name} {"started" if enabled else "stopped"}')
             GLib.timeout_add(400, lambda: (self.refresh(), False)[1])
         async_call(lambda: virtual.set_enabled(dev, enabled), done)
 
