@@ -137,6 +137,20 @@ using. The point where the labels go depends on your font size and on the
 style's name, because the app measures the labels rather than assuming a
 width. In a wider window nothing changes.
 
+**Bug: some messages at the bottom of the window showed up empty**
+
+A message popping up at the bottom of the window showed as an empty box
+with only its ✕ whenever its text had a `&` or a `<` in it. That happened
+with any device, filter chain or equalizer whose name has an `&` (such as
+"Game & Chat"), and with error messages from PipeWire or systemd, which
+often contain a `<`. So some failures went unexplained. This had been the
+case since v0.3.0. Messages now show their text exactly as written.
+
+**Turning a virtual device on or off no longer pops up a message**
+
+The switch already shows it. If starting or stopping the device fails, a
+message still says so, with the reason.
+
 **Fewer processes on every refresh**
 
 To find out which devices are the defaults, every page that lists devices
