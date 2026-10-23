@@ -9,7 +9,7 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gtk  # noqa: E402
 
 from .backend import (graph, levels, livestate, prefs, presets, pw, system,
                       units)
@@ -27,7 +27,7 @@ from .ui.settings_pages import ServerPage, StreamsPage, WirePlumberPage
 from .ui.surround_page import SurroundPage
 from .ui.tools_page import ToolsPage
 from .ui.virtual_page import VirtualPage
-from .ui.widgets import async_call, esc, micro
+from .ui.widgets import async_call, esc, micro, reduce_motion
 
 # (name, title, icon, section).  Sixteen rows in one flat list read as
 # "this is complicated" before a single click, so they are grouped — but every
@@ -82,6 +82,19 @@ MIN_WIDTH, MIN_HEIGHT = 360, 294
 # sidebar plus a 360 page) once every page fits in 360.
 SIDEBAR_COLLAPSE_SP = 840
 
+# How long after the window appears its sidebar is put in place without a
+# slide.  At start-up in a narrow window the breakpoint applies after the
+# first frames, and a sidebar sliding away then is noise, not information.
+SETTLE_US = 500_000
+
+# The header's change between labels and icons is a crossfade this long (the
+# same as the page crossfade), and only when the header was last drawn within
+# this many pixels of its new width.  Across a bigger jump, such as a tiling
+# layout change, the old header's ends would fade out in the wrong place, and
+# the compositor is animating that change itself.
+HEADER_FADE_MS = 200
+HEADER_FADE_MAX_JUMP = 64
+
 
 class _HeaderFit(Gtk.Widget):
     """The content header bar, with its labels shown only where they fit.
@@ -92,6 +105,12 @@ class _HeaderFit(Gtk.Widget):
     laid the header out one frame late, which painted the very overlap this
     prevents once at every crossing (measured on the real window).  The
     window works out `need`, `floor` and `height` in `fit_header`.
+
+    The change itself is a crossfade.  The layout still switches at once, so
+    nothing ever overlaps; only the picture eases from the header as it was
+    last drawn to the header as it is now.  Fading costs nothing to keep
+    ready: the last drawing is the same render node the header was drawn
+    with, not a second rendering.
     """
 
     def __init__(self, child, set_compact):
@@ -103,6 +122,20 @@ class _HeaderFit(Gtk.Widget):
         self.need = 0        # narrower than this, the labels go
         self.floor = 0       # the header's minimum width with icons only
         self.height = 0      # the taller of the two layouts
+        self._last = None    # the header as it was last drawn: its node,
+        self._last_width = 0  # its width, and where its title sat
+        self._last_title = (0, 0)
+        self._ghost = None   # the same three, for the drawing fading out
+        self._ghost_width = 0
+        self._ghost_title = (0, 0)
+        self._progress = 1.0
+        # The old drawing can be wider than the header now; keep it inside.
+        self.set_overflow(Gtk.Overflow.HIDDEN)
+        self._fade = Adw.TimedAnimation.new(
+            self, 0.0, 1.0, HEADER_FADE_MS,
+            Adw.CallbackAnimationTarget.new(self._on_fade))
+        self._fade.set_easing(Adw.Easing.EASE)
+        self._fade.connect('done', self._on_fade_done)
 
     def do_measure(self, orientation, for_size):
         low, nat, _b1, _b2 = self._child.measure(orientation, for_size)
@@ -119,9 +152,78 @@ class _HeaderFit(Gtk.Widget):
         if compact != self.compact:
             self.compact = compact
             self._set_compact(compact)
+            self._cross_fade(width)
         self._child.allocate(width, height, baseline, None)
 
+    def _cross_fade(self, width):
+        if (self._last is None
+                or abs(width - self._last_width) > HEADER_FADE_MAX_JUMP):
+            return
+        self._ghost = self._last
+        self._ghost_width, self._ghost_title = (self._last_width,
+                                                self._last_title)
+        self._fade.reset()
+        self._fade.play()      # finishes at once with animations turned off
+
+    def _on_fade(self, value):
+        self._progress = value
+        self.queue_draw()
+
+    def _on_fade_done(self, _anim):
+        self._ghost = None
+        self._progress = 1.0
+        self.queue_draw()
+
+    def do_snapshot(self, snapshot):
+        drawing = Gtk.Snapshot()
+        self.snapshot_child(self._child, drawing)
+        node = drawing.to_node()
+        if self._ghost is not None and self._progress < 1.0:
+            snapshot.push_cross_fade(self._progress)
+            self._draw_ghost(snapshot)
+            snapshot.pop()
+            if node is not None:
+                snapshot.append_node(node)
+            snapshot.pop()
+        elif node is not None:
+            snapshot.append_node(node)
+        self._last, self._last_width = node, self.get_width()
+        self._last_title = self._title_span()
+
+    def _title_span(self):
+        """Where the title sits, so the old drawing can be cut around it."""
+        title = self._child.get_title_widget()
+        if title is not None and title.get_mapped():
+            ok, b = title.compute_bounds(self)
+            if ok:
+                return (b.get_x(), b.get_x() + b.get_width())
+        mid = self.get_width() / 2
+        return (mid, mid)
+
+    def _draw_ghost(self, snapshot):
+        """The old drawing in three pieces, each where its group now is.
+
+        The header was a few pixels wider or narrower when it was drawn.
+        Drawn whole, its window buttons would fade out beside the new ones;
+        so what was left of the title stays left, the title stays centred,
+        and what was right of it (the window buttons) stays right.
+        """
+        old, height = self._ghost_width, self.get_height()
+        left, right = self._ghost_title
+        dx = self.get_width() - old
+        for x0, x1, shift in ((0, left, 0), (left, right, dx / 2),
+                              (right, old, dx)):
+            if x1 <= x0:
+                continue
+            snapshot.save()
+            snapshot.translate(Graphene.Point().init(shift, 0))
+            snapshot.push_clip(Graphene.Rect().init(x0, 0, x1 - x0, height))
+            snapshot.append_node(self._ghost)
+            snapshot.pop()
+            snapshot.restore()
+
     def do_dispose(self):
+        self._ghost = self._last = None
         if self._child is not None:
             self._child.unparent()
             self._child = None
@@ -262,20 +364,32 @@ class Window(Adw.ApplicationWindow):
         # screens: every page change costs two clicks, and the Advanced
         # switch in the sidebar's footer ends up behind one of them.  An
         # overlay keeps the page on screen and slides the sidebar over it.
+        # Pinned: on its own, collapsing hides the sidebar (and uncollapsing
+        # shows it) with no animation, so it vanished in a single frame.
+        # Pinned, it moves only when told to, and `_on_narrow`/`_on_wide`
+        # tell it with libadwaita's own slide.
         self.split = Adw.OverlaySplitView(
             min_sidebar_width=210, max_sidebar_width=240,
-            show_sidebar=bool(prefs.get('sidebar_shown')))
+            show_sidebar=bool(prefs.get('sidebar_shown')), pin_sidebar=True)
         self.split.set_sidebar(side_view)
         self.split.set_content(content_view)
         self.toaster.set_child(self.split)
         self.set_content(self.toaster)
 
+        # The breakpoint has no setter: crossing it starts the slide, and
+        # the split collapses once the sidebar is out of the way.  It still
+        # makes the window's minimum its size request (DR-013).
         bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(
             f'max-width: {SIDEBAR_COLLAPSE_SP}sp'))
-        bp.add_setter(self.split, 'collapsed', True)
+        bp.connect('apply', self._on_narrow)
+        bp.connect('unapply', self._on_wide)
         self.add_breakpoint(bp)
-        self.split.connect('notify::collapsed', self._on_collapsed)
         self.split.connect('notify::show-sidebar', self._on_sidebar_shown)
+        self._auto_hiding = False      # sliding out for the breakpoint
+        self._collapse_tick = None     # watching that slide
+        self._step_tick = None         # waiting for the breakpoint to land
+        self._mapped_at = 0
+        self.connect('map', self._on_map)
 
         # Shows and hides the sidebar, at any width.  It is packed before
         # anything a page adds, so it is the first thing in the header on
@@ -550,20 +664,141 @@ class Window(Adw.ApplicationWindow):
         self.sidebar_button.set_tooltip_text(
             'Hide the sidebar' if shown else 'Show the sidebar')
 
-    def _on_collapsed(self, split, _p):
-        """The breakpoint was crossed, one way or the other."""
-        # Narrow, the window opens on its page rather than with the sidebar
-        # over it.  Wide again, the sidebar comes back as it was last left
-        # while there was room for it.
-        split.set_show_sidebar(
-            False if split.get_collapsed() else bool(prefs.get('sidebar_shown')))
+    def _on_map(self, *_a):
+        self._mapped_at = GLib.get_monotonic_time()
+
+    def _still(self):
+        """Put the sidebar in place without a slide?
+
+        With animations off, when the user asked for reduced motion, and
+        while the window is only just appearing.
+        """
+        return (not self.get_mapped()
+                or GLib.get_monotonic_time() - self._mapped_at < SETTLE_US
+                or not Adw.get_enable_animations(self)
+                or reduce_motion(self))
+
+    def _on_narrow(self, _bp):
+        """The window got too narrow for the sidebar beside the page.
+
+        The sidebar slides out, the page widening behind it as it goes (the
+        slide the header button makes), and the split collapses once it is
+        gone, so a narrow window opens on its page rather than under the
+        sidebar.  That slide needs the page to fit beside what is left of the
+        sidebar; if it stops fitting, the split collapses at once and the
+        slide carries on over the page instead.
+        """
+        self._stop_watching_slide()
+        if not self.split.get_show_sidebar() or self._still():
+            self._collapse(at_once=True)
+        elif self._squeezed():
+            # Collapsed now, so no frame lays the page out beside the
+            # sidebar in too little room; pinned, the sidebar stays where it
+            # is, over the page, until the slide starts.
+            self.split.set_collapsed(True)
+            self._next_frame(self._slide_out)
+        else:
+            self._next_frame(self._slide_out)
+
+    def _next_frame(self, step):
+        """Run `step` once the window's content is back on screen.
+
+        libadwaita unmaps the window's content while it applies a breakpoint
+        (measured), and an animation started on an unmapped widget is skipped
+        to its end: called from the breakpoint itself, the sidebar would
+        jump instead of slide.
+        """
+        def tick(_window, _clock):
+            if not self.split.get_mapped():
+                return GLib.SOURCE_CONTINUE
+            self._step_tick = None
+            step()
+            return GLib.SOURCE_REMOVE
+        self._step_tick = self.add_tick_callback(tick)
+
+    def _slide_out(self):
+        split = self.split
+        if not split.get_show_sidebar():
+            return
+        if split.get_collapsed() or self._squeezed():
+            # No room for the page beside the sidebar: the sidebar slides
+            # out over the page instead.
+            split.set_collapsed(True)
+            split.set_show_sidebar(False)
+            return
+        self._auto_hiding = True
+        split.set_show_sidebar(False)
+        self._collapse_tick = split.add_tick_callback(self._watch_slide)
+
+    def _squeezed(self):
+        """The page and the sidebar beside it need more than the window has.
+
+        The split then shrinks the sidebar below its own minimum rather than
+        the page, and the window lays it all out wider than itself (GTK and
+        libadwaita warn, measured), so the pair is compared with the window.
+        """
+        return (self.split.measure(Gtk.Orientation.HORIZONTAL, -1)[0]
+                > self.get_width())
+
+    def _watch_slide(self, split, _clock):
+        # The split unmaps the sidebar once it has finished sliding out.  A
+        # sidebar shown again meanwhile is the user opening it: collapse, and
+        # it stays open over the page.
+        if (self._squeezed() or not split.get_sidebar().get_mapped()
+                or split.get_show_sidebar()):
+            self._collapse_tick = None
+            self._collapse()
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    def _stop_watching_slide(self):
+        if self._step_tick is not None:
+            self.remove_tick_callback(self._step_tick)
+            self._step_tick = None
+        if self._collapse_tick is not None:
+            self.split.remove_tick_callback(self._collapse_tick)
+            self._collapse_tick = None
+
+    def _collapse(self, at_once=False):
+        self._stop_watching_slide()
+        split = self.split
+        if at_once and split.get_show_sidebar():
+            # Unpinned, collapsing hides the sidebar in the same frame.
+            split.set_pin_sidebar(False)
+            split.set_collapsed(True)
+            split.set_pin_sidebar(True)
+        else:
+            # Pinned, a slide still under way carries on over the page.
+            split.set_collapsed(True)
+        self._auto_hiding = False
+
+    def _on_wide(self, _bp):
+        """Room for the sidebar again: it comes back as it was last left
+        while it had room, sliding in with the page making way."""
+        self._stop_watching_slide()
+        self._auto_hiding = False
+        split = self.split
+        want = bool(prefs.get('sidebar_shown'))
+        if split.get_collapsed():
+            if want and not split.get_show_sidebar() and self._still():
+                # Unpinned, uncollapsing shows the sidebar in the same frame.
+                split.set_pin_sidebar(False)
+                split.set_collapsed(False)
+                split.set_pin_sidebar(True)
+                return
+            split.set_collapsed(False)
+        if split.get_show_sidebar() != want:
+            self._next_frame(lambda: self.split.set_show_sidebar(
+                bool(prefs.get('sidebar_shown'))))
 
     def _on_sidebar_shown(self, split, _p):
         # Only a choice made while the sidebar has a place of its own is
         # remembered.  Opening it over the page in a narrow window is how
-        # you reach another page, not a preference.
+        # you reach another page, not a preference, and the breakpoint's
+        # slide is not a choice at all.
         shown = split.get_show_sidebar()
-        if not split.get_collapsed() and shown != bool(prefs.get('sidebar_shown')):
+        if (not split.get_collapsed() and not self._auto_hiding
+                and shown != bool(prefs.get('sidebar_shown'))):
             prefs.save(sidebar_shown=shown)
 
     def _set_header_widget(self, page_name, title):

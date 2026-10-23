@@ -35,6 +35,22 @@ def esc(text) -> str:
     return GLib.markup_escape_text(str(text)) if text else ''
 
 
+def reduce_motion(widget) -> bool:
+    """Whether the user asked for less motion on screen.
+
+    GTK 4.22's accessibility setting.  Where it is set, movement the app adds
+    (a slide) gives way to a fade or to none; a fade is still fine.  Older GTK
+    has no such setting, which reads as no preference.  libadwaita's own
+    widgets decide this for themselves.
+    """
+    settings = widget.get_settings()
+    if settings.find_property('gtk-interface-reduced-motion') is None:
+        return False
+    reduce = getattr(getattr(Gtk, 'ReducedMotion', None), 'REDUCE', None)
+    return (reduce is not None
+            and settings.get_property('gtk-interface-reduced-motion') == reduce)
+
+
 # One glyph per kind of software device, keyed on `pw.AudioNode.software_kind`.
 # Deliberately NOT a second classifier: this is a lookup on the value the row
 # already has, so there is exactly one place that decides what a node is, and
