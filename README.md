@@ -126,18 +126,21 @@ Install the dependencies:
 
 ```bash
 # Fedora
-sudo dnf install pipewire pipewire-utils wireplumber pipewire-pulseaudio gtk4 \
-    libadwaita gobject-introspection python3-gobject python3-numpy python3-soundfile
+sudo dnf install pipewire pipewire-utils wireplumber pipewire-pulseaudio \
+    pulseaudio-utils gtk4 libadwaita gobject-introspection python3-gobject \
+    python3-numpy python3-soundfile
 # Debian / Ubuntu (Ubuntu: add libspa-0.2-modules-extra for LV2 and SOFA)
-sudo apt install pipewire wireplumber pipewire-pulse gir1.2-gtk-4.0 \
-    gir1.2-adw-1 python3-gi python3-gi-cairo python3-numpy python3-soundfile
+sudo apt install pipewire wireplumber pipewire-pulse pulseaudio-utils \
+    gir1.2-gtk-4.0 gir1.2-adw-1 python3-gi python3-gi-cairo python3-numpy \
+    python3-soundfile
 # Arch
 sudo pacman -S --needed pipewire wireplumber pipewire-pulse gtk4 libadwaita \
     python-gobject python-cairo python-numpy python-soundfile
 ```
 
 Elsewhere you need GTK 4, libadwaita, PyGObject with its cairo support
-(`python3-gobject-cairo` on openSUSE), numpy and soundfile. Then:
+(`python3-gobject-cairo` on openSUSE), numpy, soundfile, and `pactl` for
+switching Bluetooth codecs (`pulseaudio-utils`). Then:
 
 ```bash
 git clone https://github.com/knightinfected/PipeWireController.git
