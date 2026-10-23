@@ -214,6 +214,11 @@ drawn outside it.
   sitting beside it, so the page gets the whole window. The new button at the
   top left opens it, and it closes again when you pick a page, click outside
   it, or press Escape.
+- **The sidebar slides away as the window narrows, and back as it widens**,
+  with the page widening and narrowing behind it, instead of vanishing in a
+  single frame. In the header, the change between labels and icons is a
+  short fade. With animations turned off, or reduced motion turned on, both
+  happen at once.
 - **The same button hides the sidebar in a wide window too**, and the app
   remembers whether you left it shown.
 - **Up and Down in the sidebar still change pages.**
