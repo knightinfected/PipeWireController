@@ -70,6 +70,51 @@ WATCHED_SERVICES = ('pipewire.service', 'wireplumber.service',
                     'pipewire-pulse.service')
 
 
+class _HeaderFit(Gtk.Widget):
+    """The content header bar, with its labels shown only where they fit.
+
+    It decides as it is laid out: narrower than `need`, the labelled controls
+    go to icons, and only then is the header allocated, so the first frame at
+    a new width is already right.  An `AdwBreakpointBin` was tried first and
+    laid the header out one frame late, which painted the very overlap this
+    prevents once at every crossing (measured on the real window).  The
+    window works out `need`, `floor` and `height` in `fit_header`.
+    """
+
+    def __init__(self, child, set_compact):
+        super().__init__()
+        self._child = child
+        child.set_parent(self)
+        self._set_compact = set_compact
+        self.compact = False
+        self.need = 0        # narrower than this, the labels go
+        self.floor = 0       # the header's minimum width with icons only
+        self.height = 0      # the taller of the two layouts
+
+    def do_measure(self, orientation, for_size):
+        low, nat, _b1, _b2 = self._child.measure(orientation, for_size)
+        if orientation == Gtk.Orientation.HORIZONTAL:
+            # The labels go before the header gets this narrow, so the
+            # icons-only minimum is the one that counts.
+            low = min(low, self.floor) if self.floor else low
+        else:
+            low, nat = max(low, self.height), max(nat, self.height)
+        return low, nat, -1, -1
+
+    def do_size_allocate(self, width, height, baseline):
+        compact = width < self.need
+        if compact != self.compact:
+            self.compact = compact
+            self._set_compact(compact)
+        self._child.allocate(width, height, baseline, None)
+
+    def do_dispose(self):
+        if self._child is not None:
+            self._child.unparent()
+            self._child = None
+        Gtk.Widget.do_dispose(self)
+
+
 class Window(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title='PipeWire Controller',
@@ -157,8 +202,14 @@ class Window(Adw.ApplicationWindow):
         self.content_header = content_header
         content_header.set_title_widget(self.content_title)
         content_header.pack_end(self._build_presets_button())
+        # Below the width where the header's labels fit, its three labelled
+        # controls drop to their icons.  Without this the header bar keeps
+        # them at full width and slides the page title on top of the
+        # Overview/Mixer switcher.  The width is measured, never a constant
+        # (see `fit_header`), so it holds for any font.
+        self._header_fit = _HeaderFit(content_header, self._set_header_compact)
         content_view = Adw.ToolbarView()
-        content_view.add_top_bar(content_header)
+        content_view.add_top_bar(self._header_fit)
         content_view.add_top_bar(self.banner)
         content_view.set_content(self.stack)
         # The hairline under the header bar (and under the restart banner when
@@ -206,6 +257,14 @@ class Window(Adw.ApplicationWindow):
         dash = self.pages['dashboard']
         content_header.pack_start(dash.view_switcher)
         content_header.pack_end(dash.style_button)
+        self.fit_header()
+        # The labels' widths follow the font, so a font or text-scale change
+        # moves the width where they stop fitting.
+        settings = Gtk.Settings.get_default()
+        handlers = [settings.connect(f'notify::{key}', self.fit_header)
+                    for key in ('gtk-font-name', 'gtk-xft-dpi')]
+        self.connect('destroy', lambda *_: [settings.disconnect(h)
+                                            for h in handlers])
 
         start = 0
         import os
@@ -245,8 +304,9 @@ class Window(Adw.ApplicationWindow):
     # ------------------------------------------------------ device presets --
     def _build_presets_button(self):
         btn = Gtk.MenuButton(tooltip_text='Device presets')
-        btn.set_child(Adw.ButtonContent(icon_name='user-bookmarks-symbolic',
-                                        label='Device Presets'))
+        self._presets_content = Adw.ButtonContent(
+            icon_name='user-bookmarks-symbolic', label='Device Presets')
+        btn.set_child(self._presets_content)
         self._presets_popover = Gtk.Popover()
         self._presets_popover.connect('show', self._fill_presets_popover)
         btn.set_popover(self._presets_popover)
@@ -397,6 +457,50 @@ class Window(Adw.ApplicationWindow):
         else:
             self.content_title.set_title(title)
             self.content_header.set_title_widget(self.content_title)
+        self.fit_header()
+
+    # -------------------------------------------------------- header width --
+    def _set_header_compact(self, compact):
+        """Show the header's labelled controls as icons only, or labelled."""
+        self._presets_content.set_label('' if compact else 'Device Presets')
+        dash = getattr(self, 'pages', {}).get('dashboard')
+        if dash is not None:
+            dash.set_header_compact(compact)
+
+    def fit_header(self, *_a):
+        """Work out the width below which the header's labels go.
+
+        Measured with the labels showing: the header bar's own minimum, plus
+        what each labelled control wants beyond its minimum.  The title may
+        still shrink to its minimum, but the controls may not shrink below
+        their natural width, because the header bar then slides the title
+        over the switcher instead of squeezing them.  The width depends on
+        the font, the page title and the current slider style's name, so it
+        is measured again when any of those changes.
+        """
+        dash = getattr(self, 'pages', {}).get('dashboard')
+        if dash is None or dash.style_button.get_parent() is None:
+            return                     # still being built
+        fit = self._header_fit
+        labelled = (dash.view_switcher, dash.style_button,
+                    self._presets_content.get_parent())
+        horizontal, vertical = (Gtk.Orientation.HORIZONTAL,
+                                Gtk.Orientation.VERTICAL)
+        self._set_header_compact(False)
+        need = self.content_header.measure(horizontal, -1)[0]
+        for w in labelled:
+            low, nat, _b1, _b2 = w.measure(horizontal, -1)
+            need += nat - low
+        # The taller of the two layouts, so the header keeps one height:
+        # with a large font the labelled switcher is a pixel taller than the
+        # icons, and C19 has to stay level with the sidebar's line.
+        height = self.content_header.measure(vertical, -1)[0]
+        self._set_header_compact(True)
+        floor = self.content_header.measure(horizontal, -1)[0]
+        height = max(height, self.content_header.measure(vertical, -1)[0])
+        self._set_header_compact(fit.compact)
+        fit.need, fit.floor, fit.height = need, floor, height
+        fit.queue_resize()
 
     def _save_window_state(self, *_a):
         prefs.save(win_width=self.get_width() or 1080,

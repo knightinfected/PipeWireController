@@ -1278,12 +1278,15 @@ class Dashboard:
     kind = 'apps'            # apps | devices
     _switching = False       # suppress the switcher's own navigation
 
+    _header_compact = False  # the header shows icons only (see app.py)
+
     def _build_view_switcher(self):
         tg = Adw.ToggleGroup(can_shrink=True)
         tg.add(Adw.Toggle(name='overview', label='Overview',
                           icon_name='view-grid-symbolic'))
         tg.add(Adw.Toggle(name='mixer', label='Mixer',
                           icon_name='audio-volume-high-symbolic'))
+        self._view_labels = {'overview': 'Overview', 'mixer': 'Mixer'}
         tg.set_active_name('overview')
         tg.connect('notify::active-name', self._on_view_toggle)
         self._view_tg = tg
@@ -1305,6 +1308,23 @@ class Dashboard:
         if name != self.views.get_visible_child_name():
             self.views.set_visible_child_name(name)
         self.window.goto('dashboard')
+
+    def set_header_compact(self, compact: bool):
+        """Icons only on the switcher and the style button, or labelled.
+
+        The window calls this when its header gets too narrow for the labels.
+        A hidden label moves to the tooltip, so nothing becomes a mystery icon.
+        """
+        self._header_compact = compact
+        for name, label in self._view_labels.items():
+            toggle = self._view_tg.get_toggle_by_name(name)
+            toggle.set_label(None if compact else label)
+            toggle.set_tooltip(label if compact else '')
+        self._style_content.set_label('' if compact else self._style_title())
+
+    def _style_title(self):
+        return next((s[1] for s in VOLUME_STYLES if s[0] == self.volume_style),
+                    VOLUME_STYLES[0][1])
 
     def set_on_page(self, on_page: bool):
         """Called by the window when the selected page changes."""
@@ -1436,13 +1456,15 @@ class Dashboard:
         `can_shrink` lets the label ellipsize away to its icon when the header
         is tight, which is what keeps it from setting a floor under the app.
         """
-        active = next((s for s in VOLUME_STYLES if s[0] == self.volume_style),
-                      VOLUME_STYLES[0])
         self._style_content = Adw.ButtonContent(
-            icon_name='preferences-system-symbolic', label=active[1],
+            icon_name='preferences-system-symbolic', label=self._style_title(),
             can_shrink=True)
 
-        btn = Gtk.MenuButton(tooltip_text='Volume slider style')
+        # The tooltip names the style, which is the only place it shows once
+        # a narrow window hides the label.
+        btn = Gtk.MenuButton(
+            tooltip_text=f'Volume slider style: {self._style_title()}')
+        self._style_btn = btn
         btn.set_child(self._style_content)
 
         header = Gtk.Label(label='Volume slider style', margin_bottom=4)
@@ -1494,7 +1516,11 @@ class Dashboard:
         for k, check in self._style_checks.items():
             check.set_opacity(1.0 if k == key else 0.0)
         self._style_content.set_label(
-            next(s[1] for s in VOLUME_STYLES if s[0] == key))
+            '' if self._header_compact else self._style_title())
+        self._style_btn.set_tooltip_text(
+            f'Volume slider style: {self._style_title()}')
+        # The new name is a different width, so the header's breakpoint moves.
+        self.window.fit_header()
         for tab in (self.playback, self.recording, self.outputs, self.inputs):
             tab.clear()
         for ep in (self.out_card, self.in_card, self.fav):
