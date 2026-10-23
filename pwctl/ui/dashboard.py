@@ -1218,6 +1218,8 @@ class Dashboard:
         self._slow = {}          # last slow-tier result, reused between ticks
         self._unit_watch = None  # systemd signals for SERVICES while mapped
         self._live_states = {}   # unit -> state, from those signals
+        self._live_seq = {}      # unit -> newest signal, so a slow read
+        #                          can't overwrite a newer one
         self._local_ts = 0.0
         self.filter_text = ''
         self.volume_style = prefs.get('volume_style')
@@ -1884,8 +1886,21 @@ class Dashboard:
         self._live_states = {}
 
     def _on_unit_state(self, unit, state):
-        self._live_states[unit] = state
-        self._paint_services()
+        seq = self._live_seq[unit] = self._live_seq.get(unit, 0) + 1
+        if state != 'inactive':
+            self._live_states[unit] = state
+            self._paint_services()
+            return
+
+        # Stopped, or only idle: pipewire-pulse waits on its socket until
+        # the first Pulse app connects.  Asked off the main loop, and painted
+        # once known, so an idle service never flashes "not running".
+        def done(read, error):
+            if self._live_seq.get(unit) != seq or self._unit_watch is None:
+                return                      # a newer signal, or unmapped
+            self._live_states[unit] = read if read and not error else state
+            self._paint_services()
+        async_call(lambda: system.service_state(unit), done)
 
     def _paint_services(self):
         """The service pills and the status line, from the newest states.
@@ -1898,6 +1913,9 @@ class Dashboard:
         for unit, (_row, p) in self.svc_rows.items():
             state = states.get(unit, 'unknown')
             p.set_label(state)
+            p.set_tooltip_text(system.ON_DEMAND_TIP
+                               if state == system.ON_DEMAND
+                               else None)
             for c in list(p.get_css_classes()):
                 if c.startswith('pill-'):
                     p.remove_css_class(c)
@@ -1905,7 +1923,7 @@ class Dashboard:
 
         # -- status hero -------------------------------------------------
         bad = [label for unit, label in SERVICES
-               if states.get(unit) not in ('active', None)]
+               if states.get(unit) not in ('active', system.ON_DEMAND, None)]
         unknown = not states
         if unknown:
             tone, headline = 'dim', 'Checking services…'
@@ -1993,7 +2011,8 @@ class Dashboard:
                                               streams=all_streams)
             data['cards'] = surround.list_cards(dump, outputs_only=False)
             if want_slow:
-                data['states'] = {u: system.unit_state(u) for u, _ in SERVICES}
+                data['states'] = {u: system.service_state(u)
+                                  for u, _ in SERVICES}
                 inv = {}
                 for key, items, status in (
                         ('chains', chains.list_chains(), chains.status),

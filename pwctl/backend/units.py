@@ -79,6 +79,13 @@ def active_state(unit: str) -> str | None:
     return state if isinstance(state, str) and state else None
 
 
+def triggered_by(unit: str) -> list[str] | None:
+    """The units that start this one on demand (a socket, a timer), or None
+    (fall back).  `pipewire-pulse.service` answers `['pipewire-pulse.socket']`."""
+    val = _get(unit, UNIT_IFACE, 'TriggeredBy')
+    return [str(u) for u in val] if isinstance(val, list) else None
+
+
 def main_pid(unit: str) -> int | None:
     """The service's main PID (0 when not running), or None (fall back)."""
     pid = _get(unit, SERVICE_IFACE, 'MainPID')

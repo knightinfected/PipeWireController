@@ -67,6 +67,36 @@ def unit_state(unit: str) -> str:
     return state
 
 
+# What `service_state()` says for a stopped service whose socket is
+# listening: the first client will start it, so nothing is wrong.
+ON_DEMAND = 'on demand'
+ON_DEMAND_TIP = ('Not started yet: it starts by itself when the first app '
+                 'that uses it connects. Nothing is wrong.')
+
+
+def service_state(unit: str) -> str:
+    """`unit_state()`, except a socket-activated service that is only idle.
+
+    pipewire-pulse is started by `pipewire-pulse.socket` when the first
+    PulseAudio app connects, so after a login it is `inactive` while its
+    socket listens, which is healthy.  Then this says ON_DEMAND.  The sockets
+    are asked for, never assumed: the service's `TriggeredBy`, and each
+    socket's own state (measured on a transient socket-activated pair,
+    docs.local/probes/2026-10-23-pulse-socket/).
+    """
+    state = unit_state(unit)
+    if state != 'inactive':
+        return state
+    from . import units
+    socks = units.triggered_by(unit)
+    if socks is None:
+        _rc, out, _ = sysctl_user('show', '-p', 'TriggeredBy', '--value', unit)
+        socks = out.split()
+    if any(unit_state(s) == 'active' for s in socks if s.endswith('.socket')):
+        return ON_DEMAND
+    return state
+
+
 def unit_enabled(unit: str) -> bool:
     rc, out, _ = sysctl_user('is-enabled', unit)
     return out.strip() in ('enabled', 'enabled-runtime', 'linked', 'static')

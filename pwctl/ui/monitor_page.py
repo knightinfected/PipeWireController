@@ -349,6 +349,9 @@ class MonitorPage:
             state = snap.states.get(unit, 'unknown')
             p = widgets['pill']
             p.set_label(state)
+            p.set_tooltip_text(system.ON_DEMAND_TIP
+                               if state == system.ON_DEMAND
+                               else None)
             for c in list(p.get_css_classes()):
                 if c.startswith('pill-'):
                     p.remove_css_class(c)

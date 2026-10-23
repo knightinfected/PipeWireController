@@ -206,10 +206,10 @@ class HealthSnapshot:
 
 
 def health_snapshot() -> HealthSnapshot:
-    from .system import unit_state
+    from .system import service_state
     snap = HealthSnapshot()
     for unit in MONITOR_UNITS:
-        snap.states[unit] = unit_state(unit)
+        snap.states[unit] = service_state(unit)
         snap.procs[unit] = proc_sample(service_pid(unit))
     snap.top = top_sample()
     snap.xruns = xrun_total(snap.top)
