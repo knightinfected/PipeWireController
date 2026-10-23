@@ -124,6 +124,19 @@ way `wpctl` does. Bluetooth, virtual devices and Pro Audio weren't
 affected. A device preset or routing snapshot saved while a card was in this
 state stored 100% for it: save it again to store the real level.
 
+**Bug: in a narrow window, the page's name covered the Overview and Mixer
+buttons**
+
+Make the window narrow enough and the name of the page you were on was drawn
+on top of the Overview and Mixer buttons at the top of the window, so you
+could read neither. This had been the case since v0.6.0. Now, once the top
+bar is too narrow for its labels, Overview, Mixer, the volume style button
+and Device Presets show just their icons, and each name moves into the
+button's tooltip. The style button's tooltip always names the style you're
+using. The point where the labels go depends on your font size and on the
+style's name, because the app measures the labels rather than assuming a
+width. In a wider window nothing changes.
+
 **Fewer processes on every refresh**
 
 To find out which devices are the defaults, every page that lists devices
