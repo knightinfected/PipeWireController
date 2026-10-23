@@ -18,7 +18,8 @@ main graph or other enhancements — exactly like virtual devices and chains.
        taps the default sink's monitor as the echo reference, so it works
        with no routing changes.
 
-The parametric-equalizer module is available since PipeWire 1.0.6; the WebRTC
+The parametric-equalizer module is available since PipeWire 1.2.0 (it is not
+in 1.0.x: docs.local/probes/2026-10-20-mint22-checkout/); the WebRTC
 canceller needs the libspa-aec-webrtc SPA plugin.
 """
 
