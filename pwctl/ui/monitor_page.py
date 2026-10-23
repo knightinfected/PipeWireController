@@ -42,6 +42,39 @@ XRUN_SUBTITLE = ('Graph cycles the driver could not complete, '
                  'counted while this page is open')
 
 
+
+def set_lines(buf: Gtk.TextBuffer, lines: list[str]):
+    """Make `buf` hold `lines`, rewriting only the lines that changed.
+
+    `set_text()` empties the buffer for a moment, and that sends a text
+    view's scrollbars back to the top left on every refresh, so nobody could
+    read the end of a long pw-top list or copy from it (issue #16).  Editing
+    line by line never shrinks the text under the view, so it stays where it
+    was scrolled.
+    """
+    if not lines:
+        buf.set_text('')
+        return
+    old = buf.get_text(buf.get_start_iter(), buf.get_end_iter(),
+                       False).split('\n')
+    for i, line in enumerate(lines):
+        if i >= len(old):
+            buf.insert(buf.get_end_iter(), '\n' + line)
+            continue
+        if old[i] == line:
+            continue
+        _ok, start = buf.get_iter_at_line(i)
+        end = start.copy()
+        if not end.ends_line():
+            end.forward_to_line_end()
+        buf.delete(start, end)          # `start` now marks the gap
+        buf.insert(start, line)
+    if len(old) > len(lines):
+        _ok, cut = buf.get_iter_at_line(len(lines) - 1)
+        if not cut.ends_line():
+            cut.forward_to_line_end()
+        buf.delete(cut, buf.get_end_iter())
+
 class Sparkline(Gtk.DrawingArea):
     """Tiny inline history graph for one metric."""
 
@@ -367,7 +400,7 @@ class MonitorPage:
             lines.append(f'{r.state:1} {r.id:>4} {r.quantum:>6} {r.rate:>6} '
                          f'{r.wait:>8} {r.busy:>8} {r.w_q:>5} {r.b_q:>5} '
                          f'{r.errors:>4}  {name}')
-        self.top_view.get_buffer().set_text('\n'.join(lines))
+        set_lines(self.top_view.get_buffer(), lines)
 
         if log_text:
             buf = self.log_view.get_buffer()
