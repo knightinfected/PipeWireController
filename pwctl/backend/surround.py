@@ -157,12 +157,24 @@ def set_profile(device_id: int, profile_index: int) -> bool:
 
 # ------------------------------------------------------------- test tones --
 
-def play_test_tone(target_node_id: int | None, channel_index: int,
+# WirePlumber remembers where a stream last played, keyed by its app name,
+# so an untargeted pw-play could follow an old saved target instead of the
+# default output.  These make it neither restore nor save one.
+TONE_PROPS = '{ state.restore-props = false state.restore-target = false }'
+
+
+def play_test_tone(target_serial: int | None, channel_index: int,
                    positions: list[str], rate=48000, duration=1.2):
     """Play a tone on one channel of a multichannel file via pw-play.
 
     Regular speakers get a 550 Hz burst, the LFE position a 60 Hz sine.
     Fire-and-forget; the file lives in the system tmp dir.
+
+    `target_serial` is the sink's `object.serial`, or None for the default
+    output.  `pw-play --target` reads a number as a serial: given an object
+    id it played on the default output once the two differed, which they do
+    for any device that appeared after the session started (measured,
+    docs.local/probes/2026-10-22-devices-ui/).
     """
     import numpy as np
     import soundfile as sf
@@ -181,8 +193,8 @@ def play_test_tone(target_node_id: int | None, channel_index: int,
 
     path = Path(tempfile.gettempdir()) / f'pwctl-tone-{positions[channel_index]}.wav'
     sf.write(path, data, rate)
-    cmd = ['pw-play']
-    if target_node_id is not None:
-        cmd += ['--target', str(target_node_id)]
+    cmd = ['pw-play', '-P', TONE_PROPS]
+    if target_serial is not None:
+        cmd += ['--target', str(target_serial)]
     cmd.append(str(path))
     subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

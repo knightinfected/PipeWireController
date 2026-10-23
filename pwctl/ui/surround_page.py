@@ -45,7 +45,7 @@ class SurroundPage:
         self.window = window
         self.updating = False
         self.cards = []
-        self.sinks = []              # (node_id, device_id)
+        self.sinks = []              # (id, device id, name, desc, serial)
         self._profile_indices = []   # combo position -> profile index
         self.layout_key = prefs.get('surround_layout')
         if not any(l[0] == self.layout_key for l in surround.LAYOUTS):
@@ -170,19 +170,22 @@ class SurroundPage:
         return self.cards[idx]
 
     def _target_sink(self):
-        """Sink node id belonging to the selected card, else None (default)."""
+        """The serial of the selected card's sink, else None (default).
+
+        A serial, not the node id: that is what `pw-play --target` reads.
+        """
         card = self._selected_card()
         if card:
-            for node_id, device_id, _name, _desc in self.sinks:
+            for _nid, device_id, _name, _desc, serial in self.sinks:
                 if device_id == card.id:
-                    return node_id
+                    return serial
         return None
 
     def _real_target(self):
         """(node.name, description) of the sink the virtual sink should feed."""
         card = self._selected_card()
         if card:
-            for _nid, device_id, name, desc in self.sinks:
+            for _nid, device_id, name, desc, _serial in self.sinks:
                 if device_id == card.id:
                     return name, desc
         return '', 'the default output'
@@ -204,7 +207,8 @@ class SurroundPage:
                 except (TypeError, ValueError):
                     dev = -1
                 sinks.append((obj['id'], dev, props.get('node.name', ''),
-                              props.get('node.description', '')))
+                              props.get('node.description', ''),
+                              props.get('object.serial')))
             vsink = next((m for m in chains.list_chains()
                           if m.template == VSINK_TEMPLATE), None)
             vstate = chains.status(vsink) if vsink else None
