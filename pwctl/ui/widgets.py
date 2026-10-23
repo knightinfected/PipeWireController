@@ -156,7 +156,7 @@ class ColumnBox(Gtk.Widget):
     BALANCE = 0.3
 
     def __init__(self, spacing=24, max_columns=3, ideal=IDEAL,
-                 max_col=MAX_COL, min_col=MIN_COL):
+                 max_col=MAX_COL, min_col=MIN_COL, keep_columns=False):
         super().__init__()
         self._spacing = spacing
         self._max_columns = max_columns
@@ -165,12 +165,26 @@ class ColumnBox(Gtk.Widget):
         self._min_col = min_col
         self._kids: list[Gtk.Widget] = []
         self._spans: set = set()
+        # `keep_columns`: a child that only changes height stays in its
+        # column.  For a page whose cards fold and unfold under the pointer
+        # (Devices): re-balancing on height alone would move the card just
+        # clicked to another column.  The split is still worked out afresh
+        # whenever the children shown change (a rebuild, the filter, a
+        # section folded) or the width allows a different number of columns.
+        self._keep = keep_columns
+        self._held_ncols: dict = {}     # (fits, children shown) -> ncols
+        self._held_runs: dict = {}      # (ncols, one run's children) -> cols
+
+    def _forget(self):
+        self._held_ncols.clear()
+        self._held_runs.clear()
 
     def append(self, child: Gtk.Widget, span: bool = False):
         child.set_parent(self)
         self._kids.append(child)
         if span:
             self._spans.add(child)
+        self._forget()
         self.queue_resize()
 
     def remove(self, child: Gtk.Widget):
@@ -179,6 +193,7 @@ class ColumnBox(Gtk.Widget):
         self._kids.remove(child)
         self._spans.discard(child)
         child.unparent()
+        self._forget()
         self.queue_resize()
 
     def remove_all(self):
@@ -186,6 +201,7 @@ class ColumnBox(Gtk.Widget):
             child.unparent()
         self._kids = []
         self._spans = set()
+        self._forget()
         self.queue_resize()
 
     def do_dispose(self):
@@ -195,6 +211,7 @@ class ColumnBox(Gtk.Widget):
             child.unparent()
         self._kids = []
         self._spans = set()
+        self._forget()
         Gtk.Widget.do_dispose(self)
 
     def do_get_request_mode(self):
@@ -287,7 +304,12 @@ class ColumnBox(Gtk.Widget):
                 return
             heights = [c.measure(Gtk.Orientation.VERTICAL, colw)[1]
                        for c in run]
-            cols = self._assign(run, heights, ncols)
+            key = (ncols, tuple(run))
+            cols = self._held_runs.get(key) if self._keep else None
+            if cols is None:
+                cols = self._assign(run, heights, ncols)
+                if self._keep:
+                    self._held_runs[key] = cols
             ys = [y_base] * ncols
             for child, h, col in zip(run, heights, cols):
                 out.append((child, x0 + col * (colw + sp), ys[col], colw, h))
@@ -327,14 +349,25 @@ class ColumnBox(Gtk.Widget):
         kids = self._visible()
         if not kids:
             return [], 0
+        fits = self._fits(width)
+        key = (fits, tuple(kids))
+        if self._keep and key in self._held_ncols:
+            placements, height, _cols = self._try(kids, width,
+                                                  self._held_ncols[key])
+            return placements, height
         best = None
-        for ncols in range(self._fits(width), 0, -1):
+        for ncols in range(fits, 0, -1):
             placements, height, col_heights = self._try(kids, width, ncols)
-            best = best or (placements, height)
+            best = best or (placements, height, ncols)
             tallest = max(col_heights)
             if ncols == 1 or min(col_heights) >= self.BALANCE * tallest:
-                return placements, height
-        return best
+                best = (placements, height, ncols)
+                break
+        if self._keep:
+            if len(self._held_ncols) > 64:      # filter typing, many sets
+                self._forget()
+            self._held_ncols[key] = best[2]
+        return best[0], best[1]
 
     # -- GtkWidget ---------------------------------------------------------
     def do_measure(self, orientation, for_size):
