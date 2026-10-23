@@ -1070,6 +1070,63 @@ headerbar.pwctl-header:not(.pwctl-sidebar-header) > windowhandle {
     color: alpha(currentColor, 0.7);
 }
 
+/* The heading is a flat button that folds its section.  Pulled left by its
+   own padding, so the title still lines up with the cards' edge. */
+button.dev-band-toggle {
+    padding: 4px 8px;
+    margin-left: -8px;
+    min-height: 0;
+}
+
+/* Folding: the chevron points down while open and turns to point along the
+   heading when folded, as an AdwExpanderRow's does.  The transition is on
+   the image, never the button (UI.md §4a); GTK skips it with animations
+   off.  The class changes in place on the card or band, so it runs. */
+image.dev-chevron {
+    transition: -gtk-icon-transform 200ms ease;
+    opacity: 0.7;
+}
+
+.dev-card.folded image.dev-chevron,
+.dev-band.folded image.dev-chevron {
+    -gtk-icon-transform: rotate(-90deg);
+}
+
+/* The head's icon buttons (star, gear, fold), a little under Adwaita's
+   34 px so three fit beside the name on a narrow card. */
+button.dev-icon {
+    min-width: 30px;
+    min-height: 30px;
+    padding: 0;
+}
+
+/* The state and format line in a card's head.  Tags, not a sentence, so
+   "48 kHz" reads at a glance; tabular numerals so the rate does not shift
+   its neighbours.  Neutral while idle (only the channel layout is known),
+   the live green while running, as the state dot is. */
+.dev-state {
+    color: alpha(currentColor, 0.62);
+}
+
+label.dev-spec {
+    font-size: 0.78em;
+    font-weight: 600;
+    font-feature-settings: "tnum";
+    padding: 0 6px;
+    border-radius: 6px;
+    background: alpha(currentColor, 0.07);
+    color: alpha(currentColor, 0.62);
+}
+
+label.dev-spec.running {
+    background: alpha(@green_4, 0.12);
+    color: @pwctl_live;
+}
+
+.dev-alert {
+    color: @warning_color;
+}
+
 .dev-card {
     background-color: @card_bg_color;
     border: 1px solid alpha(currentColor, 0.09);
@@ -1228,12 +1285,6 @@ label.dev-more {
     border-top: 1px solid alpha(currentColor, 0.07);
     padding-top: 6px;
     margin-top: 2px;
-}
-
-.dev-format {
-    font-size: 0.85em;
-    font-feature-settings: "tnum";
-    color: alpha(currentColor, 0.6);
 }
 
 .dev-small {

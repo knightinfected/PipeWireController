@@ -220,6 +220,61 @@ def format_text(node) -> str:
     return STATE_LABEL.get(node.state, '')
 
 
+# Channel layouts by the set of positions, so the order a driver lists them
+# in does not matter.  5.1 comes as either rear or side pairs.
+_LAYOUTS = {
+    frozenset({'MONO'}): 'Mono',
+    frozenset({'FC'}): 'Mono',
+    frozenset({'FL', 'FR'}): 'Stereo',
+    frozenset({'FL', 'FR', 'LFE'}): '2.1',
+    frozenset({'FL', 'FR', 'RL', 'RR'}): 'Quad',
+    frozenset({'FL', 'FR', 'FC', 'LFE', 'RL', 'RR'}): '5.1',
+    frozenset({'FL', 'FR', 'FC', 'LFE', 'SL', 'SR'}): '5.1',
+    frozenset({'FL', 'FR', 'FC', 'LFE', 'RL', 'RR', 'SL', 'SR'}): '7.1',
+}
+
+
+def layout_name(positions, count=None) -> str:
+    """'Stereo', '5.1', '7.1'… from a channel map; '4 channels' otherwise
+    (Pro Audio's AUX0…AUXn names no layout)."""
+    pos = [str(p).upper() for p in (positions or [])]
+    name = _LAYOUTS.get(frozenset(pos)) if len(set(pos)) == len(pos) else None
+    if name:
+        return name
+    count = count or len(pos)
+    if not count:
+        return ''
+    return {1: 'Mono', 2: 'Stereo'}.get(count, f'{count} channels')
+
+
+def format_tags(node) -> list:
+    """The device's format as short tags: ['48 kHz', '24-bit', 'Stereo'].
+
+    Rate and sample format exist only while the device runs: a suspended or
+    idle node has `Format: []` in the dump (DR-012, measured), so it gets
+    its channel layout alone, which the channel map always gives.
+    """
+    fmt = node.fmt or {}
+    tags = []
+    if node.state == 'running' and fmt:
+        rate = fmt.get('rate')
+        if rate:
+            tags.append(f'{rate / 1000:g} kHz')
+        bits = _sample_bits(fmt.get('format', ''))
+        if bits:
+            tags.append(bits)
+    positions = list(getattr(node, 'channel_map', None) or [])
+    running = fmt.get('channels') if node.state == 'running' else None
+    if running and positions and running != len(positions):
+        positions = []          # the running format wins over the map
+    count = running or len(positions) \
+        or len(getattr(node, 'channels', None) or [])
+    layout = layout_name(positions, count)
+    if layout:
+        tags.append(layout)
+    return tags
+
+
 def state_dot(node) -> str:
     """CSS class for the state dot: ok / warn / err / dim."""
     return STATE_DOT.get(node.state, 'dim')

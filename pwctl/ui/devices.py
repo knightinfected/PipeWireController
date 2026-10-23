@@ -12,6 +12,12 @@ and the cards in newspaper columns under each, hardware first.  The column
 floor is the cards' own minimum (`ColumnBox._content_floor`), so no width
 can squeeze a card.
 
+Folding: a band's heading folds its whole section, and each card folds to
+its head and level.  Both are remembered in `ui.json` by section and by
+`node.name` (`devices_folded`), so they survive a rebuild, a restart and a
+device coming back.  The box keeps each card in its column when one folds
+(`keep_columns`); a section folding re-flows the page, as the filter does.
+
 Live state: the graph comes from `livestate` while the page is mapped (one
 fresh `pw-dump` per real change), the 3 s poll only where it cannot listen.
 Every delivery is applied in place (`device_levels.sync_device_levels` for
@@ -59,21 +65,67 @@ def _order(nodes, sink):
 
 
 class _Band:
-    """A section heading across every column: OUTPUTS · 6."""
+    """A section heading across every column: ⌄ OUTPUTS · 6.
 
-    def __init__(self, title):
+    The heading is one flat button that folds the section under it, so the
+    whole heading is the target, and the keyboard reaches it.
+    """
+
+    def __init__(self, title, on_toggle, folded=False):
+        self.name = title.lower()
+        self.folded = folded
         self.widget = Gtk.Box(spacing=10)
         self.widget.add_css_class('dev-band')
+        self.button = Gtk.Button(halign=Gtk.Align.START)
+        self.button.add_css_class('flat')
+        self.button.add_css_class('dev-band-toggle')
+        inner = Gtk.Box(spacing=10)
+        arrow = Gtk.Image.new_from_icon_name('pan-down-symbolic')
+        arrow.add_css_class('dev-chevron')
         self.title = micro(title)
         self.title.add_css_class('dev-band-title')
         self.count = Gtk.Label(valign=Gtk.Align.CENTER)    # not the row's
         self.count.add_css_class('dev-band-count')        # height (Hidden)
-        self.widget.append(self.title)
-        self.widget.append(self.count)
+        inner.append(arrow)
+        inner.append(self.title)
+        inner.append(self.count)
+        self.button.set_child(inner)
+        self.button.connect('clicked', lambda _b: on_toggle(self))
+        self.widget.append(self.button)
+        self.set_folded(folded)
+
+    def set_folded(self, folded):
+        self.folded = bool(folded)
+        if self.folded:
+            self.widget.add_css_class('folded')
+        else:
+            self.widget.remove_css_class('folded')
+        what = self.name
+        self.button.set_tooltip_text(f'Show {what}' if self.folded
+                                     else f'Collapse {what}')
+        self.button.update_state([Gtk.AccessibleState.EXPANDED],
+                                 [int(not self.folded)])
 
     def set_count(self, shown, total):
         self.count.set_label(str(total) if shown == total
                              else f'{shown} of {total}')
+
+
+def _load_folds():
+    """(folded sections, folded cards) from ui.json, whatever it holds."""
+    saved = prefs.get('devices_folded')
+    saved = saved if isinstance(saved, dict) else {}
+
+    def strings(key):
+        value = saved.get(key)
+        return {v for v in value if isinstance(v, str)} \
+            if isinstance(value, list) else set()
+    return strings('sections') & {'outputs', 'inputs'}, strings('cards')
+
+
+def fold_key(node):
+    """A card's fold, by direction and name: ids and serials do not last."""
+    return ('out:' if node.is_sink else 'in:') + node.name
 
 
 class DevicesPage:
@@ -98,16 +150,20 @@ class DevicesPage:
         self._default_ts = 0.0          # when the user last clicked a star
         self.dragging = None            # the stream an app chip is carrying
         self._held_rebuild = False      # a rebuild that waited for the drop
+        self._folded_sections, self._folded_cards = _load_folds()
 
-        self.box = ColumnBox(spacing=16, max_columns=3)
+        # keep_columns: a card folding stays in its column (module doc).
+        self.box = ColumnBox(spacing=16, max_columns=3, keep_columns=True)
         self.box.set_margin_top(18)
         self.box.set_margin_bottom(32)
         self.box.set_margin_start(16)
         self.box.set_margin_end(16)
 
         self._build_toolbar()
-        self.out_band = _Band('Outputs')
-        self.in_band = _Band('Inputs')
+        self.out_band = _Band('Outputs', self._on_band,
+                              'outputs' in self._folded_sections)
+        self.in_band = _Band('Inputs', self._on_band,
+                             'inputs' in self._folded_sections)
         self._build_hidden()
         self.box.append(self.toolbar, span=True)
 
@@ -140,16 +196,10 @@ class DevicesPage:
 
     def _build_hidden(self):
         self.hidden = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.hidden_band = _Band('Hidden')
-        head = self.hidden_band.widget
-        self.hidden_toggle = Gtk.ToggleButton(label='Show')
-        self.hidden_toggle.add_css_class('flat')
-        self.hidden_toggle.add_css_class('dev-small')
-        self.hidden_toggle.connect('toggled', self._on_hidden_toggled)
-        spacer = Gtk.Box(hexpand=True)
-        head.append(spacer)
-        head.append(self.hidden_toggle)
-        self.hidden.append(head)
+        # Folded until asked for, each time the page is built, as before;
+        # only Outputs and Inputs remember theirs.
+        self.hidden_band = _Band('Hidden', self._on_band, folded=True)
+        self.hidden.append(self.hidden_band.widget)
         self.hidden_note = Gtk.Label(
             xalign=0, wrap=True,
             label='A hidden device is gone from the audio graph, so this is '
@@ -166,10 +216,36 @@ class DevicesPage:
         self.hidden.append(self.hidden_reveal)
         self.hidden.set_visible(False)
 
-    def _on_hidden_toggled(self, btn):
-        shown = btn.get_active()
-        btn.set_label('Hide' if shown else 'Show')
-        self.hidden_reveal.set_reveal_child(shown)
+    # ------------------------------------------------------------ folding --
+    def _on_band(self, band):
+        band.set_folded(not band.folded)
+        if band is self.hidden_band:
+            self.hidden_reveal.set_reveal_child(not band.folded)
+            return
+        name = 'outputs' if band is self.out_band else 'inputs'
+        if band.folded:
+            self._folded_sections.add(name)
+        else:
+            self._folded_sections.discard(name)
+        self._save_folds()
+        self._filter()
+
+    def fold_card(self, card, folded):
+        key = fold_key(card.node)
+        if folded:
+            self._folded_cards.add(key)
+        else:
+            self._folded_cards.discard(key)
+        card.set_folded(folded)
+        self._save_folds()
+
+    def _save_folds(self):
+        try:
+            prefs.save(devices_folded={
+                'sections': sorted(self._folded_sections),
+                'cards': sorted(self._folded_cards)})
+        except OSError:
+            pass            # a read-only config: the fold still holds now
 
     # ------------------------------------------------------- live state --
     def _on_map(self, *_args):
@@ -336,7 +412,8 @@ class DevicesPage:
             self.box.append(band.widget, span=True)
             for node in _order(nodes, sink):
                 card = DeviceCard(self, node,
-                                  rule_data['nodes'].get(node.name, {}), ctx)
+                                  rule_data['nodes'].get(node.name, {}), ctx,
+                                  folded=fold_key(node) in self._folded_cards)
                 self._add(card)
                 self._live_controls[card.key] = card.live
             for c in endpoints.cards_without_endpoint(data['cards'], nodes,
@@ -356,10 +433,13 @@ class DevicesPage:
         text = self.search.get_text().strip().lower()
         counts = {True: [0, 0], False: [0, 0]}
         playing = 0
+        folded = {True: self.out_band.folded, False: self.in_band.folded}
         for key in self._order:
             card = self._cards[key]
             shown = not text or text in card.filter_text
-            card.widget.set_visible(shown)
+            # A folded section keeps its count, so "2 of 5" still says
+            # what the filter found under it.
+            card.widget.set_visible(shown and not folded[card.sink])
             counts[card.sink][1] += 1
             counts[card.sink][0] += shown
             node = getattr(card, 'node', None)

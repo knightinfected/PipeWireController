@@ -18,6 +18,14 @@ Two rules shape the layout, both learned on this page:
   when the set of endpoints changes; every other change is painted in place
   by `paint()`, so a level meter is never respawned and an open popover is
   never closed by audio starting somewhere.
+
+A card folds to its head and level (the chevron, or a click on its name):
+everything under the volume line is in a revealer.  The head carries what
+must stay reachable folded: the default star, the settings gear, the format,
+and a ⚠ when the folded part holds a profile problem.  Folding is the one
+height change a card makes on purpose, so the page's `ColumnBox` keeps each
+card in its column (`keep_columns`) rather than re-balancing under the
+pointer.
 """
 
 from __future__ import annotations
@@ -125,6 +133,7 @@ class _ProfilePicker:
         self._key = None
         self._items = []
         self.updating = False
+        self.problem = ''
 
         self.dropdown = Gtk.DropDown(valign=Gtk.Align.CENTER, hexpand=True,
                                      tooltip_text='Sound card profile: which '
@@ -213,6 +222,9 @@ class _ProfilePicker:
                 f'Switch the card to {fix_name}, the best available profile '
                 f'with an {what}' if fix_name else None)
             self._fix_index = state.fix
+            # What a folded card says in its head instead (_paint_alert).
+            self.problem = (self.warn_text.get_label()
+                            if state.unavailable else '')
         finally:
             self.updating = False
 
@@ -254,7 +266,7 @@ class _ProfilePicker:
 class DeviceCard:
     """One output or input."""
 
-    def __init__(self, page, node, rule, ctx):
+    def __init__(self, page, node, rule, ctx, folded=False):
         self.page = page
         self.node = node
         self.key = (node.id, node.serial)
@@ -262,8 +274,10 @@ class DeviceCard:
         self.is_hw = node.name.startswith(('alsa_', 'bluez_'))
         self.style = page.volume_style
         self.filter_text = ''
+        self.folded = False
         self._chip_keys = {}
         self._outs = []
+        self._tags_key = None
 
         self.widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                               spacing=12, valign=Gtk.Align.START)
@@ -273,9 +287,23 @@ class DeviceCard:
             self.widget.add_css_class('virtual')
 
         self._build_head(node)
+        # The level, then everything that folds away under it.  One box with
+        # no spacing, so a folded card has no gap left where the rest was:
+        # the space above the details is the revealer child's own margin.
+        lower = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.widget.append(lower)
+        self._lower = lower
         self._build_volume(node)
+        self._rest = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                             margin_top=12)
+        self.reveal = Gtk.Revealer(
+            transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
+            transition_duration=200, child=self._rest)
+        lower.append(self.reveal)
         self._build_details(node, ctx)
         self._build_foot(node)
+        # Before the first frame, so a card built folded never animates.
+        self.set_folded(folded)
         # An app chip dragged from another card lands here: the move the
         # chip's own menu makes, as a gesture.
         drop_target(self.widget, GObject.TYPE_STRING,
@@ -304,29 +332,98 @@ class DeviceCard:
         avatar.set_valign(Gtk.Align.CENTER)
         head.append(avatar)
 
-        names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2,
+        names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3,
                         hexpand=True, valign=Gtk.Align.CENTER)
         self.title = _label(css=('dev-title',), chars=28)
         names.append(self.title)
         sub = Gtk.Box(spacing=6)
+        self.subtitle = _label(css=('caption', 'dim-label'), chars=34)
+        self.custom = pill('customized', 'warning')
+        # Shrinks like the subtitle beside it, so it never sets the card's
+        # minimum width (DR-013's 360 px window).
+        self.custom.set_ellipsize(Pango.EllipsizeMode.END)
+        self.custom.set_tooltip_text('This device has settings of its own '
+                                     '(the gear)')
+        # A folded card's stand-in for the profile warning it hides.
+        self.alert = Gtk.Image.new_from_icon_name('dialog-warning-symbolic')
+        self.alert.add_css_class('dev-alert')
+        self.alert.set_visible(False)
+        sub.append(self.subtitle)
+        sub.append(self.custom)
+        sub.append(self.alert)
+        names.append(sub)
+
+        # State and format: "● Running  48 kHz  24-bit  Stereo".  Always one
+        # line (the tags ellipsize rather than wrap), so the head is the same
+        # height whether or not the device is playing.
+        spec = Gtk.Box(spacing=6)
+        spec.add_css_class('dev-spec-line')
         # A box, not a label: a label is a whole text line tall, which drew
         # the dot as a bar.
         self.dot = Gtk.Box(valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
         self.dot.add_css_class('dev-dot')
-        self.subtitle = _label(css=('caption', 'dim-label'), chars=34)
-        self.custom = pill('customized', 'warning')
-        self.custom.set_tooltip_text('This device has settings of its own '
-                                     '(the gear below)')
-        sub.append(self.dot)
-        sub.append(self.subtitle)
-        sub.append(self.custom)
-        names.append(sub)
+        self.state = _label(css=('caption', 'dev-state'))
+        self.tags = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER)
+        spec.append(self.dot)
+        spec.append(self.state)
+        spec.append(self.tags)
+        names.append(spec)
         head.append(names)
+        # A click on the name folds or unfolds, as on an expander row.
+        click = Gtk.GestureClick()
+        click.connect('released', lambda g, n, _x, _y: (
+            self.page.fold_card(self, not self.folded) if n == 1 else None))
+        names.add_controller(click)
+        names.set_cursor_from_name('pointer')
 
+        buttons = Gtk.Box(spacing=2, valign=Gtk.Align.CENTER)
         self.star = Gtk.Button(valign=Gtk.Align.CENTER)
         self.star.connect('clicked', lambda _b: self.page.make_default(self))
-        head.append(self.star)
+        buttons.append(self.star)
+        # Up here, not in the foot, so a folded card still has it.
+        self.gear = None
+        if self.is_hw:
+            self.gear = Gtk.Button(icon_name='emblem-system-symbolic',
+                                   valign=Gtk.Align.CENTER,
+                                   tooltip_text='Device settings: name, '
+                                                'format, buffering, hiding')
+            self.gear.add_css_class('flat')
+            self.gear.add_css_class('dev-icon')
+            self.gear.connect('clicked',
+                              lambda _b: self.page.open_settings(self))
+            buttons.append(self.gear)
+        self.chevron = Gtk.Button(valign=Gtk.Align.CENTER)
+        self.chevron.add_css_class('flat')
+        self.chevron.add_css_class('dev-icon')
+        arrow = Gtk.Image.new_from_icon_name('pan-down-symbolic')
+        arrow.add_css_class('dev-chevron')
+        self.chevron.set_child(arrow)
+        self.chevron.connect('clicked', lambda _b: self.page.fold_card(
+            self, not self.folded))
+        buttons.append(self.chevron)
+        head.append(buttons)
         self.widget.append(head)
+
+    def set_folded(self, folded):
+        """Fold to the head and level, or unfold.  Animated only when the
+        card is on screen; GTK skips the slide by itself with animations
+        off or reduced motion (measured, GTK 4.24)."""
+        self.folded = bool(folded)
+        self.reveal.set_reveal_child(not self.folded)
+        if self.folded:
+            self.widget.add_css_class('folded')
+        else:
+            self.widget.remove_css_class('folded')
+        self.chevron.set_tooltip_text('Expand' if self.folded else 'Collapse')
+        self.chevron.update_state([Gtk.AccessibleState.EXPANDED],
+                                  [int(not self.folded)])
+        self._paint_alert()
+
+    def _paint_alert(self):
+        problem = self.profile.problem if self.profile is not None else ''
+        self.alert.set_visible(self.folded and bool(problem))
+        self.alert.set_tooltip_text(
+            f'{problem} Expand the card to fix it.' if problem else None)
 
     def _build_volume(self, node):
         self.live = {
@@ -368,7 +465,7 @@ class DeviceCard:
             line.append(self.channels)
         self.live['volume'] = self.vol
         self.live['mute'] = self.mute
-        self.widget.append(line)
+        self._lower.append(line)
 
     def _build_panel(self, *_a):
         # Built on first open, as the Mixer does: most cards are never asked,
@@ -438,15 +535,14 @@ class DeviceCard:
         # What is playing / recording.  Always present: see the module doc.
         self.apps_row, self.apps_box = self._row(
             'Playing' if self.sink else 'Recording')
-        self.widget.append(self.details)
+        self._rest.append(self.details)
 
     def _build_foot(self, node):
         foot = Gtk.Box(spacing=6)
         foot.add_css_class('dev-foot')
-        self.fmt = _label(css=('dev-format',), chars=36)
-        self.fmt.set_hexpand(True)
-        self.fmt.set_valign(Gtk.Align.CENTER)
-        foot.append(self.fmt)
+        # The format moved up into the head (the spec line); the foot is
+        # the card's actions, at the end.
+        foot.append(Gtk.Box(hexpand=True))
 
         if self.sink:
             test = Gtk.Button(valign=Gtk.Align.CENTER)
@@ -460,22 +556,13 @@ class DeviceCard:
             self.test = test
             foot.append(test)
 
-        if self.is_hw:
-            gear = Gtk.Button(icon_name='emblem-system-symbolic',
-                              valign=Gtk.Align.CENTER,
-                              tooltip_text='Device settings: name, format, '
-                                           'buffering, hiding')
-            gear.add_css_class('flat')
-            gear.connect('clicked', lambda _b: self.page.open_settings(self))
-            foot.append(gear)
-
         more = Gtk.MenuButton(icon_name='view-more-symbolic',
                               valign=Gtk.Align.CENTER,
                               tooltip_text='More')
         more.add_css_class('flat')
         more.set_menu_model(self._menu(node))
         foot.append(more)
-        self.widget.append(foot)
+        self._rest.append(foot)
 
     def _menu(self, node):
         group = Gio.SimpleActionGroup()
@@ -525,6 +612,7 @@ class DeviceCard:
             self.star.set_tooltip_text(f'The default {what}: apps play here '
                                        'unless told otherwise')
             self.star.remove_css_class('flat')
+            self.star.remove_css_class('dev-icon')
             self.star.add_css_class('dev-default')
             self.widget.add_css_class('is-default')
         else:
@@ -533,6 +621,7 @@ class DeviceCard:
             self.star.set_tooltip_text(f'Make this the default {what}')
             self.star.remove_css_class('dev-default')
             self.star.add_css_class('flat')
+            self.star.add_css_class('dev-icon')
             self.widget.remove_css_class('is-default')
 
     def paint(self, node, ctx):
@@ -546,8 +635,8 @@ class DeviceCard:
         for css in ('ok', 'warn', 'err', 'dim'):
             self.dot.remove_css_class(css)
         self.dot.add_css_class(endpoints.state_dot(node))
-        self.dot.set_tooltip_text(endpoints.STATE_LABEL.get(node.state, ''))
-        self.fmt.set_label(endpoints.format_text(node))
+        self.state.set_label(endpoints.STATE_LABEL.get(node.state, ''))
+        self._paint_tags(endpoints.format_tags(node), node.state == 'running')
         self.vol.set_meter(node.serial)
         # The star is not painted here: `sync_device_levels` owns it, and
         # holds it after a click until the graph has caught up.
@@ -557,6 +646,7 @@ class DeviceCard:
             card = endpoints.card_of(node, ctx['cards'])
             if card is not None:
                 self.profile.update(card, in_grace)
+        self._paint_alert()
         if self.sends_row is not None:
             self._paint_sends(node, act, ctx)
         self._paint_from(act)
@@ -564,6 +654,31 @@ class DeviceCard:
             self._paint_apps(act, ctx)
         self.filter_text = ' '.join((
             node.description, node.name, endpoints.subtitle(node))).lower()
+
+    def _paint_tags(self, tags, running):
+        """The format tags, refilled only when they change."""
+        key = (tuple(tags), running)
+        if key == self._tags_key:
+            return
+        self._tags_key = key
+        _clear(self.tags)
+        for text in tags:
+            tag = _label(text, css=('dev-spec',))
+            if running:
+                tag.add_css_class('running')
+            self.tags.append(tag)
+        self.tags.set_tooltip_text(
+            'The format the device is running at' if running else
+            'Channel layout. Rate and bit depth show while the device runs')
+
+    def spec_text(self):
+        """'Running · 48 kHz · 24-bit · Stereo', as drawn (for harnesses)."""
+        parts = [self.state.get_label()]
+        child = self.tags.get_first_child()
+        while child is not None:
+            parts.append(child.get_label())
+            child = child.get_next_sibling()
+        return ' · '.join(p for p in parts if p)
 
     def _paint_ports(self, node, in_grace):
         if self.port_row is None:
