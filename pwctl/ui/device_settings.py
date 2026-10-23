@@ -10,6 +10,11 @@ window's banner sits behind the dialog.
 Rules are written as `monitor.alsa.rules` / `monitor.bluez.rules`
 (`backend/rules.py`), so this exists for hardware only: a software device's
 settings live on the page that made it.
+
+Every explanation is a tooltip, not a line under its row (the user's call,
+2026-10-23: "the idea is to look clean"): a row's on the row, a group's on
+the group, which is what its heading shows when hovered.  Tooltip text is
+plain text, never markup, so a device name goes in unescaped.
 """
 
 from __future__ import annotations
@@ -18,10 +23,10 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from ..backend import rules  # noqa: E402
-from .widgets import async_call, esc  # noqa: E402
+from .widgets import async_call  # noqa: E402
 
 # Which group each schema key belongs to, in display order.  Priority keys
 # are left to App Policies, as they always were.
@@ -33,6 +38,24 @@ GROUPS = (
      ('api.alsa.period-size', 'api.alsa.headroom', 'node.latency')),
     ('Power', '', ('session.suspend-timeout-seconds',)),
 )
+
+# The hover text per row.  The schema's own sentences are shared with App
+# Policies and say "0 = …" where this dialog shows "Auto", so the rows here
+# say it the way they are drawn; anything not listed uses the schema's.
+TIPS = {
+    'audio.rate': 'A fixed rate for this device only. Auto follows the '
+                  'graph.',
+    'audio.format': 'Force the ALSA sample format. Auto negotiates the best '
+                    'available.',
+    'api.alsa.period-size': 'The ALSA period in frames: the hardware chunk '
+                            'size underneath the quantum. Auto is the '
+                            'driver default.',
+    'api.alsa.headroom': 'Extra buffered frames. Raise it to fix crackling '
+                         'USB interfaces.',
+    'node.latency': 'Ask the graph for this quantum while the device is in '
+                    'use, for example 256/48000. Leave it empty for no '
+                    'preference.',
+}
 
 
 class DeviceSettingsDialog:
@@ -64,17 +87,19 @@ class DeviceSettingsDialog:
 
         # -- name and visibility ------------------------------------------
         g = Adw.PreferencesGroup(title='Name and visibility')
-        rename = Adw.EntryRow(title='Name (empty: the device’s own name)')
+        rename = Adw.EntryRow(title='Name')
+        rename.set_tooltip_text('Leave it empty to use the device’s own '
+                                'name.')
         rename.set_text((rule or {}).get('rename', ''))
         rename.set_show_apply_button(True)
         rename.connect('apply', lambda r: self._save(
             rename=r.get_text().strip()))
         g.add(rename)
 
-        hide = Adw.SwitchRow(
-            title=f'Hide this {what}',
-            subtitle='It disappears from every app. Unhide it from the '
-                     'Hidden list at the bottom of the Devices page.')
+        hide = Adw.SwitchRow(title=f'Hide this {what}')
+        hide.set_tooltip_text('It disappears from every app. Unhide it from '
+                              'the Hidden list at the bottom of the Devices '
+                              'page.')
         hide.set_active(bool((rule or {}).get('hide')))
         hide.connect('notify::active', lambda r, _p: (
             None if self.updating else self._save(hide=r.get_active())))
@@ -82,10 +107,10 @@ class DeviceSettingsDialog:
 
         if card:
             card_name, card_desc = card
-            card_hide = Adw.SwitchRow(
-                title='Hide the whole sound card',
-                subtitle=f'Disables {esc(card_desc)} and every input and '
-                         'output it provides, everywhere.')
+            card_hide = Adw.SwitchRow(title='Hide the whole sound card')
+            card_hide.set_tooltip_text(
+                f'Disables {card_desc} and every input and output it '
+                'provides, everywhere.')
             card_hide.set_active(bool((card_rule or {}).get('hide')))
             card_hide.connect('notify::active', lambda r, _p: (
                 None if self.updating else self._save_card(
@@ -97,7 +122,9 @@ class DeviceSettingsDialog:
         for title, description, keys in GROUPS:
             g = Adw.PreferencesGroup(title=title)
             if description:
-                g.set_description(description)
+                # On the group: its rows carry their own, so this one shows
+                # over the heading (GTK asks the innermost widget first).
+                g.set_tooltip_text(description)
             for key in keys:
                 if key in schema:
                     g.add(self._prop_row(key, *schema[key], props, node))
@@ -105,11 +132,15 @@ class DeviceSettingsDialog:
 
         # -- elsewhere ----------------------------------------------------
         g = Adw.PreferencesGroup()
-        prio = Adw.ActionRow(
-            title='Default and clock priority',
-            subtitle='Which device wins automatic selection, and which one '
-                     'drives the clock, are set in App Policies.',
-            activatable=True)
+        prio = Adw.ActionRow(title='Default and clock priority',
+                             activatable=True)
+        prio.set_tooltip_text('Which device wins automatic selection, and '
+                              'which one drives the clock, are set in App '
+                              'Policies.')
+        # Where the arrow goes, said in two words rather than a sentence.
+        where = Gtk.Label(label='App Policies', valign=Gtk.Align.CENTER)
+        where.add_css_class('dim-label')
+        prio.add_suffix(where)
         prio.add_suffix(Gtk.Image.new_from_icon_name('go-next-symbolic'))
         prio.connect('activated', lambda _r: (self.close(),
                                               self.window.goto('policy')))
@@ -136,17 +167,23 @@ class DeviceSettingsDialog:
             self.dialog.close()
 
     def toast(self, text):
+        """Plain text.  The dialog's own toasts do not go through
+        `Window.toast()`, so they escape here: an Adw.Toast title is markup,
+        and an error with `<` in it showed as a blank toast (main's
+        `toast-markup` fix covers the window's toasts only)."""
         if self.dialog is not None:
-            self.dialog.add_toast(Adw.Toast(title=text))
+            self.dialog.add_toast(Adw.Toast(
+                title=GLib.markup_escape_text(str(text))))
         else:
             self.window.toast(text)
 
     def _prop_row(self, key, title, subtitle, kind, extra, props, node):
         current = props.get(key)
+        tip = TIPS.get(key, subtitle)
         if kind == 'enum':
             labels = [('Auto' if c in (0, 'auto') else str(c)) for c in extra]
-            row = Adw.ComboRow(title=title, subtitle=subtitle,
-                               model=Gtk.StringList.new(labels))
+            row = Adw.ComboRow(title=title, model=Gtk.StringList.new(labels))
+            row.set_tooltip_text(tip)
             try:
                 row.set_selected(extra.index(current)
                                  if current is not None else 0)
@@ -157,11 +194,10 @@ class DeviceSettingsDialog:
                     props={key: extra[r.get_selected()]})))
             return row
         if kind == 'latency':
-            # An entry row has no subtitle line, and the schema's sentence
-            # cut off mid-word as a title (seen 2026-10-22).
-            row = Adw.EntryRow(title=f'{title}, e.g. 256/48000 '
-                                     '(empty: no preference)')
-            row.set_tooltip_text(subtitle)
+            # The example lives in the tooltip with the rest; the title
+            # alone, as every other row here.
+            row = Adw.EntryRow(title=title)
+            row.set_tooltip_text(tip)
             row.set_text(str(current or ''))
             row.set_show_apply_button(True)
             row.connect('apply', lambda r: self._save(
@@ -170,7 +206,7 @@ class DeviceSettingsDialog:
         lo, hi = extra
         row = Adw.SpinRow.new_with_range(lo, hi, 1)
         row.set_title(title)
-        row.set_subtitle(subtitle)
+        row.set_tooltip_text(tip)
         try:
             row.set_value(float(current if current is not None
                                 else node.props.get(key, 0) or 0))
