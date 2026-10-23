@@ -9,7 +9,7 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from .backend import (graph, levels, livestate, prefs, presets, pw, system,
                       units)
@@ -69,6 +69,19 @@ RESTART_UNITS = {
 WATCHED_SERVICES = ('pipewire.service', 'wireplumber.service',
                     'pipewire-pulse.service')
 
+# The narrowest and shortest the window may be: GNOME's guideline for an app
+# that scales down to a phone.  A tiling compositor gives the window its tile
+# whatever minimum the app asks for, so this is the width every page has to
+# work at, not a request.
+MIN_WIDTH, MIN_HEIGHT = 360, 294
+
+# Below this window width the sidebar stops sitting beside the page and slides
+# over it instead.  In sp, so it follows the text size.  840 is the widest
+# page today (the Patchbay, 603) plus the sidebar, so a page never has to fit
+# beside the sidebar in less than it needs.  It comes down to 600 (the
+# sidebar plus a 360 page) once every page fits in 360.
+SIDEBAR_COLLAPSE_SP = 840
+
 
 class _HeaderFit(Gtk.Widget):
     """The content header bar, with its labels shown only where they fit.
@@ -122,19 +135,46 @@ class Window(Adw.ApplicationWindow):
                          default_height=int(prefs.get('win_height') or 760))
         if prefs.get('win_maximized'):
             self.maximize()
+        # With a breakpoint on it (the sidebar's, below), the window's
+        # minimum is this size request and no longer its content's minimum,
+        # so it takes the width it is given.  A page wider than that is cut
+        # off at the window's edge instead of being drawn under whatever is
+        # tiled next to it.
+        self.set_size_request(MIN_WIDTH, MIN_HEIGHT)
         self.connect('close-request', self._save_window_state)
         self._pending_restarts: set[str] = set()
         self.advanced = bool(prefs.get('advanced'))
         self._advanced_widgets: list = []
         self._last_default_sink = None
+        self._current_row = None
 
         self.toaster = Adw.ToastOverlay()
+        # Not `hhomogeneous`: a stack otherwise takes the minimum width of its
+        # widest page on every page, so the Patchbay's toolbar set the
+        # narrowest width of the Dashboard too.  Vertical sizing stays
+        # homogeneous: pages are scrollers, so nothing gains from it.
         self.stack = Gtk.Stack(
-            transition_type=Gtk.StackTransitionType.CROSSFADE)
+            transition_type=Gtk.StackTransitionType.CROSSFADE,
+            hhomogeneous=False)
 
         # sidebar
-        self.listbox = Gtk.ListBox(css_classes=['navigation-sidebar'])
-        self.listbox.connect('row-selected', self._on_select)
+        # Selection is off.  The current page's row is drawn with the
+        # selected state instead (`_highlight`), and pages change on
+        # activation.  With selection on, hiding and showing the sidebar
+        # moved to the next page each time: GtkListBox moves focus to the
+        # row after the focused one when it gets focus back, and selection
+        # follows focus.
+        self.listbox = Gtk.ListBox(css_classes=['navigation-sidebar'],
+                                   selection_mode=Gtk.SelectionMode.NONE)
+        self.listbox.connect('row-activated', self._on_activate)
+        # Up/Down still change the page, as they did when selection followed
+        # focus: after a navigation key moves the focus, open the row it
+        # landed on.  Only those keys, so focus arriving by any other route
+        # (Tab, the sidebar coming back) never changes the page.
+        keys = Gtk.EventControllerKey(
+            propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        keys.connect('key-pressed', self._on_sidebar_key)
+        self.listbox.add_controller(keys)
         for name, title, icon, section in PAGES:
             row = Gtk.ListBoxRow()
             box = Gtk.Box(spacing=12, margin_top=10, margin_bottom=10,
@@ -217,12 +257,38 @@ class Window(Adw.ApplicationWindow):
         # theme instead of guessing at a border colour.
         content_view.set_top_bar_style(Adw.ToolbarStyle.RAISED_BORDER)
 
-        split = Adw.NavigationSplitView(
-            min_sidebar_width=210, max_sidebar_width=240)
-        split.set_sidebar(Adw.NavigationPage.new(side_view, 'Menu'))
-        split.set_content(Adw.NavigationPage.new(content_view, 'Content'))
-        self.toaster.set_child(split)
+        # An overlay split, not a navigation split.  Both collapse, but a
+        # collapsed navigation split makes the sidebar and the page separate
+        # screens: every page change costs two clicks, and the Advanced
+        # switch in the sidebar's footer ends up behind one of them.  An
+        # overlay keeps the page on screen and slides the sidebar over it.
+        self.split = Adw.OverlaySplitView(
+            min_sidebar_width=210, max_sidebar_width=240,
+            show_sidebar=bool(prefs.get('sidebar_shown')))
+        self.split.set_sidebar(side_view)
+        self.split.set_content(content_view)
+        self.toaster.set_child(self.split)
         self.set_content(self.toaster)
+
+        bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(
+            f'max-width: {SIDEBAR_COLLAPSE_SP}sp'))
+        bp.add_setter(self.split, 'collapsed', True)
+        self.add_breakpoint(bp)
+        self.split.connect('notify::collapsed', self._on_collapsed)
+        self.split.connect('notify::show-sidebar', self._on_sidebar_shown)
+
+        # Shows and hides the sidebar, at any width.  It is packed before
+        # anything a page adds, so it is the first thing in the header on
+        # every page, and bound both ways so it also follows a change the
+        # breakpoint makes.
+        self.sidebar_button = Gtk.ToggleButton()
+        self.split.bind_property(
+            'show-sidebar', self.sidebar_button, 'active',
+            GObject.BindingFlags.SYNC_CREATE
+            | GObject.BindingFlags.BIDIRECTIONAL)
+        self.sidebar_button.connect('notify::active', self._sync_sidebar_icon)
+        self._sync_sidebar_icon()
+        content_header.pack_start(self.sidebar_button)
 
         # pages
         self.pages = {
@@ -274,7 +340,7 @@ class Window(Adw.ApplicationWindow):
             for i, (n, _t, _i2, _s) in enumerate(PAGES):
                 if n == want:
                     start = i
-        self.listbox.select_row(self.listbox.get_row_at_index(start))
+        self.goto(PAGES[start][0])
         GLib.timeout_add_seconds(5, self._autoload_tick)
 
         # link / service watcher for system notifications
@@ -431,16 +497,74 @@ class Window(Adw.ApplicationWindow):
         lbl.set_margin_start(14)
         row.set_header(lbl)
 
-    def _on_select(self, _lb, row):
-        if row:
-            self.stack.set_visible_child_name(row.page_name)
-            title = next(t for n, t, _i, _s in PAGES if n == row.page_name)
-            self._set_header_widget(row.page_name, title)
-            dash = getattr(self, 'pages', {}).get('dashboard')
-            if dash is not None:
-                dash.set_on_page(row.page_name == 'dashboard')
-            if not self._debug_page:
-                prefs.save(last_page=row.page_name)
+    def _on_activate(self, _lb, row):
+        if row is not None:
+            self.goto(row.page_name)
+
+    def _on_sidebar_key(self, _ctl, keyval, _code, state):
+        """Up, Down, Home, End, Page Up/Down: follow the focus to its page.
+
+        The list moves the focus itself, after this handler; the page
+        follows once it has.
+        """
+        if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK):
+            return False
+        if keyval in (Gdk.KEY_Up, Gdk.KEY_Down, Gdk.KEY_KP_Up,
+                      Gdk.KEY_KP_Down, Gdk.KEY_Home, Gdk.KEY_End,
+                      Gdk.KEY_Page_Up, Gdk.KEY_Page_Down):
+            GLib.idle_add(self._follow_sidebar_focus)
+        return False
+
+    def _follow_sidebar_focus(self):
+        row = self.listbox.get_focus_child()
+        if isinstance(row, Gtk.ListBoxRow) and row is not self._current_row:
+            self.goto(row.page_name)
+        return False
+
+    def _highlight(self, current):
+        """Draw one row as the current page, without selecting anything.
+
+        `.navigation-sidebar` styles `row:selected`, which CSS reads from the
+        SELECTED state flag, so setting the flag keeps libadwaita's look.
+        The flag is only a look, though: a screen reader learns which page
+        is current from the accessible state, set beside it.  It takes
+        lists, and ints rather than bools (gotchas).
+        """
+        i = 0
+        while (row := self.listbox.get_row_at_index(i)) is not None:
+            on = row is current
+            if on:
+                row.set_state_flags(Gtk.StateFlags.SELECTED, False)
+            else:
+                row.unset_state_flags(Gtk.StateFlags.SELECTED)
+            row.update_state([Gtk.AccessibleState.SELECTED], [int(on)])
+            i += 1
+        self._current_row = current
+
+    # ------------------------------------------------------------ sidebar --
+    def _sync_sidebar_icon(self, *_a):
+        """The button shows what a click will do, not what is there now."""
+        shown = self.sidebar_button.get_active()
+        self.sidebar_button.set_icon_name(
+            'pan-start-symbolic' if shown else 'sidebar-show-symbolic')
+        self.sidebar_button.set_tooltip_text(
+            'Hide the sidebar' if shown else 'Show the sidebar')
+
+    def _on_collapsed(self, split, _p):
+        """The breakpoint was crossed, one way or the other."""
+        # Narrow, the window opens on its page rather than with the sidebar
+        # over it.  Wide again, the sidebar comes back as it was last left
+        # while there was room for it.
+        split.set_show_sidebar(
+            False if split.get_collapsed() else bool(prefs.get('sidebar_shown')))
+
+    def _on_sidebar_shown(self, split, _p):
+        # Only a choice made while the sidebar has a place of its own is
+        # remembered.  Opening it over the page in a narrow window is how
+        # you reach another page, not a preference.
+        shown = split.get_show_sidebar()
+        if not split.get_collapsed() and shown != bool(prefs.get('sidebar_shown')):
+            prefs.save(sidebar_shown=shown)
 
     def _set_header_widget(self, page_name, title):
         """A page may own the header bar's title slot.
@@ -509,10 +633,24 @@ class Window(Adw.ApplicationWindow):
         return False
 
     def goto(self, name):
-        for i, (n, _t, _i2, _s) in enumerate(PAGES):
-            if n == name:
-                self.listbox.select_row(self.listbox.get_row_at_index(i))
-                return
+        """Show a page.  Every way of changing page comes through here."""
+        index = next((i for i, (n, _t, _i2, _s) in enumerate(PAGES)
+                      if n == name), None)
+        if index is None:
+            return
+        row = self.listbox.get_row_at_index(index)
+        self._highlight(row)
+        self.stack.set_visible_child_name(name)
+        self._set_header_widget(name, PAGES[index][1])
+        dash = getattr(self, 'pages', {}).get('dashboard')
+        if dash is not None:
+            dash.set_on_page(name == 'dashboard')
+        if not getattr(self, '_debug_page', False):
+            prefs.save(last_page=name)
+        # In a narrow window the sidebar lies over the page: once a page is
+        # picked, get out of its way.
+        if self.split.get_collapsed() and self.split.get_show_sidebar():
+            self.split.set_show_sidebar(False)
 
     # ------------------------------------------------------- notifications --
     def notify_user(self, title: str, body: str):

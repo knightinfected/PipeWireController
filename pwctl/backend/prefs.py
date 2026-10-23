@@ -18,6 +18,9 @@ DEFAULTS = {
     'autoload_presets': False,   # apply device preset when default changes
     'device_presets': {},        # node.name -> preset dict (backend/presets)
     'last_page': 'dashboard',    # restored on startup
+    # Whether the sidebar is shown, while the window is wide enough to have
+    # it beside the page.  A narrow window always opens on its page.
+    'sidebar_shown': True,
     'dashboard_tab': 'overview',
     # Dashboard → Overview → Favourites, as a list of `node.name`.  Names, not
     # ids or serials: an id is recycled and a serial changes every time a node
