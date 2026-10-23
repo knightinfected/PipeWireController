@@ -151,6 +151,39 @@ case since v0.3.0. Messages now show their text exactly as written.
 The switch already shows it. If starting or stopping the device fails, a
 message still says so, with the reason.
 
+**Bug: the Surround speaker test could play on the wrong speakers**
+
+In Surround Setup, testing a speaker played the tone on your default output
+instead of the sound card you picked whenever that card had appeared after
+you logged in: one plugged in later, or one whose profile you had switched.
+With no card picked, the tone could also follow wherever PipeWire last
+remembered sending it. It now plays on the card you picked, or on your
+default output when you haven't picked one. This had been the case since
+v0.1.0.
+
+**Bug: Monitor's node list jumped back to the top on every refresh**
+
+The Node activity (pw-top) list on the Monitor page went back to its first
+line every time it refreshed, every 1 to 5 seconds depending on your
+setting. So you couldn't read the end of a long list, or select text long
+enough to copy it. It now stays where you scrolled it. Reported in
+[#16](https://github.com/knightinfected/PipeWireController/issues/16).
+
+**Bug: the Dashboard said PipeWire-Pulse was not running after every
+login**
+
+PipeWire-Pulse starts by itself when the first app that needs it connects.
+Until then the Dashboard said "PipeWire-Pulse is not running — audio will
+not work", which wasn't true. The Dashboard and Monitor now show it as
+"on demand", and the Dashboard says audio is running. If it fails, the
+warning still appears. This had been the case since v0.6.0.
+
+**Bug: Signal Paths' equalizer said its bands change while audio plays**
+
+The equalizer stage's settings said its bands' frequency, gain and Q could
+be changed while audio is playing. They can't: saving rebuilds the strip,
+which stops its sound for a moment. The text now says so.
+
 **Fewer processes on every refresh**
 
 To find out which devices are the defaults, every page that lists devices
