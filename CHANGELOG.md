@@ -201,6 +201,31 @@ using. The point where the labels go depends on your font size and on the
 style's name, because the app measures the labels rather than assuming a
 width. In a wider window nothing changes.
 
+**Bug: in a narrow window the app drew under the windows beside it**
+
+The window couldn't be made narrower than about 810 pixels on any page,
+because every page was given the room the widest one needed. When a tiling
+desktop gave it less than that (half of a 1440-pixel screen, say), the app
+drew past the edge of its own window and under the windows next to it. Now the
+window takes whatever width it's given, down to 360 pixels, and nothing is
+drawn outside it.
+
+- **Below about 840 pixels the sidebar slides over the page** instead of
+  sitting beside it, so the page gets the whole window. The new button at the
+  top left opens it, and it closes again when you pick a page, click outside
+  it, or press Escape.
+- **The same button hides the sidebar in a wide window too**, and the app
+  remembers whether you left it shown.
+- **Up and Down in the sidebar still change pages.**
+- **Some pages still need more than 360 pixels**: the Patchbay, Monitor,
+  Surround Setup, the Dashboard, Devices, the HRIR Library and Filter Chains.
+  In a window narrower than that page, its right side is cut off at the
+  window's edge. Making each of them fit is the next job.
+
+The sidebar and the narrow-window handling come from
+[lonk42](https://github.com/lonk42)'s pull request
+[#18](https://github.com/knightinfected/PipeWireController/pull/18).
+
 **Bug: some messages at the bottom of the window showed up empty**
 
 A message popping up at the bottom of the window showed as an empty box
