@@ -689,8 +689,11 @@ class StageDialog(Adw.Window):
         kind = self.stage.get('kind')
         p = self.stage.setdefault('params', {})
         if kind == 'eq':
-            g = group('Bands', 'Each band is one filter. Frequency, gain and '
-                               'Q can be changed while audio is playing.')
+            # Not live: saving regenerates the strip and restarts it (the
+            # control ports could be written live, but nothing does yet).
+            g = group('Bands', 'Each band is one filter. Changes apply when '
+                               'you save, which restarts this strip, so its '
+                               'sound stops for a moment.')
             add = icon_button('list-add-symbolic', 'Add band',
                               lambda *_: self._add_band())
             g.set_header_suffix(add)
