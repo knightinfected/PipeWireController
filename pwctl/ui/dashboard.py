@@ -1293,6 +1293,11 @@ class Dashboard:
         # packs them; see Window.__init__.
         self.view_switcher = self._build_view_switcher()
         self.style_button = self._build_style_picker()
+        # Where the switcher goes when the header is too narrow to hold it
+        # (see `set_header_tight`): a bar along the bottom, as in GNOME's
+        # own apps.  The window packs it too.  Bound to the views, so it
+        # shows whichever is current however it was chosen.
+        self.switcher_bar = Adw.ViewSwitcherBar(stack=self.views)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         root.append(self.views)
@@ -1329,6 +1334,8 @@ class Dashboard:
     _switching = False       # suppress the switcher's own navigation
 
     _header_compact = False  # the header shows icons only (see app.py)
+    _header_tight = False    # ...and has no room for the switcher at all
+    _on_page = False         # this is the page showing
 
     def _build_view_switcher(self):
         tg = Adw.ToggleGroup(can_shrink=True)
@@ -1372,18 +1379,34 @@ class Dashboard:
             toggle.set_tooltip(label if compact else '')
         self._style_content.set_label('' if compact else self._style_title())
 
+    def set_header_tight(self, tight: bool):
+        """The switcher in the header, or in the bar along the bottom.
+
+        The window calls this when its header is too narrow even for the
+        icons.  The bar shows on this page only; elsewhere the sidebar's
+        Dashboard row gets here.
+        """
+        self._header_tight = tight
+        self._view_tg.set_visible(not tight)
+        self._sync_switcher_bar()
+
+    def _sync_switcher_bar(self):
+        self.switcher_bar.set_reveal(self._header_tight and self._on_page)
+
     def _style_title(self):
         return next((s[1] for s in VOLUME_STYLES if s[0] == self.volume_style),
                     VOLUME_STYLES[0][1])
 
     def set_on_page(self, on_page: bool):
         """Called by the window when the selected page changes."""
+        self._on_page = on_page
         self._switching = True
         try:
             self._view_tg.set_active_name(
                 self.views.get_visible_child_name() if on_page else None)
         finally:
             self._switching = False
+        self._sync_switcher_bar()
 
     def _sync_switcher(self):
         name = self.views.get_visible_child_name()

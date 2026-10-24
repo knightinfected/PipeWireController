@@ -9,7 +9,8 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gtk  # noqa: E402
+from gi.repository import (Adw, Gdk, Gio, GLib, GObject, Graphene,  # noqa: E402
+                           Gsk, Gtk)
 
 from .backend import (graph, levels, livestate, prefs, presets, pw, system,
                       units)
@@ -97,14 +98,17 @@ HEADER_FADE_MAX_JUMP = 64
 
 
 class _HeaderFit(Gtk.Widget):
-    """The content header bar, with its labels shown only where they fit.
+    """The content header bar, holding only what fits in it.
 
-    It decides as it is laid out: narrower than `need`, the labelled controls
-    go to icons, and only then is the header allocated, so the first frame at
-    a new width is already right.  An `AdwBreakpointBin` was tried first and
+    It decides as it is laid out, in two steps: narrower than `need`, the
+    labelled controls go to icons; in a narrow window (the sidebar
+    collapsed), narrower than `floor` (the header with icons only), the
+    Overview/Mixer switcher leaves it too, for a bar along the bottom of the
+    Dashboard.  Only then is the header allocated, so the first frame at a
+    new width is already right.  An `AdwBreakpointBin` was tried first and
     laid the header out one frame late, which painted the very overlap this
     prevents once at every crossing (measured on the real window).  The
-    window works out `need`, `floor` and `height` in `fit_header`.
+    window works out `need`, `floor`, `least` and `height` in `fit_header`.
 
     The change itself is a crossfade.  The layout still switches at once, so
     nothing ever overlaps; only the picture eases from the header as it was
@@ -113,15 +117,23 @@ class _HeaderFit(Gtk.Widget):
     with, not a second rendering.
     """
 
-    def __init__(self, child, set_compact):
+    def __init__(self, child, set_compact, set_tight, loose):
         super().__init__()
         self._child = child
         child.set_parent(self)
         self._set_compact = set_compact
+        self._set_tight = set_tight
+        # () -> bool: the sidebar is collapsed.  Only then may the switcher
+        # go.  Beside the sidebar the header is narrow only for a few frames
+        # of its slide, and the switcher would pop out and back.
+        self._loose = loose
         self.compact = False
+        self.tight = False
         self.need = 0        # narrower than this, the labels go
-        self.floor = 0       # the header's minimum width with icons only
-        self.height = 0      # the taller of the two layouts
+        self.floor = 0       # the header's minimum width with icons only;
+        #                      narrower than this, the switcher goes
+        self.least = 0       # ...and its minimum once the switcher has gone
+        self.height = 0      # the taller of the layouts
         self._last = None    # the header as it was last drawn: its node,
         self._last_width = 0  # its width, and where its title sat
         self._last_title = (0, 0)
@@ -140,18 +152,27 @@ class _HeaderFit(Gtk.Widget):
     def do_measure(self, orientation, for_size):
         low, nat, _b1, _b2 = self._child.measure(orientation, for_size)
         if orientation == Gtk.Orientation.HORIZONTAL:
-            # The labels go before the header gets this narrow, so the
-            # icons-only minimum is the one that counts.
-            low = min(low, self.floor) if self.floor else low
+            # The labels (and, in a narrow window, the switcher) go before
+            # the header gets this narrow, so the smallest layout's minimum
+            # is the one that counts.  Beside the sidebar that is the icons'
+            # minimum, which is also what decides whether the sidebar's
+            # slide has room for the page (`Window._squeezed`).
+            least = self.least if self._loose() else self.floor
+            low = min(low, least) if least else low
         else:
             low, nat = max(low, self.height), max(nat, self.height)
         return low, nat, -1, -1
 
     def do_size_allocate(self, width, height, baseline):
         compact = width < self.need
-        if compact != self.compact:
-            self.compact = compact
-            self._set_compact(compact)
+        tight = width < self.floor and self._loose()
+        if (compact, tight) != (self.compact, self.tight):
+            if compact != self.compact:
+                self.compact = compact
+                self._set_compact(compact)
+            if tight != self.tight:
+                self.tight = tight
+                self._set_tight(tight)
             self._cross_fade(width)
         self._child.allocate(width, height, baseline, None)
 
@@ -224,6 +245,56 @@ class _HeaderFit(Gtk.Widget):
 
     def do_dispose(self):
         self._ghost = self._last = None
+        if self._child is not None:
+            self._child.unparent()
+            self._child = None
+        Gtk.Widget.do_dispose(self)
+
+
+class _PageRoom(Gtk.Widget):
+    """Holds the pages, so that a page wider than the window can't widen
+    the header.
+
+    The header and the page share one column, and a column is as wide as
+    its widest part.  So a page wider than the window was laying the header
+    out at the page's width too, and the header's end (the window buttons)
+    was cut off along with the page.  While the sidebar is collapsed this
+    reports no minimum width of its own: the page still gets the width it
+    needs and is cut off at the window's edge, but the header keeps the
+    window's width.  Beside the sidebar it measures as the page does, so
+    the sidebar's slide still never gives a page less room than it needs
+    (`Window._squeezed`).
+    """
+
+    def __init__(self, child, loose):
+        super().__init__()
+        self._child = child
+        child.set_parent(self)
+        self._loose = loose            # () -> bool: claim no minimum width
+        self.set_overflow(Gtk.Overflow.HIDDEN)
+
+    def _need(self):
+        return self._child.measure(Gtk.Orientation.HORIZONTAL, -1)[0]
+
+    def do_measure(self, orientation, for_size):
+        if orientation == Gtk.Orientation.VERTICAL and for_size >= 0:
+            # The height for the width the page is really laid out at.
+            for_size = max(for_size, self._need())
+        low, nat, _b1, _b2 = self._child.measure(orientation, for_size)
+        if orientation == Gtk.Orientation.HORIZONTAL and self._loose():
+            low = 0
+        return low, nat, -1, -1
+
+    def do_size_allocate(self, width, height, baseline):
+        wide = max(width, self._need())
+        where = None
+        if wide > width and self.get_direction() == Gtk.TextDirection.RTL:
+            # Right to left, the page starts at the right: cut off its end.
+            where = Gsk.Transform().translate(
+                Graphene.Point().init(width - wide, 0))
+        self._child.allocate(wide, height, baseline, where)
+
+    def do_dispose(self):
         if self._child is not None:
             self._child.unparent()
             self._child = None
@@ -347,13 +418,19 @@ class Window(Adw.ApplicationWindow):
         # Below the width where the header's labels fit, its three labelled
         # controls drop to their icons.  Without this the header bar keeps
         # them at full width and slides the page title on top of the
-        # Overview/Mixer switcher.  The width is measured, never a constant
-        # (see `fit_header`), so it holds for any font.
-        self._header_fit = _HeaderFit(content_header, self._set_header_compact)
+        # Overview/Mixer switcher.  Narrower still, the switcher moves to the
+        # bottom of the Dashboard, or the window buttons would be cut off.
+        # The widths are measured, never constants (see `fit_header`), so
+        # they hold for any font.
+        self._header_fit = _HeaderFit(content_header, self._set_header_compact,
+                                      self._set_header_tight, self._is_narrow)
+        self._switcher_width = None    # see fit_header
+        self._switcher_share = 0
         content_view = Adw.ToolbarView()
         content_view.add_top_bar(self._header_fit)
         content_view.add_top_bar(self.banner)
-        content_view.set_content(self.stack)
+        self._page_room = _PageRoom(self.stack, self._is_narrow)
+        content_view.set_content(self._page_room)
         # The hairline under the header bar (and under the restart banner when
         # it is showing).  libadwaita's own top-bar style, so it follows the
         # theme instead of guessing at a border colour.
@@ -385,6 +462,7 @@ class Window(Adw.ApplicationWindow):
         bp.connect('unapply', self._on_wide)
         self.add_breakpoint(bp)
         self.split.connect('notify::show-sidebar', self._on_sidebar_shown)
+        self.split.connect('notify::collapsed', self._on_collapsed)
         self._auto_hiding = False      # sliding out for the breakpoint
         self._collapse_tick = None     # watching that slide
         self._step_tick = None         # waiting for the breakpoint to land
@@ -395,13 +473,14 @@ class Window(Adw.ApplicationWindow):
         # anything a page adds, so it is the first thing in the header on
         # every page, and bound both ways so it also follows a change the
         # breakpoint makes.
-        self.sidebar_button = Gtk.ToggleButton()
+        self.sidebar_button = Gtk.ToggleButton(
+            icon_name='sidebar-show-symbolic')
         self.split.bind_property(
             'show-sidebar', self.sidebar_button, 'active',
             GObject.BindingFlags.SYNC_CREATE
             | GObject.BindingFlags.BIDIRECTIONAL)
-        self.sidebar_button.connect('notify::active', self._sync_sidebar_icon)
-        self._sync_sidebar_icon()
+        self.sidebar_button.connect('notify::active', self._sync_sidebar_tip)
+        self._sync_sidebar_tip()
         content_header.pack_start(self.sidebar_button)
 
         # pages
@@ -437,6 +516,11 @@ class Window(Adw.ApplicationWindow):
         dash = self.pages['dashboard']
         content_header.pack_start(dash.view_switcher)
         content_header.pack_end(dash.style_button)
+        # ...and where the switcher goes when the header is too narrow for
+        # it: a bar along the window's bottom, shown on the Dashboard only.
+        # The window's and not the page's, so it is the window's width
+        # even while the page is wider than that.
+        content_view.add_bottom_bar(dash.switcher_bar)
         self.fit_header()
         # The labels' widths follow the font, so a font or text-scale change
         # moves the width where they stop fitting.
@@ -656,11 +740,14 @@ class Window(Adw.ApplicationWindow):
         self._current_row = current
 
     # ------------------------------------------------------------ sidebar --
-    def _sync_sidebar_icon(self, *_a):
-        """The button shows what a click will do, not what is there now."""
+    def _sync_sidebar_tip(self, *_a):
+        """The tooltip says what a click will do.
+
+        The icon is the same sidebar in both states, and the button is drawn
+        pressed while the sidebar shows, as in GNOME's own apps.  Adwaita has
+        no separate "hide" icon to pair it with.
+        """
         shown = self.sidebar_button.get_active()
-        self.sidebar_button.set_icon_name(
-            'pan-start-symbolic' if shown else 'sidebar-show-symbolic')
         self.sidebar_button.set_tooltip_text(
             'Hide the sidebar' if shown else 'Show the sidebar')
 
@@ -729,6 +816,22 @@ class Window(Adw.ApplicationWindow):
         self._auto_hiding = True
         split.set_show_sidebar(False)
         self._collapse_tick = split.add_tick_callback(self._watch_slide)
+
+    def _is_narrow(self):
+        """Is the sidebar collapsed, so the page has the window to itself?
+
+        Only then may the header lose its switcher (`_HeaderFit`) and a
+        page wider than the window be cut off at its edge (`_PageRoom`).
+        Beside the sidebar both measure as they always did, so the slide
+        decides as before, and the sidebar collapses before any page would
+        have too little room beside it.
+        """
+        split = getattr(self, 'split', None)
+        return split is not None and split.get_collapsed()
+
+    def _on_collapsed(self, *_a):
+        self._header_fit.queue_resize()
+        self._page_room.queue_resize()
 
     def _squeezed(self):
         """The page and the sidebar beside it need more than the window has.
@@ -826,39 +929,68 @@ class Window(Adw.ApplicationWindow):
         if dash is not None:
             dash.set_header_compact(compact)
 
+    def _set_header_tight(self, tight):
+        """Move the Overview/Mixer switcher out of the header, or back.
+
+        Below the header's width with icons only, keeping it would cut off
+        the window buttons.  The Dashboard then shows the same choice as a
+        bar along its bottom; from other pages the sidebar's Dashboard row
+        gets there.
+        """
+        dash = getattr(self, 'pages', {}).get('dashboard')
+        if dash is not None:
+            dash.set_header_tight(tight)
+
     def fit_header(self, *_a):
-        """Work out the width below which the header's labels go.
+        """Work out the widths below which the labels, then the switcher, go.
 
         Measured with the labels showing: the header bar's own minimum, plus
         what each labelled control wants beyond its minimum.  The title may
         still shrink to its minimum, but the controls may not shrink below
         their natural width, because the header bar then slides the title
-        over the switcher instead of squeezing them.  The width depends on
-        the font, the page title and the current slider style's name, so it
-        is measured again when any of those changes.
+        over the switcher instead of squeezing them.  The switcher goes
+        below the minimum with icons only (`floor`), and `least` is the
+        minimum without it.  The widths depend on the font, the page title
+        and the current slider style's name, so they are measured again when
+        any of those changes.
         """
         dash = getattr(self, 'pages', {}).get('dashboard')
         if dash is None or dash.style_button.get_parent() is None:
             return                     # still being built
         fit = self._header_fit
-        labelled = (dash.view_switcher, dash.style_button,
+        switcher = dash.view_switcher
+        labelled = (switcher, dash.style_button,
                     self._presets_content.get_parent())
         horizontal, vertical = (Gtk.Orientation.HORIZONTAL,
                                 Gtk.Orientation.VERTICAL)
+        switcher.set_visible(True)
         self._set_header_compact(False)
         need = self.content_header.measure(horizontal, -1)[0]
         for w in labelled:
             low, nat, _b1, _b2 = w.measure(horizontal, -1)
             need += nat - low
-        # The taller of the two layouts, so the header keeps one height:
-        # with a large font the labelled switcher is a pixel taller than the
-        # icons, and C19 has to stay level with the sidebar's line.
+        # The tallest of the layouts, so the header keeps one height: with a
+        # large font the labelled switcher is a pixel taller than the icons,
+        # and C19 has to stay level with the sidebar's line.
         height = self.content_header.measure(vertical, -1)[0]
         self._set_header_compact(True)
         floor = self.content_header.measure(horizontal, -1)[0]
         height = max(height, self.content_header.measure(vertical, -1)[0])
+        # What the switcher takes up in the header, its spacing included.
+        # Measured by taking it out, which costs it the keyboard focus, so
+        # only when its own width has changed (a font or theme change) and
+        # never on a page change: the switcher's own click changes the page.
+        # Taking it out can only make the header lower, so `height` stands.
+        width = switcher.measure(horizontal, -1)[0]
+        if width != self._switcher_width:
+            switcher.set_visible(False)
+            self._switcher_share = (
+                floor - self.content_header.measure(horizontal, -1)[0])
+            self._switcher_width = width
+        switcher.set_visible(not fit.tight)
         self._set_header_compact(fit.compact)
         fit.need, fit.floor, fit.height = need, floor, height
+        fit.least = floor - self._switcher_share
         fit.queue_resize()
 
     def _save_window_state(self, *_a):
