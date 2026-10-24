@@ -221,6 +221,11 @@ drawn outside it.
   happen at once.
 - **The same button hides the sidebar in a wide window too**, and the app
   remembers whether you left it shown.
+- **The header always fits the window**, so its window buttons stay on
+  screen. Below about 410 pixels (it depends on your font size) the
+  Overview/Mixer switcher leaves the header, and on the Dashboard it becomes
+  a bar along the bottom of the window. A page that is still too wide for the
+  window no longer takes the header past the window's edge with it.
 - **Up and Down in the sidebar still change pages.**
 - **Some pages still need more than 360 pixels**: the Patchbay, Monitor,
   Surround Setup, the Dashboard, Devices, the HRIR Library and Filter Chains.
