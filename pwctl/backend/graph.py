@@ -7,6 +7,7 @@ the module stays daemon-version agnostic — no bindings required.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from . import levels
@@ -34,6 +35,17 @@ class Port:
     #                           i.e. which channel of the layout it carries.
     #                           NOT `id`, which is creation-ordered and puts a
     #                           card's FR before its FL often enough to matter.
+    #                           -1 only when the port has no `port.id` at all.
+    is_video: bool = False
+
+    @property
+    def media(self) -> str:
+        """'audio', 'midi' or 'video': only ports of one kind can be linked
+        (pw-link refuses MIDI into audio: exit 255, "failed to link ports:
+        Success", measured 2026-10-26)."""
+        if self.is_midi:
+            return 'midi'
+        return 'video' if self.is_video else 'audio'
 
 
 @dataclass
@@ -52,6 +64,10 @@ class GNode:
     @property
     def is_running(self) -> bool:
         return self.state == 'running'
+
+    @property
+    def is_video(self) -> bool:
+        return self.media_class.startswith('Video')
 
     @property
     def latency(self) -> str:
@@ -123,6 +139,47 @@ def _classify(mclass: str, props: dict, has_in: bool, has_out: bool) -> str:
     return 'other'
 
 
+_DIGITS = re.compile(r'(\d+)')
+
+
+def natural_key(text: str) -> tuple:
+    """Sort key that reads digit runs as numbers: `in2` before `in10`,
+    `AUX2` before `AUX10`.  Text and numbers alternate in the tuple, so two
+    keys always compare like with like."""
+    parts = _DIGITS.split(str(text).casefold())
+    return tuple(int(p) if i % 2 else p for i, p in enumerate(parts))
+
+
+def port_order(ports) -> list[Port]:
+    """One side of a node, in the order a user reads its channels.
+
+    By the node's own numbering (`port.id`), which is the channel order of an
+    audio layout (FL FR FC LFE…, AUX0 AUX1 … AUX31) and, for a JACK client,
+    the order it registered its ports (measured 2026-10-26: a client
+    registering Kick, Snare, in_10, in_2 gets port.id 0-3 in that order,
+    while the object ids came out scrambled).  Ties and ports without a
+    number go by name, digits as numbers.
+
+    A side made only of MIDI ports is a bridge of devices, not a layout:
+    its numbering is the order the devices appeared in, so it is sorted by
+    name instead, which keeps it stable across replugs.  (Issue #26: this
+    used to be a plain text sort, so 2 came after 128 and a 7.1 sink read
+    FC FL FR.)
+    """
+    ports = list(ports)
+    if ports and all(p.is_midi for p in ports):
+        return sorted(ports, key=lambda p: natural_key(p.name))
+    return sorted(ports, key=lambda p: (p.index < 0, p.index,
+                                        natural_key(p.name)))
+
+
+def _int_or(value, default=-1) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def snapshot(dump=None, include_hidden=False) -> Graph:
     """Build the complete graph. Hidden = nodes without any ports."""
     dump = dump if dump is not None else pw_dump()
@@ -146,7 +203,9 @@ def snapshot(dump=None, include_hidden=False) -> Graph:
             is_midi='midi' in fmt or 'Midi' in str(props.get('port.alias', '')),
             is_monitor=bool(props.get('port.monitor')),
             channel=str(props.get('audio.channel', '')),
-            index=int(props.get('port.id', -1) or -1))
+            # Not `int(... or -1)`: port.id is the integer 0 for every
+            # channel-0 port, and `0 or -1` made all of them -1.
+            index=_int_or(props.get('port.id')))
         ports_by_node.setdefault(node_id, []).append(port)
 
     for obj in dump:
@@ -163,11 +222,12 @@ def snapshot(dump=None, include_hidden=False) -> Graph:
         plist = ports_by_node.get(obj['id'], [])
         if not plist and not include_hidden:
             continue
-        ins = sorted((p for p in plist if p.direction == 'in'),
-                     key=lambda p: p.name)
-        outs = sorted((p for p in plist if p.direction == 'out'),
-                      key=lambda p: p.name)
         mclass = props.get('media.class', '')
+        if mclass.startswith('Video'):
+            for p in plist:
+                p.is_video = True
+        ins = port_order(p for p in plist if p.direction == 'in')
+        outs = port_order(p for p in plist if p.direction == 'out')
         node = GNode(
             id=obj['id'], name=name,
             label=(props.get('node.description') or props.get('node.nick')
