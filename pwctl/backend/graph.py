@@ -48,6 +48,13 @@ class Port:
         return 'video' if self.is_video else 'audio'
 
 
+def is_video_class(media_class: str) -> bool:
+    """Video/Source and the like, and also the streams that carry video: an
+    app taking a camera or a screen share is Stream/Input/Video (measured
+    2026-10-27, media.type=Video), and its ports say nothing about it."""
+    return 'Video' in media_class.split('/')
+
+
 @dataclass
 class GNode:
     id: int
@@ -67,7 +74,7 @@ class GNode:
 
     @property
     def is_video(self) -> bool:
-        return self.media_class.startswith('Video')
+        return is_video_class(self.media_class)
 
     @property
     def latency(self) -> str:
@@ -223,7 +230,7 @@ def snapshot(dump=None, include_hidden=False) -> Graph:
         if not plist and not include_hidden:
             continue
         mclass = props.get('media.class', '')
-        if mclass.startswith('Video'):
+        if is_video_class(mclass):
             for p in plist:
                 p.is_video = True
         ins = port_order(p for p in plist if p.direction == 'in')
