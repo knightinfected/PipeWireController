@@ -814,12 +814,16 @@ class GraphArea(Gtk.DrawingArea):
                       key=lambda n: (boxes[n.id][0], boxes[n.id][1]))
 
     def _tick(self, _widget, _clock):
-        if self.get_mapped() and any(
-                self.g.nodes.get(l.out_node) and self.g.nodes.get(l.in_node)
-                and self.g.nodes[l.out_node].is_running
-                and self.g.nodes[l.in_node].is_running
-                for l in self.g.links):
-            self.queue_draw()
+        # Redraw every frame only while a cable on screen carries sound: a
+        # hidden camera or screen share would otherwise keep the page busy.
+        if self.get_mapped():
+            drawn, nodes = self._geom().paths, self.g.nodes
+            if any(l.id in drawn
+                   and nodes.get(l.out_node) and nodes.get(l.in_node)
+                   and nodes[l.out_node].is_running
+                   and nodes[l.in_node].is_running
+                   for l in self.g.links):
+                self.queue_draw()
         return GLib.SOURCE_CONTINUE
 
     # ------------------------------------------------------------ drawing --
