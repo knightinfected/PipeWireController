@@ -35,6 +35,9 @@ DEFAULTS = {
     'win_height': 760,
     'win_maximized': False,
     'graph_positions': {},       # node.name -> [x, y] on the patchbay
+    # The Patchbay's Show menu: {'midi': bool, 'monitors': bool,
+    # 'video': bool}.  Empty means MIDI on, unused monitors and video off.
+    'graph_view': {},
     # Devices page, what is folded: {'sections': ['outputs'|'inputs'],
     # 'cards': ['out:<node.name>'|'in:<node.name>']}.  Names, as Favourites
     # are, so a fold survives a reboot and the device coming back.

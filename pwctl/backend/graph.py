@@ -265,29 +265,133 @@ def disconnect(link_id: int) -> tuple[bool, str]:
     return rc == 0, err.strip()
 
 
+def side_ports(node: GNode, direction: str, media: str | None = None,
+               monitor: bool | None = None) -> list[Port]:
+    """One side of a node, optionally only one kind of port.
+
+    `monitor=None` means: the node's ordinary ports if it has any on that
+    side, else its monitor ports (a sink's only outputs are monitors)."""
+    plist = node.outputs if direction == 'out' else node.inputs
+    if media:
+        plist = [p for p in plist if p.media == media]
+    if monitor is None:
+        plain = [p for p in plist if not p.is_monitor]
+        return plain or [p for p in plist if p.is_monitor]
+    return [p for p in plist if p.is_monitor == monitor]
+
+
+def shared_media(out_node: GNode, in_node: GNode) -> str | None:
+    """The kind of port both nodes can be patched with: audio first."""
+    outs = {p.media for p in out_node.outputs}
+    ins = {p.media for p in in_node.inputs}
+    return next((m for m in ('audio', 'midi', 'video')
+                 if m in outs and m in ins), None)
+
+
+def pair_up(outs: list[Port], ins: list[Port]) -> list[tuple[Port, Port]]:
+    """Pair two chosen lists of ports in order.  A single port on one side
+    goes to every port on the other (mono to stereo, or a stereo pair summed
+    into one input); otherwise the longer list's extra ports are left out."""
+    if not outs or not ins:
+        return []
+    if len(outs) == 1:
+        return [(outs[0], i) for i in ins]
+    if len(ins) == 1:
+        return [(o, ins[0]) for o in outs]
+    return list(zip(outs, ins))
+
+
+def plan_pairs(outs: list[Port], ins: list[Port]) -> list[tuple[Port, Port]]:
+    """Which output feeds which input when a whole node is patched.
+
+    By channel name when the two sides share any (FL to FL; a 7.1 player
+    into stereo speakers links only FL and FR), otherwise in order (AUX0 to
+    in1, AUX1 to in2…).  Only ports of one kind: the caller filters."""
+    named = {}
+    for p in ins:
+        if p.channel:
+            named.setdefault(p.channel, []).append(p)
+    if len(outs) > 1 and len(ins) > 1 and any(
+            o.channel and o.channel in named for o in outs):
+        pairs, used = [], set()
+        for o in outs:
+            target = next((p for p in named.get(o.channel, ())
+                           if p.id not in used), None)
+            if target is not None:
+                used.add(target.id)
+                pairs.append((o, target))
+        return pairs
+    return pair_up(outs, ins)
+
+
+def plan_nodes(out_node: GNode, in_node: GNode,
+               monitor: bool | None = None) -> list[tuple[Port, Port]]:
+    """`plan_pairs` for two whole nodes, in the kind of port they share."""
+    media = shared_media(out_node, in_node)
+    if media is None:
+        return []
+    return plan_pairs(side_ports(out_node, 'out', media, monitor),
+                      side_ports(in_node, 'in', media))
+
+
+_RANGE = re.compile(r'^(\d+)-(\d+)$')
+_DASH = re.compile(r'\s*[-\u2013\u2014]\s*')
+
+
+def parse_channels(text: str, count: int, ports=None) -> list[int]:
+    """'all', '3', '1,3-16', '16-1' or a name -> 0-based positions on a
+    side of `count` ports.  Channels count from 1, as the Patchbay lists
+    them.  With `ports` (that side, in order), a part that is not a number
+    picks ports by name: an exact channel (`FL`) or a name containing it
+    (`MIDI Commander` on a Midi-Bridge).  Raises ValueError with a message
+    a user can act on."""
+    text = (text or '').strip()
+    if text.casefold() in ('', 'all', '*'):
+        return list(range(count))
+    out = []
+    for part in re.split(r'[,;]+', text):
+        part = _DASH.sub('-', part.strip())  # "3 - 16" and "3–16" too
+        if not part:
+            continue
+        toks = part.split()
+        if all(_RANGE.match(t) or t.isdigit() for t in toks):
+            for tok in toks:
+                m = _RANGE.match(tok)
+                if m:
+                    a, b = int(m.group(1)), int(m.group(2))
+                    step = 1 if b >= a else -1
+                    nums = list(range(a, b + step, step))
+                else:
+                    nums = [int(tok)]
+                for n in nums:
+                    if not 1 <= n <= count:
+                        raise ValueError(
+                            f'{tok}: there {"is" if count == 1 else "are"} '
+                            f'only {count} channel{"" if count == 1 else "s"}')
+                    out.append(n - 1)
+            continue
+        if ports is None:
+            raise ValueError(f'“{part}” is not a channel number or a range '
+                             '(like 3 or 1-8)')
+        want = part.casefold()
+        hits = [k for k, p in enumerate(ports)
+                if p.channel.casefold() == want]
+        if not hits:
+            hits = [k for k, p in enumerate(ports)
+                    if want in p.name.casefold()]
+        if not hits:
+            raise ValueError(f'no channel is called “{part}”')
+        out.extend(hits)
+    return out
+
+
 def connect_nodes(out_node: GNode, in_node: GNode) -> int:
-    """Best-effort node-to-node patch: match ports by channel, else by order.
+    """Best-effort node-to-node patch (see `plan_nodes`).
     Returns the number of links created."""
-    outs = [p for p in out_node.outputs if not p.is_midi]
-    ins = [p for p in in_node.inputs if not p.is_midi]
-    if not outs or not ins:            # fall back to MIDI if that's all there is
-        outs = out_node.outputs
-        ins = in_node.inputs
     made = 0
-    used = set()
-    for o in outs:
-        target = None
-        if o.channel:
-            target = next((p for p in ins
-                           if p.channel == o.channel and p.id not in used), None)
-        if target is None:
-            target = next((p for p in ins if p.id not in used), None)
-        if target is None:
-            break
-        ok, _ = connect(o.id, target.id)
-        if ok:
-            used.add(target.id)
-            made += 1
+    for o, i in plan_nodes(out_node, in_node):
+        ok, _ = connect(o.id, i.id)
+        made += ok
     return made
 
 
