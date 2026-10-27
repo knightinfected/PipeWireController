@@ -25,6 +25,62 @@ and commit log.
 
 ## Unreleased
 
+**The Patchbay, reworked**
+
+Patching many channels no longer means one drag per cable, and the graph
+says more about what is connected and what a drag will do.
+
+- **Connect a whole device at once.** Drop a cable on a node's title to
+  connect every channel: FL to FL, or 1 to 1 when the names don't match. Or
+  right-click a node and pick *Connect all channels to*.
+- **Connect channels** (in the toolbar, and in every menu) does ranges, such
+  as an interface's inputs 1-8 into a DAW's 9-16, or one MIDI device to
+  another by name. It lists every cable before it makes them, and can remove
+  them the same way.
+- **See where a cable can go.** While you drag one, the ports that can take
+  it light up and the rest fade. Anywhere on a port's row counts, not just
+  its dot. The toolbar says what letting go will do, including when it would
+  remove a cable that is already there. A cable can't be dropped on a port
+  of another kind: MIDI into audio used to fail with "failed to link ports:
+  Success", and now the Patchbay says why before you let go.
+- **See what's connected.** Hover over a node or select it and its cables
+  stand out; while it's selected the others fade. Hover over a cable to see
+  both of its ends.
+- **Right-click** (or long-press) a node, a cable or the empty canvas for its
+  menu: details, connecting, removing a cable or all of a node's cables, and
+  arranging.
+- **Arrange follows the signal**: apps on the left, then what they play
+  into, then the devices on the right. A filter chain's or a virtual
+  device's input and output sit side by side.
+- **Find a node** with the search button, Ctrl+F, or by just typing.
+- **Zoom where you point**: Ctrl+scroll and a touchpad pinch zoom at the
+  pointer. Ctrl+plus, Ctrl+minus and Ctrl+0 (fit) work too, and the zoom
+  buttons sit in the canvas's corner.
+- **The Show menu** holds MIDI, unused monitor ports and, new, video
+  (cameras and screen sharing). Video is hidden until you ask for it. The
+  choice is remembered.
+- **It fits a narrow window**: the Patchbay needs 336 pixels, down from 603.
+- Where two nodes overlap, a click picks the one on top, and a node you
+  pick comes to the top.
+
+**Bug: a cable from a node back into the same node was hidden under it**
+
+Two MIDI devices patched to each other through the Midi-Bridge showed only
+as two short stubs, because the cable ran behind the bridge's box, and it
+could only be clicked on those stubs. Such a cable now goes round the box.
+The same applies to any cable into a node drawn to the left of the one it
+comes from. Reported in
+[#31](https://github.com/knightinfected/PipeWireController/issues/31).
+
+**Bug: the Patchbay sorted ports as text**
+
+A device's ports were listed 1, 10, 100 … 2, and AUX10 came before AUX2, so
+the next channel was never the next row. Ports are now in each device's own
+channel order: 1, 2, 3 … 128, a 7.1 device as FL FR FC LFE RL RR SL SR, and
+an app's ports in the order the app made them. The Midi-Bridge lists its
+devices by name. Reported in
+[#26](https://github.com/knightinfected/PipeWireController/issues/26).
+
 **The Devices page, redesigned**
 
 Every output and input is now a card that shows what the device is doing,
@@ -227,8 +283,8 @@ drawn outside it.
   a bar along the bottom of the window. A page that is still too wide for the
   window no longer takes the header past the window's edge with it.
 - **Up and Down in the sidebar still change pages.**
-- **Some pages still need more than 360 pixels**: the Patchbay, Monitor,
-  Surround Setup, the Dashboard, Devices, the HRIR Library and Filter Chains.
+- **Some pages still need more than 360 pixels**: Monitor, Surround Setup,
+  the Dashboard, Devices, the HRIR Library and Filter Chains.
   In a window narrower than that page, its right side is cut off at the
   window's edge. Making each of them fit is the next job.
 
