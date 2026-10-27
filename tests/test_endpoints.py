@@ -203,3 +203,94 @@ class CardTests(TestCase):
         c.active_profile = 3                    # unknown is playable
         st = endpoints.profile_state(c, True)
         self.assertFalse(st.unavailable or st.gives_nothing)
+
+
+def hw(nid, name, card_id, sink=True, desc=None, api='alsa', **props):
+    return node(nid, name, sink=sink, desc=desc,
+                **{'device.api': api, 'device.id': card_id, **props})
+
+
+def named_card(cid, name, desc, dirs, active=1):
+    c = card(cid, [(i, f'P{i}', 'yes') for i in dirs], active, dirs,
+             name=name)
+    c.description = desc
+    return c
+
+
+class ListGroupTests(TestCase):
+    def test_kinds_come_from_the_api_the_node_names(self):
+        self.assertEqual(endpoints.device_kind(SPEAKERS), 'alsa')
+        bt = node(3, 'bluez_output.x', **{'device.api': 'bluez5'})
+        self.assertEqual(endpoints.device_kind(bt), 'bluez')
+        self.assertEqual(endpoints.device_kind(node(4, 'pwctl.vd-x')),
+                         'virtual')
+        cam = node(5, 'v4l2.x', **{'device.api': 'v4l2'})
+        self.assertEqual(endpoints.device_kind(cam), 'other')
+
+    def test_a_card_with_two_rows_gets_a_heading_and_lists_outputs_first(self):
+        c = named_card(9, 'alsa_card.pci', 'Built-in Audio',
+                       {1: (True, True)})
+        out = hw(1, 'alsa_output.pci', 9, desc='Built-in Audio Analog Stereo')
+        mic = hw(2, 'alsa_input.pci', 9, sink=False,
+                 desc='Built-in Audio Analog Stereo')
+        groups = endpoints.list_groups([mic, out], [c])
+        self.assertEqual(len(groups), 1)
+        self.assertIs(groups[0].card, c)
+        self.assertEqual([n.id for n in groups[0].nodes], [1, 2])
+        self.assertEqual(endpoints.part_name(out, c), 'Analog Stereo')
+
+    def test_a_card_with_one_row_is_listed_on_its_own(self):
+        c = named_card(9, 'alsa_card.hdmi', 'HDMI', {1: (True, False)})
+        out = hw(1, 'alsa_output.hdmi', 9, desc='LG TV')
+        groups = endpoints.list_groups([out], [c])
+        self.assertIsNone(groups[0].card)
+        self.assertEqual(groups[0].title, 'HDMI')
+
+    def test_an_off_direction_is_a_row_of_its_card(self):
+        # Output-only profile active; the card can also record.
+        c = named_card(9, 'alsa_card.pci', 'Built-in Audio',
+                       {1: (True, False), 2: (True, True)}, active=1)
+        out = hw(1, 'alsa_output.pci', 9)
+        groups = endpoints.list_groups([out], [c])
+        self.assertEqual(groups[0].off, [(c, False)])
+        self.assertIs(groups[0].card, c)
+
+    def test_a_fully_off_card_is_still_listed(self):
+        c = named_card(9, 'alsa_card.usb', 'USB Mic',
+                       {0: (False, False), 1: (False, True)}, active=0)
+        groups = endpoints.list_groups([], [c])
+        self.assertEqual([g.title for g in groups], ['USB Mic'])
+        self.assertEqual(groups[0].off, [(c, False)])
+
+    def test_order_is_kinds_then_names_and_software_outputs_first(self):
+        c = named_card(9, 'alsa_card.pci', 'Zeta Card', {1: (True, False)})
+        hwout = hw(1, 'alsa_output.pci', 9)
+        bt = node(3, 'bluez_output.x', desc='Buds', **{'device.api': 'bluez5'})
+        vmic = node(4, 'pwctl.vd-mic', sink=False, desc='A mic')
+        veq = node(5, 'pwctl.eq.enh-1', desc='Z eq')
+        groups = endpoints.list_groups([veq, vmic, bt, hwout], [c])
+        self.assertEqual([g.title for g in groups],
+                         ['Zeta Card', 'Buds', 'Z eq', 'A mic'])
+
+    def test_row_subtitle_says_the_direction_only_on_its_own(self):
+        n = node(1, 'alsa_output.usb', **{'device.api': 'alsa',
+                                         'device.bus': 'usb'})
+        self.assertEqual(endpoints.row_subtitle(n), 'Output · USB')
+        self.assertEqual(endpoints.row_subtitle(n, in_card=True), 'USB')
+
+    def test_facts_never_guess_while_idle(self):
+        n = node(1, 'alsa_output.pci')
+        n.channel_map = ['FL', 'FR']
+        n.state = 'suspended'
+        self.assertEqual(endpoints.facts(n), [('Rate', '—'), ('Format', '—'),
+                                              ('Channels', 'Stereo')])
+        n.state = 'running'
+        n.fmt = {'rate': 48000, 'format': 'S24_32LE', 'channels': 2}
+        self.assertEqual(endpoints.facts(n), [('Rate', '48 kHz'),
+                                              ('Format', '24-bit'),
+                                              ('Channels', 'Stereo')])
+
+    def test_search_reaches_port_names(self):
+        n = node(1, 'alsa_output.pci', desc='Built-in')
+        n.ports = [(0, 'Speakers', 'yes'), (1, 'Headphones', 'no')]
+        self.assertIn('headphones', endpoints.search_text(n))

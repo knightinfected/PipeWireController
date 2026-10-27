@@ -1047,156 +1047,14 @@ headerbar.pwctl-header:not(.pwctl-sidebar-header) > windowhandle {
 @define-color pwctl_rec mix(@orange_3, @window_fg_color, 0.2);
 @define-color pwctl_default mix(@yellow_4, @window_fg_color, 0.12);
 
-.dev-toolbar {
-    margin-bottom: 2px;
-}
-
-.dev-band {
-    margin-top: 8px;
-}
-
-.dev-band-title {
-    font-size: 0.78em;
-    opacity: 0.7;
-}
-
-.dev-band-count {
-    font-size: 0.75em;
-    font-weight: 700;
-    font-feature-settings: "tnum";
-    padding: 0 8px;
-    border-radius: 99px;
-    background: alpha(currentColor, 0.08);
-    color: alpha(currentColor, 0.7);
-}
-
-/* The heading is a flat button that folds its section.  Pulled left by its
-   own padding, so the title still lines up with the cards' edge. */
-button.dev-band-toggle {
-    padding: 4px 8px;
-    margin-left: -8px;
-    min-height: 0;
-}
-
-/* Folding: the chevron points down while open and turns to point along the
-   heading when folded, as an AdwExpanderRow's does.  The transition is on
-   the image, never the button (UI.md §4a); GTK skips it with animations
-   off.  The class changes in place on the card or band, so it runs. */
-image.dev-chevron {
-    transition: -gtk-icon-transform 200ms ease;
-    opacity: 0.7;
-}
-
-.dev-card.folded image.dev-chevron,
-.dev-band.folded image.dev-chevron {
-    -gtk-icon-transform: rotate(-90deg);
-}
-
-/* The head's icon buttons (star, gear, fold), a little under Adwaita's
-   34 px so three fit beside the name on a narrow card. */
-button.dev-icon {
-    min-width: 30px;
-    min-height: 30px;
-    padding: 0;
-}
-
-/* The state and format line in a card's head.  Tags, not a sentence, so
-   "48 kHz" reads at a glance; tabular numerals so the rate does not shift
-   its neighbours.  Neutral while idle (only the channel layout is known),
-   the live green while running, as the state dot is. */
-.dev-state {
-    color: alpha(currentColor, 0.62);
-}
-
-label.dev-spec {
-    font-size: 0.78em;
-    font-weight: 600;
-    font-feature-settings: "tnum";
-    padding: 0 6px;
-    border-radius: 6px;
-    background: alpha(currentColor, 0.07);
-    color: alpha(currentColor, 0.62);
-}
-
-label.dev-spec.running {
-    background: alpha(@green_4, 0.12);
-    color: @pwctl_live;
-}
-
 .dev-alert {
     color: @warning_color;
-}
-
-.dev-card {
-    background-color: @card_bg_color;
-    border: 1px solid alpha(currentColor, 0.09);
-    border-radius: 16px;
-    padding: 14px 16px 8px 16px;
-}
-
-/* A wash of the direction's hue under the head: identity, not state.  The
-   card colour stays opaque underneath, so a translucent window never shows
-   through (UI.md §2, surfaces). */
-.dev-card.out {
-    background-image: linear-gradient(to bottom, alpha(@blue_3, 0.08),
-                                      alpha(@blue_3, 0) 72px);
-}
-
-.dev-card.in {
-    background-image: linear-gradient(to bottom, alpha(@green_4, 0.08),
-                                      alpha(@green_4, 0) 72px);
-}
-
-.dev-card.virtual.out {
-    background-image: linear-gradient(to bottom, alpha(@blue_3, 0.04),
-                                      alpha(@blue_3, 0) 72px);
-}
-
-.dev-card.virtual.in {
-    background-image: linear-gradient(to bottom, alpha(@green_4, 0.04),
-                                      alpha(@green_4, 0) 72px);
-}
-
-/* The default device carries a ring in its direction's hue. */
-.dev-card.out.is-default {
-    border-color: alpha(@blue_3, 0.55);
-    box-shadow: 0 0 0 1px alpha(@blue_3, 0.22);
-}
-
-.dev-card.in.is-default {
-    border-color: alpha(@green_4, 0.55);
-    box-shadow: 0 0 0 1px alpha(@green_4, 0.22);
-}
-
-/* A sound card that gives nothing in this direction: present, but plainly
-   not a working device.  Same border width as a card, so it is the same
-   height a working one would be. */
-.dev-card.off {
-    border-style: dashed;
-    border-color: alpha(currentColor, 0.22);
-    background-image: none;
 }
 
 .dash-avatar.off {
     background: alpha(currentColor, 0.07);
     color: alpha(currentColor, 0.5);
 }
-
-.dev-title {
-    font-size: 1.05em;
-    font-weight: 700;
-}
-
-.dev-dot {
-    min-width: 8px;
-    min-height: 8px;
-    border-radius: 99px;
-    background: alpha(currentColor, 0.25);
-}
-
-.dev-dot.ok   { background: @pwctl_live; }
-.dev-dot.warn { background: @warning_color; }
-.dev-dot.err  { background: @error_color; }
 
 button.dev-default {
     padding: 3px 11px;
@@ -1211,14 +1069,6 @@ button.dev-default {
 
 button.dev-default:hover {
     background: alpha(@yellow_4, 0.24);
-}
-
-.dev-row-label {
-    min-width: 64px;
-}
-
-.dev-details {
-    margin-top: 2px;
 }
 
 /* Chips: an app, a device feeding this one, or where this one sends.  A
@@ -1281,12 +1131,6 @@ label.dev-more {
     background: currentColor;
 }
 
-.dev-foot {
-    border-top: 1px solid alpha(currentColor, 0.07);
-    padding-top: 6px;
-    margin-top: 2px;
-}
-
 .dev-small {
     font-size: 0.92em;
 }
@@ -1336,25 +1180,221 @@ button.dev-fix:hover {
     background: alpha(@green_4, 0.26);
 }
 
-/* Dragging an app chip onto another device.  The class is repeated so it
-   outranks `.dev-card.out.is-default` (three classes), the way the Signal
-   Paths drop rules do (UI.md §3, specificity). */
-.dev-card.dev-card.drop-ready {
-    border-style: dashed;
-    border-color: alpha(@pwctl_drop, 0.75);
+menubutton.dev-chip.dev-dragging {
+    opacity: 0.45;
 }
 
-.dev-card.dev-card.drop-into {
-    border-style: solid;
-    border-color: @pwctl_drop;
-    background-color: mix(@card_bg_color, @blue_3, 0.14);
-    box-shadow: 0 0 0 2px alpha(@pwctl_drop, 0.35);
+/* -- Devices: list and detail (ui/device_list.py, ui/device_detail.py) ----
+   DR-012, "List and detail".  The list is a secondary sidebar beside the
+   detail; the rows keep `.navigation-sidebar`'s own look, selection
+   included (libadwaita's widget, so its accent is allowed: UI.md §2).
+   Direction still carries its hue everywhere: blue an output, green an
+   input, as on the Dashboard and the Signal Paths board. */
+.devl-list {
+    background-color: @secondary_sidebar_bg_color;
+    color: @secondary_sidebar_fg_color;
 }
 
-.dev-card.dev-card.drop-no {
+.devl-row-box {
+    min-height: 38px;
+}
+
+.devl-listbox > row.child > .devl-row-box {
+    margin-left: 14px;
+}
+
+.devl-row-title {
+    font-weight: 600;
+}
+
+image.devl-tile {
+    min-width: 32px;
+    min-height: 32px;
+    border-radius: 9px;
+}
+
+image.devl-tile.card {
+    background: alpha(currentColor, 0.08);
+    color: alpha(currentColor, 0.75);
+}
+
+image.devl-dir {
+    opacity: 0.7;
+}
+
+/* The star keeps its yellow on the selected row too, where the sidebar's
+   selection would otherwise recolour it. */
+.devl-listbox > row image.devl-star,
+.devl-listbox > row:selected image.devl-star {
+    color: @pwctl_default;
+}
+
+.devl-kind {
+    font-size: 0.78em;
+    opacity: 0.7;
+    margin: 0 12px 2px 12px;
+}
+
+.devl-card-head {
+    margin: 6px 12px 2px 12px;
+}
+
+.devl-count {
+    font-size: 0.8em;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+    padding: 0 8px;
+    border-radius: 99px;
+    background: alpha(currentColor, 0.08);
+}
+
+.devl-listbox > row.off .devl-row-title {
+    opacity: 0.7;
+}
+
+/* Dragging an app chip from the detail onto a row.  An outline, not a
+   border, so a row does not change size when it lights up. */
+.devl-listbox > row.drop-ready {
+    outline: 1px dashed alpha(@pwctl_drop, 0.75);
+    outline-offset: -1px;
+}
+
+.devl-listbox > row.drop-into {
+    outline: 2px solid @pwctl_drop;
+    outline-offset: -2px;
+    background-color: alpha(@pwctl_drop, 0.16);
+}
+
+.devl-listbox > row.drop-no {
     opacity: 0.5;
 }
 
-menubutton.dev-chip.dev-dragging {
+/* The hero: the device itself, a card with a wash of its direction's hue
+   under the head (identity, not state).  The card colour stays opaque
+   underneath, so a translucent window never shows through (UI.md §2). */
+.devl-hero {
+    background-color: @card_bg_color;
+    border: 1px solid alpha(currentColor, 0.09);
+    border-radius: 16px;
+    padding: 16px;
+}
+
+.devl-hero.out {
+    background-image: linear-gradient(to bottom, alpha(@blue_3, 0.08),
+                                      alpha(@blue_3, 0) 96px);
+}
+
+.devl-hero.in {
+    background-image: linear-gradient(to bottom, alpha(@green_4, 0.08),
+                                      alpha(@green_4, 0) 96px);
+}
+
+.devl-hero.virtual.out {
+    background-image: linear-gradient(to bottom, alpha(@blue_3, 0.04),
+                                      alpha(@blue_3, 0) 96px);
+}
+
+.devl-hero.virtual.in {
+    background-image: linear-gradient(to bottom, alpha(@green_4, 0.04),
+                                      alpha(@green_4, 0) 96px);
+}
+
+/* The default device carries a ring in its direction's hue. */
+.devl-hero.out.is-default {
+    border-color: alpha(@blue_3, 0.55);
+    box-shadow: 0 0 0 1px alpha(@blue_3, 0.22);
+}
+
+.devl-hero.in.is-default {
+    border-color: alpha(@green_4, 0.55);
+    box-shadow: 0 0 0 1px alpha(@green_4, 0.22);
+}
+
+/* A sound card that gives nothing in this direction: present, but plainly
+   not a working device. */
+.devl-hero.off {
+    border-style: dashed;
+    border-color: alpha(currentColor, 0.22);
+    background-image: none;
+}
+
+image.devl-avatar {
+    min-width: 46px;
+    min-height: 46px;
+    border-radius: 12px;
+}
+
+.devl-hero-name {
+    font-size: 1.3em;
+    font-weight: 800;
+}
+
+.devl-node-name {
+    font-family: monospace;
+    font-size: 0.8em;
+    opacity: 0.62;
+}
+
+button.devl-make-default {
+    padding: 3px 11px;
+    min-height: 0;
+    border-radius: 99px;
+    font-size: 0.88em;
+    font-weight: 700;
+    background: alpha(currentColor, 0.08);
+    box-shadow: none;
+}
+
+button.devl-make-default:hover {
+    background: alpha(@yellow_4, 0.16);
+    color: @pwctl_default;
+}
+
+.devl-facts {
+    border-top: 1px solid alpha(currentColor, 0.08);
+    padding-top: 10px;
+}
+
+.devl-fact-key {
+    font-size: 0.72em;
+    opacity: 0.62;
+}
+
+.devl-fact-value {
+    font-weight: 700;
+    font-feature-settings: "tnum";
+}
+
+.devl-restart-mark {
+    opacity: 0.62;
+}
+
+/* The signal path: chips joined by arrows, this device in its own hue. */
+image.devl-arrow {
     opacity: 0.45;
+}
+
+box.dev-chip {
+    padding: 2px 9px;
+    border-radius: 99px;
+    font-size: 0.88em;
+    border: 1px solid transparent;
+}
+
+box.dev-chip.devl-self.out {
+    background: alpha(@blue_3, 0.16);
+    border-color: alpha(@blue_3, 0.34);
+    color: @pwctl_src;
+    font-weight: 700;
+}
+
+box.dev-chip.devl-self.in {
+    background: alpha(@green_4, 0.16);
+    border-color: alpha(@green_4, 0.34);
+    color: @pwctl_mix;
+    font-weight: 700;
+}
+
+.devl-path-empty {
+    padding: 2px 4px;
 }

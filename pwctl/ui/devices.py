@@ -1,29 +1,26 @@
-"""Devices page: every output and input, as a card you can operate.
+"""Devices page: a list of every device, and the selected one in full.
 
-Each endpoint is a `device_card.DeviceCard`: level and mute, the default
-star, port and card profile, what is playing into it, where a software
-device sends its sound, its state and running format, a test sound, and
-for hardware the per-device settings (now a dialog, `device_settings`).
-A sound card that gives nothing in a direction (Off, or output-only seen
-from Inputs) gets a `CardOffCard`, so the way back is always on the page.
+The list (`device_list.DeviceList`) groups devices by kind (sound cards,
+Bluetooth, virtual and processing), with a heading per sound card that has
+several rows; the detail (`device_detail`) shows the selected one: a hero
+card for the frequent things (default, test, volume, balance, the running
+format) and sections that each apply to some devices (signal path,
+connection, Bluetooth, routing, name and visibility, format and timing,
+technical details).  DR-012, "List and detail" (2026-10-26).
 
-Layout: one `ColumnBox`, with Outputs, Inputs and Hidden as full-width bands
-and the cards in newspaper columns under each, hardware first.  The column
-floor is the cards' own minimum (`ColumnBox._content_floor`), so no width
-can squeeze a card.
-
-Folding: a band's heading folds its whole section, and each card folds to
-its head and level.  Both are remembered in `ui.json` by section and by
-`node.name` (`devices_folded`), so they survive a rebuild, a restart and a
-device coming back.  The box keeps each card in its column when one folds
-(`keep_columns`); a section folding re-flows the page, as the filter does.
+Layout: an `Adw.NavigationSplitView` in the page's own `Adw.BreakpointBin`.
+Wide, the list sits beside the detail; below `COLLAPSE_SP` of page width
+it collapses to one pane, and picking a device slides its detail in, with
+a back button above it.  The bin wraps the split, never sits inside a
+scroller (UI.md §3), and its width request is the page's minimum.
 
 Live state: the graph comes from `livestate` while the page is mapped (one
 fresh `pw-dump` per real change), the 3 s poll only where it cannot listen.
-Every delivery is applied in place (`device_levels.sync_device_levels` for
-level, mute and star, `DeviceCard.paint` for the rest); cards are rebuilt
-only when the set of endpoints changes, so meters are never respawned and an
-open popover survives audio starting elsewhere.
+Every delivery is applied in place: `device_levels.sync_device_levels` for
+level, mute and star, `paint()` on every row and on the detail for the
+rest.  The list is rebuilt only when the set of endpoints changes; the
+detail only when the selection changes or the selected node is recreated,
+so it never rebuilds under the user.
 
 Per-device settings become WirePlumber node rules through backend.rules and
 need a WirePlumber restart (the banner appears automatically).
@@ -37,13 +34,21 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from ..backend import (chains, endpoints, livestate, prefs, pw, reroute,  # noqa: E402
-                       rules, surround)
-from .device_card import CardOffCard, DeviceCard  # noqa: E402
+from ..backend import (bluetooth, chains, endpoints, livestate,  # noqa: E402
+                       prefs, pw, reroute, rules, surround)
+from .device_detail import CardOffDetail, EndpointDetail, HiddenDetail  # noqa: E402
 from .device_levels import sync_device_levels  # noqa: E402
-from .device_settings import DeviceSettingsDialog  # noqa: E402
-from .widgets import (LOCAL_GRACE, ColumnBox, async_call, esc,  # noqa: E402
-                      micro, pill)
+from .device_list import DeviceList, HiddenEntry, NodeEntry, OffEntry  # noqa: E402
+from .widgets import LOCAL_GRACE, async_call  # noqa: E402
+
+# Below this page width the list and the detail stop sitting side by side.
+# The list wants ~260 and a detail reads well from ~400; in sp, so it
+# follows the text size.
+COLLAPSE_SP = 680
+
+# The page's minimum width, which a BreakpointBin takes from its request
+# alone (UI.md §3).  Under the window's 360, like Signal Paths' 352.
+MIN_PAGE_WIDTH = 352
 
 
 def _now():
@@ -57,77 +62,6 @@ def collect(dump):
             'cards': surround.list_cards(dump, outputs_only=False)}
 
 
-def _order(nodes, sink):
-    """Hardware first, then software, each by name; stable across deliveries."""
-    mine = [n for n in nodes if n.is_sink == sink]
-    return sorted(mine, key=lambda n: (n.is_virtual, n.description.lower(),
-                                       n.name, n.id))
-
-
-class _Band:
-    """A section heading across every column: ⌄ OUTPUTS · 6.
-
-    The heading is one flat button that folds the section under it, so the
-    whole heading is the target, and the keyboard reaches it.
-    """
-
-    def __init__(self, title, on_toggle, folded=False):
-        self.name = title.lower()
-        self.folded = folded
-        self.widget = Gtk.Box(spacing=10)
-        self.widget.add_css_class('dev-band')
-        self.button = Gtk.Button(halign=Gtk.Align.START)
-        self.button.add_css_class('flat')
-        self.button.add_css_class('dev-band-toggle')
-        inner = Gtk.Box(spacing=10)
-        arrow = Gtk.Image.new_from_icon_name('pan-down-symbolic')
-        arrow.add_css_class('dev-chevron')
-        self.title = micro(title)
-        self.title.add_css_class('dev-band-title')
-        self.count = Gtk.Label(valign=Gtk.Align.CENTER)    # not the row's
-        self.count.add_css_class('dev-band-count')        # height (Hidden)
-        inner.append(arrow)
-        inner.append(self.title)
-        inner.append(self.count)
-        self.button.set_child(inner)
-        self.button.connect('clicked', lambda _b: on_toggle(self))
-        self.widget.append(self.button)
-        self.set_folded(folded)
-
-    def set_folded(self, folded):
-        self.folded = bool(folded)
-        if self.folded:
-            self.widget.add_css_class('folded')
-        else:
-            self.widget.remove_css_class('folded')
-        what = self.name
-        self.button.set_tooltip_text(f'Show {what}' if self.folded
-                                     else f'Collapse {what}')
-        self.button.update_state([Gtk.AccessibleState.EXPANDED],
-                                 [int(not self.folded)])
-
-    def set_count(self, shown, total):
-        self.count.set_label(str(total) if shown == total
-                             else f'{shown} of {total}')
-
-
-def _load_folds():
-    """(folded sections, folded cards) from ui.json, whatever it holds."""
-    saved = prefs.get('devices_folded')
-    saved = saved if isinstance(saved, dict) else {}
-
-    def strings(key):
-        value = saved.get(key)
-        return {v for v in value if isinstance(v, str)} \
-            if isinstance(value, list) else set()
-    return strings('sections') & {'outputs', 'inputs'}, strings('cards')
-
-
-def fold_key(node):
-    """A card's fold, by direction and name: ids and serials do not last."""
-    return ('out:' if node.is_sink else 'in:') + node.name
-
-
 class DevicesPage:
     _POLL_SECONDS = 3       # only when livestate cannot listen
 
@@ -135,117 +69,91 @@ class DevicesPage:
         self.window = window
         self.volume_style = prefs.get('volume_style')
         self.chain_templates = {}
-        self.label_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
 
-        self._cards = {}                # key -> DeviceCard | CardOffCard
+        self._entries = {}              # key -> list entry
         self._order = []                # keys in display order
-        self._live_controls = {}        # (id, serial) -> card.live
-        self._hidden_rows = []
+        self._live_controls = {}        # (id, serial) -> entry.live
         self._data = None               # what the last delivery said
+        self._rules = {'nodes': {}, 'devices': {}}
+        self._hidden = []
         self._poll_timer = None
         self._poll_busy = False
         self._live = None               # livestate subscription while mapped
-        self._rebuild_next = False      # the next delivery rebuilds the cards
+        self._rebuild_next = False      # the next delivery rebuilds the list
         self._grace_id = None
         self._default_ts = 0.0          # when the user last clicked a star
         self.dragging = None            # the stream an app chip is carrying
         self._held_rebuild = False      # a rebuild that waited for the drop
-        self._folded_sections, self._folded_cards = _load_folds()
+        self._want = None               # (ident, key) of the selection
+        self.detail = None
+        self._codecs = {}               # (card name, profile) -> codecs
 
-        # keep_columns: a card folding stays in its column (module doc).
-        self.box = ColumnBox(spacing=16, max_columns=3, keep_columns=True)
-        self.box.set_margin_top(18)
-        self.box.set_margin_bottom(32)
-        self.box.set_margin_start(16)
-        self.box.set_margin_end(16)
+        self.list = DeviceList(self)
 
-        self._build_toolbar()
-        self.out_band = _Band('Outputs', self._on_band,
-                              'outputs' in self._folded_sections)
-        self.in_band = _Band('Inputs', self._on_band,
-                             'inputs' in self._folded_sections)
-        self._build_hidden()
-        self.box.append(self.toolbar, span=True)
+        # The detail side: a back bar for the narrow layout, then the
+        # selected device's pane, crossfading when the selection changes.
+        self.back = Gtk.Box(spacing=6, margin_top=6, margin_bottom=2,
+                            margin_start=6, margin_end=6)
+        self.back.add_css_class('devl-back')
+        back = Gtk.Button(tooltip_text='Back to the list')
+        back.set_child(Adw.ButtonContent(icon_name='go-previous-symbolic',
+                                         label='Devices'))
+        back.add_css_class('flat')
+        back.connect('clicked', lambda _b: self.split.set_show_content(False))
+        self.back.append(back)
+        self.back_button = back
+        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType
+                               .CROSSFADE, transition_duration=150,
+                               vexpand=True, hhomogeneous=False)
+        self.stack.connect('notify::transition-running', self._drop_old)
+        self._empty = Adw.StatusPage(icon_name='pwctl-devices-symbolic',
+                                     title='No devices yet',
+                                     description='Reading the audio graph…')
+        self.stack.add_child(self._empty)
+        self._old = []
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content.append(self.back)
+        content.append(self.stack)
 
-        sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
-                                vexpand=True)
-        sw.set_child(self.box)
-        self.widget = sw
+        self.split = Adw.NavigationSplitView(
+            min_sidebar_width=250, max_sidebar_width=340,
+            sidebar_width_fraction=0.34)
+        self.split.set_sidebar(Adw.NavigationPage(
+            title='Devices', tag='list', child=self.list.widget))
+        self.content_page = Adw.NavigationPage(title='Device', tag='detail',
+                                               child=content)
+        self.split.set_content(self.content_page)
+        self.split.connect('notify::collapsed', self._on_collapsed)
+        self._on_collapsed()
+
+        bin_ = Adw.BreakpointBin(width_request=MIN_PAGE_WIDTH,
+                                 height_request=200, child=self.split)
+        bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(
+            f'max-width: {COLLAPSE_SP}sp'))
+        bp.add_setter(self.split, 'collapsed', True)
+        bin_.add_breakpoint(bp)
+        self.widget = bin_
         self.widget.connect('map', self._on_map)
         self.widget.connect('unmap', self._on_unmap)
 
-    # ------------------------------------------------------------ chrome --
-    def _build_toolbar(self):
-        bar = Gtk.Box(spacing=8)
-        bar.add_css_class('dev-toolbar')
-        self.search = Gtk.SearchEntry(placeholder_text='Filter devices',
-                                      hexpand=True)
-        self.search.set_max_width_chars(28)
-        self.search.connect('search-changed', lambda *_a: self._filter())
-        bar.append(self.search)
-        self.summary = Gtk.Label(xalign=1, hexpand=True)
-        self.summary.add_css_class('dim-label')
-        self.summary.add_css_class('caption')
-        bar.append(self.summary)
-        btn = Gtk.Button(icon_name='view-refresh-symbolic',
-                         tooltip_text='Read the devices again')
-        btn.add_css_class('flat')
-        btn.connect('clicked', lambda *_a: self.refresh())
-        bar.append(btn)
-        self.toolbar = bar
+        # The sidebar's Advanced switch; a window without one (a harness's
+        # stand-in) simply never changes it.
+        switch = getattr(window, 'adv_switch', None)
+        if isinstance(switch, Gtk.Widget):
+            switch.connect('notify::active', lambda *_a: self._on_advanced())
 
-    def _build_hidden(self):
-        self.hidden = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        # Folded until asked for, each time the page is built, as before;
-        # only Outputs and Inputs remember theirs.
-        self.hidden_band = _Band('Hidden', self._on_band, folded=True)
-        self.hidden.append(self.hidden_band.widget)
-        self.hidden_note = Gtk.Label(
-            xalign=0, wrap=True,
-            label='A hidden device is gone from the audio graph, so this is '
-                  'the only place it is listed. Unhiding takes effect after '
-                  'WirePlumber restarts.')
-        self.hidden_note.add_css_class('caption')
-        self.hidden_note.add_css_class('dim-label')
-        self.hidden_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.hidden_list.add_css_class('boxed-list')
-        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        inner.append(self.hidden_note)
-        inner.append(self.hidden_list)
-        self.hidden_reveal = Gtk.Revealer(child=inner, reveal_child=False)
-        self.hidden.append(self.hidden_reveal)
-        self.hidden.set_visible(False)
+    # ------------------------------------------------------------ layout --
+    @property
+    def collapsed(self):
+        return self.split.get_collapsed()
 
-    # ------------------------------------------------------------ folding --
-    def _on_band(self, band):
-        band.set_folded(not band.folded)
-        if band is self.hidden_band:
-            self.hidden_reveal.set_reveal_child(not band.folded)
-            return
-        name = 'outputs' if band is self.out_band else 'inputs'
-        if band.folded:
-            self._folded_sections.add(name)
-        else:
-            self._folded_sections.discard(name)
-        self._save_folds()
-        self._filter()
+    def _on_collapsed(self, *_a):
+        self.back.set_visible(self.split.get_collapsed())
 
-    def fold_card(self, card, folded):
-        key = fold_key(card.node)
-        if folded:
-            self._folded_cards.add(key)
-        else:
-            self._folded_cards.discard(key)
-        card.set_folded(folded)
-        self._save_folds()
-
-    def _save_folds(self):
-        try:
-            prefs.save(devices_folded={
-                'sections': sorted(self._folded_sections),
-                'cards': sorted(self._folded_cards)})
-        except OSError:
-            pass            # a read-only config: the fold still holds now
+    def _on_advanced(self):
+        if self.detail is not None:
+            self.detail.set_advanced(bool(getattr(self.window, 'advanced',
+                                                  False)))
 
     # ------------------------------------------------------- live state --
     def _on_map(self, *_args):
@@ -303,8 +211,9 @@ class DevicesPage:
                 'acts': endpoints.activity(data['nodes'], data['streams'])}
 
     def _sync(self, data):
-        """Paint a delivery onto the cards there are; False to rebuild."""
-        if self._membership(data) != set(self._cards):
+        """Paint a delivery onto the rows there are; False to rebuild."""
+        mine = {k for k in self._entries if k != 'hidden'}
+        if self._membership(data) != mine:
             return False
         now = _now()
         if not sync_device_levels(
@@ -312,14 +221,39 @@ class DevicesPage:
                 default_held=now - self._default_ts < LOCAL_GRACE):
             return False
         ctx = self._ctx(data)
+        cards = {c.id: c for c in data['cards']}
+        stale_heads = False
+        for e in self._entries.values():
+            card = getattr(e.group, 'card', None)
+            if card is not None and card.id in cards:
+                fresh = cards[card.id]
+                if (fresh.active_profile, fresh.description) != \
+                        (card.active_profile, card.description):
+                    stale_heads = True
+                e.group.card = fresh
         for n in data['nodes']:
-            self._cards[(n.id, n.serial)].paint(n, ctx)
+            self._entries[(n.id, n.serial)].paint(n, ctx)
         for sink in (True, False):
             for card in endpoints.cards_without_endpoint(
                     data['cards'], data['nodes'], sink):
-                self._cards[('card', card.id, sink)].paint(card)
-        self._filter()
+                self._entries[('card', card.id, sink)].paint(card)
+        if stale_heads:
+            self.list.listbox.invalidate_headers()
+        self._paint_detail(data, ctx)
+        self.list.refilter()
         return True
+
+    def _paint_detail(self, data, ctx):
+        d = self.detail
+        if isinstance(d, EndpointDetail):
+            node = next((n for n in data['nodes']
+                         if (n.id, n.serial) == d.key), None)
+            if node is not None:
+                d.paint(node, ctx)
+        elif isinstance(d, CardOffDetail):
+            card = next((c for c in data['cards'] if c.id == d.key[1]), None)
+            if card is not None:
+                d.paint(card)
 
     def _watch_grace(self):
         """Apply the last delivery again once every hold has run out.
@@ -333,7 +267,9 @@ class DevicesPage:
             self._grace_id = None
         if self._live is None:
             return                          # the poll's next tick does it
-        holds = [c.live['local_ts'] for c in self._cards.values()]
+        holds = [e.live['local_ts'] for e in self._entries.values()]
+        if self.detail is not None and getattr(self.detail, 'live', None):
+            holds.append(self.detail.live.get('local_ts', 0.0))
         until = max(holds + [self._default_ts]) + LOCAL_GRACE
         left = until - _now()
         if left > 0:
@@ -372,7 +308,7 @@ class DevicesPage:
                 return
             # An endpoint appeared, vanished or was recreated.  Rebuild once
             # so its callbacks target the current PipeWire id; ordinary polls
-            # keep the cards, their popovers and their meters.
+            # keep the rows, the detail and their meters.
             self.refresh()
 
     def refresh(self):
@@ -396,77 +332,172 @@ class DevicesPage:
 
     # ------------------------------------------------------------ build --
     def _rebuild(self, data, rule_data):
-        self.box.remove_all()
-        self._cards = {}
-        self._order = []
-        self._live_controls = {}
-        # A fresh group, so labels of the cards just dropped stop counting.
-        self.label_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        self._rules = rule_data
         self.chain_templates = {c.id: c.template
                                 for c in chains.list_chains()}
         ctx = self._ctx(data)
         nodes = data['nodes']
+        self._hidden = rules.hidden_entries()
+        groups = endpoints.list_groups(nodes, data['cards'])
+        entries = self.list.rebuild(groups, ctx, len(self._hidden))
+        self._entries = {e.key: e for e in entries}
+        self._order = [e.key for e in entries]
+        self._live_controls = {e.key: e.live for e in entries
+                               if isinstance(e, NodeEntry)}
+        for e in entries:
+            if isinstance(e, NodeEntry):
+                e.paint_star(e.node.is_default)
+        self._live_nodes = {n.name for n in nodes}
+        self._live_cards = {c.name for c in data['cards']}
+        self._restore_selection(ctx)
 
-        self.box.append(self.toolbar, span=True)
-        for sink, band in ((True, self.out_band), (False, self.in_band)):
-            self.box.append(band.widget, span=True)
-            for node in _order(nodes, sink):
-                card = DeviceCard(self, node,
-                                  rule_data['nodes'].get(node.name, {}), ctx,
-                                  folded=fold_key(node) in self._folded_cards)
-                self._add(card)
-                self._live_controls[card.key] = card.live
-            for c in endpoints.cards_without_endpoint(data['cards'], nodes,
-                                                      sink):
-                self._add(CardOffCard(self, c, sink))
-        self.box.append(self.hidden, span=True)
-        self._fill_hidden({n.name for n in nodes},
-                          {c.name for c in data['cards']})
-        self._filter()
+    def _restore_selection(self, ctx):
+        """Select what was selected, by what lasts: kind, direction, name."""
+        entries = [self._entries[k] for k in self._order]
+        if not entries:
+            self._empty.set_description('There is no output or input in '
+                                        'the audio graph.')
+            self._show(None)
+            return
+        want = self._want
+        pick = None
+        if want is not None:
+            ident, key = want
+            same = [e for e in entries if e.ident == ident]
+            pick = next((e for e in same if e.key == key),
+                        same[0] if same else None)
+            if pick is None and ident[0] in ('node', 'off'):
+                pick = self._near(entries, ident)
+        if pick is None:
+            pick = next((e for e in entries if isinstance(e, NodeEntry)
+                         and e.sink and e.node.is_default), None) \
+                or next((e for e in entries if isinstance(e, NodeEntry)),
+                        entries[0])
+        self.select(pick, show=False, ctx=ctx)
 
-    def _add(self, card):
-        self._cards[card.key] = card
-        self._order.append(card.key)
-        self.box.append(card.widget)
+    def _near(self, entries, ident):
+        """After a profile switch: the same card, the same direction first."""
+        kind, a, b = ident
+        card_name = None
+        if kind == 'off':
+            card_name, sink = a, b
+        else:
+            sink = a
+            old = self.detail
+            card = getattr(old, 'card', None)
+            card_name = card.name if card is not None else None
+        if card_name is None:
+            return None
 
-    def _filter(self):
-        text = self.search.get_text().strip().lower()
-        counts = {True: [0, 0], False: [0, 0]}
-        playing = 0
-        folded = {True: self.out_band.folded, False: self.in_band.folded}
-        for key in self._order:
-            card = self._cards[key]
-            shown = not text or text in card.filter_text
-            # A folded section keeps its count, so "2 of 5" still says
-            # what the filter found under it.
-            card.widget.set_visible(shown and not folded[card.sink])
-            counts[card.sink][1] += 1
-            counts[card.sink][0] += shown
-            node = getattr(card, 'node', None)
-            if node is not None and node.state == 'running':
-                playing += 1
-        self.out_band.set_count(*counts[True])
-        self.in_band.set_count(*counts[False])
-        outs, ins = counts[True][1], counts[False][1]
-        parts = [f'{outs} output{"s" if outs != 1 else ""}',
-                 f'{ins} input{"s" if ins != 1 else ""}']
-        if playing:
-            parts.append(f'{playing} running')
-        self.summary.set_label(' · '.join(parts))
+        def on_card(e):
+            if isinstance(e, OffEntry):
+                return e.card.name == card_name
+            if isinstance(e, NodeEntry):
+                c = endpoints.card_of(e.node, (self._data or {}).get(
+                    'cards', []))
+                return c is not None and c.name == card_name
+            return False
+        mine = [e for e in entries if on_card(e)]
+        return next((e for e in mine if e.sink == sink),
+                    mine[0] if mine else None)
+
+    # -------------------------------------------------------- selection --
+    def select(self, entry, show=True, ctx=None):
+        """Open `entry` in the detail; in the narrow layout, slide to it."""
+        self.list.highlight(entry)
+        self._want = (entry.ident, entry.key)
+        if self.detail is None or self.detail.key != entry.key \
+                or isinstance(entry, HiddenEntry):
+            self._show(self._build_detail(entry, ctx))
+        elif isinstance(entry, NodeEntry):
+            self.detail.bind_live(entry.live)
+        if show:
+            self.split.set_show_content(True)
+
+    def select_node(self, node):
+        """Open a device named by a chip or a sibling row."""
+        entry = self._entries.get((node.id, node.serial))
+        if entry is None:
+            return
+        if entry not in self.list.visible_entries():
+            # Filtered out of the list: show everything again, or the
+            # detail would belong to a row nobody can see.
+            self.list.search.set_text('')
+            self.list.dirs.set_active_name('all')
+        self.select(entry)
+
+    def reload_detail(self):
+        """Build the selected device's detail again (its rule was reset)."""
+        entry = self.list.current
+        if entry is not None:
+            self._show(self._build_detail(entry))
+
+    def _build_detail(self, entry, ctx=None):
+        data = self._data or {'nodes': [], 'streams': [], 'cards': []}
+        ctx = ctx or self._ctx(data)
+        if isinstance(entry, NodeEntry):
+            node = entry.node
+            rule = self._rules['nodes'].get(node.name, {})
+            card = endpoints.card_of(node, data['cards'])
+            card_rule = (self._rules['devices'].get(card.name, {})
+                         if card is not None else {})
+            return EndpointDetail(self, node, rule, ctx, entry.live,
+                                  card_rule=card_rule)
+        if isinstance(entry, OffEntry):
+            return CardOffDetail(self, entry.card, entry.sink)
+        return HiddenDetail(self, self._hidden,
+                            getattr(self, '_live_nodes', set()),
+                            getattr(self, '_live_cards', set()))
+
+    def _show(self, detail):
+        old = self.detail
+        if old is not None:
+            old.unbind()
+        self.detail = detail
+        widget = detail.widget if detail is not None else self._empty
+        # What a screen reader (and the narrow layout's page) calls it.
+        node = getattr(detail, 'node', None)
+        self.content_page.set_title(node.description if node is not None
+                                    else 'Hidden devices'
+                                    if isinstance(detail, HiddenDetail)
+                                    else 'Device')
+        if widget.get_parent() is None:
+            self.stack.add_child(widget)
+        self.stack.set_visible_child(widget)
+        if old is not None and old.widget is not widget:
+            self._old.append(old.widget)
+        self._drop_old()
+
+    def _drop_old(self, *_a):
+        """Remove the details crossfaded away, once the fade is over."""
+        if self.stack.get_transition_running():
+            return
+        for w in self._old:
+            if w.get_parent() is self.stack and \
+                    w is not self.stack.get_visible_child():
+                self.stack.remove(w)
+        self._old = []
 
     # --------------------------------------------------------- actions --
-    def make_default(self, card):
+    def paint_star(self, entry, is_default):
+        """The sync's star painter for one node: its row, and the detail."""
+        entry.paint_star(is_default)
+        d = self.detail
+        if isinstance(d, EndpointDetail) and d.key == entry.key:
+            d.paint_star(is_default)
+
+    def make_default(self, node):
         # Paint it now and hold it for LOCAL_GRACE: the graph only shows the
         # new default a little after wpctl returns, so a delivery landing in
         # between would put the star back.  Painted in place, never rebuilt.
-        node = card.node
         if node.is_default and self._default_ts == 0.0:
             return
         self._default_ts = _now()
-        for other in self._cards.values():
-            if isinstance(other, DeviceCard) and other.sink == card.sink:
-                other.paint_star(other is card)
-        what = 'output' if card.sink else 'input'
+        for e in self._entries.values():
+            if isinstance(e, NodeEntry) and e.sink == node.is_sink:
+                self.paint_star(e, e.node.id == node.id
+                                and e.node.serial == node.serial)
+        what = 'output' if node.is_sink else 'input'
 
         def done(ok, error):
             if ok and not error:
@@ -478,7 +509,32 @@ class DevicesPage:
         async_call(lambda: pw.set_default(node.id), done)
         self._watch_grace()
 
-    # -- dragging an app chip onto another card -----------------------------
+    def codecs(self, card_name, profile, callback):
+        """The codecs a headset offers on a profile, asked once per profile.
+
+        `pactl … list-codecs` is a subprocess, so never per delivery: the
+        answer is kept until the profile changes."""
+        key = (card_name, profile)
+        if key in self._codecs:
+            callback(self._codecs[key])
+            return
+
+        def done(result, error):
+            codecs = [] if error or result is None else result
+            self._codecs[key] = codecs
+            callback(codecs)
+        async_call(lambda: bluetooth.list_codecs(card_name), done)
+
+    def add_virtual(self):
+        """Add → New virtual device: the Virtual Devices page's own dialog."""
+        page = getattr(self.window, 'pages', {}).get('virtual')
+        opener = getattr(page, '_open_dialog', None)
+        if callable(opener):
+            opener(None)
+        else:
+            self.window.goto('virtual')
+
+    # -- dragging an app chip onto a row ------------------------------------
     def _stream(self, value):
         """The stream a drag payload names, from the last delivery."""
         if not isinstance(value, str) or not value.startswith('stream:'):
@@ -490,41 +546,36 @@ class DevicesPage:
         streams = (self._data or {}).get('streams', [])
         return next((st for st in streams if st.id == sid), None)
 
-    def accepts(self, card, value):
+    def accepts(self, entry, value):
         stream = value if not isinstance(value, str) else self._stream(value)
-        if stream is None or not isinstance(card, DeviceCard):
+        if stream is None or not isinstance(entry, NodeEntry):
             return False
-        if card.node.id == stream.target_id:
+        if entry.node.id == stream.target_id:
             return False                        # already there
         # playback goes to an output; a recorder takes an input or the
         # monitor of an output, as its own chip menu offers
-        return card.sink if stream.is_playback else True
+        return entry.sink if stream.is_playback else True
 
     def drag_started(self, stream):
         # Say where it can land before it is dropped (UI.md §1, direct
-        # manipulation): every card that would take it, and dim the rest.
+        # manipulation): every row that would take it, and dim the rest.
         self.dragging = stream
-        for card in self._cards.values():
-            if isinstance(card, DeviceCard):
-                card.widget.add_css_class('drop-ready' if self.accepts(
-                    card, stream) else 'drop-no')
+        self.list.drag_marks(lambda e: self.accepts(e, stream))
 
     def drag_ended(self):
         was = self.dragging
         self.dragging = None
-        for card in self._cards.values():
-            for css in ('drop-ready', 'drop-no', 'drop-into'):
-                card.widget.remove_css_class(css)
+        self.list.clear_drag_marks()
         if was is not None and self._held_rebuild:
             self._held_rebuild = False
             GLib.idle_add(lambda: (self.refresh(), False)[1])
 
-    def drop_on(self, card, value):
+    def drop_on(self, entry, value):
         stream = self._stream(value)
         self.drag_ended()
-        if stream is None or not self.accepts(card, stream):
+        if stream is None or not self.accepts(entry, stream):
             return False
-        self.move_stream(stream, card.node)
+        self.move_stream(stream, entry.node)
         return True
 
     def move_stream(self, stream, target):
@@ -536,9 +587,9 @@ class DevicesPage:
             self.refresh()
         async_call(lambda: pw.move_stream(stream.id, target.serial), done)
 
-    def repoint(self, card, stream_id, target):
+    def repoint(self, node, stream_id, target):
         """Send a software device's output somewhere else, and keep it."""
-        node_name = card.node.name
+        node_name = node.name
 
         def work():
             if not pw.move_stream(stream_id, target.serial):
@@ -549,60 +600,22 @@ class DevicesPage:
 
         def done(note, error):
             if note is not None and not error:
-                self.window.toast(f'{card.node.description} → '
+                self.window.toast(f'{node.description} → '
                                   f'{target.description}{note}')
             else:
                 self.window.toast('Could not change where it sends its sound')
             self.refresh()
         async_call(work, done)
 
-    def open_settings(self, card):
-        node = card.node
-        cards = (self._data or {}).get('cards', [])
-        sc = endpoints.card_of(node, cards)
-        data = rules.load()
-        dlg = DeviceSettingsDialog(
-            self, node, data['nodes'].get(node.name, {}),
-            (sc.name, sc.description) if sc is not None else None,
-            data['devices'].get(sc.name, {}) if sc is not None else {})
-        dlg.present()
-
     def rule_changed(self, node_name):
-        """A dialog saved a rule: show "customized" without a rebuild."""
+        """A section saved a rule: show "customized" without a rebuild."""
         rule = rules.node_rule(node_name)
-        for card in self._cards.values():
-            if isinstance(card, DeviceCard) and card.node.name == node_name:
-                card.set_rule(rule)
+        self._rules.setdefault('nodes', {})[node_name] = rule
+        d = self.detail
+        if isinstance(d, EndpointDetail) and d.node.name == node_name:
+            d.set_rule(rule)
 
-    # -------------------------------------------------------- hidden list --
-    def _fill_hidden(self, live_nodes, live_cards):
-        for row in self._hidden_rows:
-            self.hidden_list.remove(row)
-        self._hidden_rows = []
-        entries = rules.hidden_entries()
-        self.hidden.set_visible(bool(entries))
-        self.hidden_band.set_count(len(entries), len(entries))
-        for entry in entries:
-            live = entry['key'] in (live_cards if entry['kind'] == 'device'
-                                    else live_nodes)
-            row = Adw.ActionRow(title=esc(entry['label']),
-                                subtitle=esc(entry['key']),
-                                title_lines=1, subtitle_lines=1)
-            row.add_prefix(Gtk.Image.new_from_icon_name(
-                'view-conceal-symbolic'))
-            if entry['kind'] == 'device':
-                row.add_suffix(pill('whole card', 'dim'))
-            if live:
-                # Still in the graph while marked hidden: the generated
-                # WirePlumber drop-in was removed or edited by hand.
-                row.add_suffix(pill('not in effect', 'warning'))
-            btn = Gtk.Button(label='Unhide', valign=Gtk.Align.CENTER)
-            btn.connect('clicked', lambda _b, e=entry: self._unhide(e))
-            row.add_suffix(btn)
-            self.hidden_list.append(row)
-            self._hidden_rows.append(row)
-
-    def _unhide(self, entry):
+    def unhide(self, entry):
         def work():
             if entry['kind'] == 'device':
                 rules.set_device_rule(entry['key'], hide=False)

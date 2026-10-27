@@ -247,6 +247,22 @@ def layout_name(positions, count=None) -> str:
     return {1: 'Mono', 2: 'Stereo'}.get(count, f'{count} channels')
 
 
+def node_layout(node) -> str:
+    """The channel layout, 'Stereo', '5.1', '4 channels'.
+
+    The running format wins over the channel map when the two disagree in
+    count; idle, the map alone says it.
+    """
+    fmt = node.fmt or {}
+    positions = list(getattr(node, 'channel_map', None) or [])
+    running = fmt.get('channels') if node.state == 'running' else None
+    if running and positions and running != len(positions):
+        positions = []          # the running format wins over the map
+    count = running or len(positions) \
+        or len(getattr(node, 'channels', None) or [])
+    return layout_name(positions, count)
+
+
 def format_tags(node) -> list:
     """The device's format as short tags: ['48 kHz', '24-bit', 'Stereo'].
 
@@ -263,13 +279,7 @@ def format_tags(node) -> list:
         bits = _sample_bits(fmt.get('format', ''))
         if bits:
             tags.append(bits)
-    positions = list(getattr(node, 'channel_map', None) or [])
-    running = fmt.get('channels') if node.state == 'running' else None
-    if running and positions and running != len(positions):
-        positions = []          # the running format wins over the map
-    count = running or len(positions) \
-        or len(getattr(node, 'channels', None) or [])
-    layout = layout_name(positions, count)
+    layout = node_layout(node)
     if layout:
         tags.append(layout)
     return tags
@@ -278,6 +288,169 @@ def format_tags(node) -> list:
 def state_dot(node) -> str:
     """CSS class for the state dot: ok / warn / err / dim."""
     return STATE_DOT.get(node.state, 'dim')
+
+
+# -- the list and detail page (DR-012, "List and detail") -------------------
+
+# Where a device is listed, in display order.  First match wins in
+# `device_kind`: the API a node names outright decides it, and only a node
+# that names none is software.
+KINDS = (
+    ('alsa', 'Sound cards'),
+    ('bluez', 'Bluetooth'),
+    ('virtual', 'Virtual & processing'),
+    ('other', 'Other'),
+)
+
+KIND_PILL = {'alsa': 'Sound card', 'bluez': 'Bluetooth', 'other': 'Device'}
+
+
+def device_kind(node) -> str:
+    """'alsa', 'bluez', 'virtual' or 'other', from the node's `device.api`."""
+    api = str((node.props or {}).get('device.api') or '')
+    if api == 'alsa':
+        return 'alsa'
+    if api.startswith('bluez'):
+        return 'bluez'
+    if node.is_virtual:
+        return 'virtual'
+    return 'other'
+
+
+def kind_text(node) -> str:
+    """The kind pill: 'Sound card', 'Bluetooth', 'Equalizer', 'Virtual device'."""
+    k = device_kind(node)
+    if k == 'virtual':
+        return kind(node)
+    return KIND_PILL[k]
+
+
+def direction(node) -> str:
+    return 'Output' if node.is_sink else 'Input'
+
+
+def part_name(node, card) -> str:
+    """What one endpoint of a sound card is, without the card's own name.
+
+    'Built-in Audio Analog Stereo' on the card 'Built-in Audio' is 'Analog
+    Stereo'.  The whole description when it does not start with the card's.
+    """
+    desc = node.description or ''
+    head = (card.description if card is not None else '') or ''
+    if head and desc.startswith(head):
+        rest = desc[len(head):].strip(' -·')
+        if rest:
+            return rest
+    return desc
+
+
+def row_subtitle(node, in_card=False) -> str:
+    """The line under a list row.
+
+    A row on its own says its direction too ('Output · Speakers · USB'); a
+    row under its card's heading has the direction as its title, so the
+    line says only where the sound is.
+    """
+    where = subtitle(node)
+    if in_card:
+        return where or ''
+    return ' · '.join(p for p in (direction(node), where) if p)
+
+
+def facts(node) -> list:
+    """[(label, value)] for the detail's facts: rate, format, channels.
+
+    Rate and bit depth exist only while the device runs (`Format: []`
+    otherwise, measured), so they read '—' then, never a guess.  Latency is
+    not here: the dump gives a node's latency in quanta of a quantum it does
+    not state (measured 2026-10-26), so a figure in ms would be inferred.
+    """
+    fmt = node.fmt or {}
+    running = node.state == 'running' and bool(fmt)
+    rate = fmt.get('rate') if running else None
+    bits = _sample_bits(fmt.get('format', '')) if running else ''
+    layout = node_layout(node)
+    return [('Rate', f'{rate / 1000:g} kHz' if rate else '—'),
+            ('Format', bits or '—'),
+            ('Channels', layout or '—')]
+
+
+def search_text(node) -> str:
+    """Everything the list's search matches: names, port names, kind."""
+    ports = ' '.join(desc for _i, desc, _a in node.ports)
+    return ' '.join((node.description or '', node.name or '', subtitle(node),
+                     ports, direction(node))).lower()
+
+
+@dataclass
+class ListGroup:
+    """One sound card's rows, or one device on its own.
+
+    `card` is set for a hardware card with two or more rows, which get a
+    heading; `nodes` and `off` are what its rows show, outputs first.
+    """
+    kind: str
+    title: str
+    card: object = None                 # surround.Card, when it heads rows
+    nodes: list = field(default_factory=list)
+    off: list = field(default_factory=list)      # [(card, sink)]
+
+    @property
+    def size(self) -> int:
+        return len(self.nodes) + len(self.off)
+
+
+def list_groups(nodes, cards) -> list:
+    """The list page's rows, grouped and ordered.
+
+    Kinds in `KINDS` order.  Hardware is grouped by its sound card (the
+    `device.id` a node names), with a sound card's off directions
+    (`cards_without_endpoint`) as rows of their own, so the way back from
+    Off stays on the page.  Software devices are one row each.  Within a
+    kind: cards by name, then each card's outputs before its inputs, so a
+    delivery never reorders rows.
+    """
+    by_card: dict = {}
+    loose = []
+    for n in nodes:
+        card = card_of(n, cards) if not n.is_virtual else None
+        if card is not None:
+            by_card.setdefault(card.id, (card, []))[1].append(n)
+        else:
+            loose.append(n)
+    offs: dict = {}
+    for sink in (True, False):
+        for c in cards_without_endpoint(cards, nodes, sink):
+            offs.setdefault(c.id, (c, []))[1].append((c, sink))
+
+    def node_order(n):
+        return (not n.is_sink, (n.description or '').lower(), n.name, n.id)
+
+    groups = []
+    for cid in set(by_card) | set(offs):
+        card = (by_card.get(cid) or offs.get(cid))[0]
+        mine = sorted((by_card.get(cid) or (None, []))[1], key=node_order)
+        off = sorted((offs.get(cid) or (None, []))[1],
+                     key=lambda cs: not cs[1])
+        kind_key = device_kind(mine[0]) if mine else (
+            'bluez' if card.name.startswith('bluez_card.') else 'alsa')
+        g = ListGroup(kind=kind_key, title=card.description, nodes=mine,
+                      off=off)
+        if g.size > 1:
+            g.card = card
+        groups.append(g)
+    for n in loose:
+        groups.append(ListGroup(kind=device_kind(n), title=n.description,
+                                nodes=[n]))
+    rank = {k: i for i, (k, _t) in enumerate(KINDS)}
+    # A card heads its kind by name; a software device sorts outputs first,
+    # then by name, as the Mixer lists them.
+    groups.sort(key=lambda g: (
+        rank.get(g.kind, len(rank)),
+        g.card is None and bool(g.nodes) and not g.nodes[0].is_sink,
+        g.title.lower(),
+        node_order(g.nodes[0]) if g.nodes else (False, '', '', 0)))
+    return groups
 
 
 def owner(node, chain_templates=None):
