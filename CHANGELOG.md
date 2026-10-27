@@ -83,36 +83,37 @@ devices by name. Reported in
 
 **The Devices page, redesigned**
 
-Every output and input is now a card that shows what the device is doing,
-not just how loud it is.
+Your devices are now a list on the left, grouped into sound cards, Bluetooth
+and virtual devices, and the one you pick is shown in full on the right.
 
-- **Where the sound is.** A card names the port (Speakers, Headphones) and
-  how the device is connected: Built-in, USB, HDMI, or Bluetooth with its
-  codec. Switch ports with one click; an unplugged one is greyed out.
-- **What's playing.** Every app playing through a device shows on its card.
-  Click an app to move it to another device, or drag it onto that device's
-  card. An app recording what a device plays shows there too.
-- **Where a virtual device sends its sound**, and which ones send into a
-  device, so a chain of devices can be followed at a glance. You can change
-  where a virtual device sends from its card.
-- **The sound card's profile**, with a warning and a one-click fix when the
-  profile gives no sound, such as HDMI with nothing plugged in. A sound card
-  that is switched off keeps a card of its own with the way to turn it back
-  on, so it never just disappears from the page. On a Bluetooth headset,
-  that's also where you turn its microphone on.
-- **Whether it's running, and its format**, under the device's name: the
-  sample rate and bit depth while it plays, and its channel layout (Stereo,
-  5.1, 7.1).
-- **Fold what you don't need.** A card folds down to its name and volume,
-  and a heading folds its whole section (all the outputs, say). The page
-  remembers what you folded.
-- **Test** plays a short chime on an output, left then right.
+- **The list** shows each sound card with its profile, and its output and
+  input under it. Anything playing has a live level, the default output and
+  input have a star, and a card whose profile gives no sound has a ⚠. Show
+  only outputs or only inputs, or search by name, port or PipeWire name.
+  **+** makes a new virtual device.
+- **What the device is doing.** How it's connected (Built-in, USB, HDMI, or
+  Bluetooth with its codec), whether it's running, and its sample rate, bit
+  depth and channel layout while it plays.
+- **What's playing, and where it goes.** The signal path shows the apps and
+  devices playing into it and where it sends its sound. Click an app to
+  move it to another device, or drag it onto a device in the list. Click a
+  device to open it.
+- **Port and profile**, with a warning and a one-click fix when the profile
+  gives no sound, such as HDMI with nothing plugged in. A sound card that is
+  switched off stays in the list with the way to turn it back on. A
+  Bluetooth headset's profile and codec are chosen here, and turning its
+  microphone on is one click.
+- **Where a virtual device sends its sound**, which you can change, with a
+  link to the page that made it.
 - **Settings** for a hardware device (its name, hiding it, sample rate,
-  buffering, when it suspends) open from the gear beside its name, in their
-  own window, grouped by what they're for, with a way to reset them. Hover
-  a setting to see what it does.
-- The default output and input are ringed, and a filter finds a device by
-  name.
+  format, preferred quantum) are right there. Buffering and power settings,
+  and the device's technical names with a copy button each, show with
+  Advanced on. Hover a setting to see what it does; reset them all from the
+  ⋯ menu.
+- **Test** plays a short chime on an output, left then right.
+- **Hidden devices** are at the bottom of the list, each with Unhide.
+- In a narrow window the list and the device take turns: pick one to open
+  it, and Back returns to the list.
 
 **Balance, and a volume for each channel**
 
@@ -123,7 +124,7 @@ on, or AUX 0 to AUX 7 on a Pro Audio card. Use it to even out speakers that
 sit at different distances, turn down one side of a pair of headphones, or
 set two outputs of an audio interface to different levels. **Reset** puts
 every channel back to the same level. The Devices page has the same controls
-under each card's Channels button. A pair of AUX channels gets two sliders and no
+under each device's Channels button. A pair of AUX channels gets two sliders and no
 Balance, because on a Pro Audio card they are often two separate outputs.
 
 - **Every other volume slider keeps your balance.** The main slider in the
