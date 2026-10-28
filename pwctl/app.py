@@ -315,6 +315,10 @@ class Window(Adw.ApplicationWindow):
         # off at the window's edge instead of being drawn under whatever is
         # tiled next to it.
         self.set_size_request(MIN_WIDTH, MIN_HEIGHT)
+        # first: an equalizer with unsaved changes asks before the window
+        # goes (and stops the close until it is answered)
+        self._closing = False
+        self.connect('close-request', self._confirm_unsaved)
         self.connect('close-request', self._save_window_state)
         self._pending_restarts: set[str] = set()
         self.advanced = bool(prefs.get('advanced'))
@@ -993,6 +997,22 @@ class Window(Adw.ApplicationWindow):
         fit.need, fit.floor, fit.height = need, floor, height
         fit.least = floor - self._switcher_share
         fit.queue_resize()
+
+    def _confirm_unsaved(self, *_a):
+        """The Equalizer page plays changes before they are saved; closing
+        the window would drop them (the app puts the saved curve back on
+        shutdown), so ask, as the page does when you leave one."""
+        page = getattr(self, 'pages', {}).get('enhance')
+        if self._closing or page is None or not page.has_unsaved:
+            return False
+
+        def close():
+            page._leave()
+            self._closing = True
+            self.close()
+        self.goto('enhance')
+        page.confirm_leave(close)
+        return True
 
     def _save_window_state(self, *_a):
         prefs.save(win_width=self.get_width() or 1080,

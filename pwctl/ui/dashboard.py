@@ -1699,7 +1699,7 @@ class Dashboard:
                                   'system-run-symbolic')
         self.run_rows = {}
         for key, label, page in (('chains', 'Filter chains', 'chains'),
-                                 ('enh', 'Equalizers and mic cleanup', 'enhance'),
+                                 ('enh', 'Equalizers and mics', 'enhance'),
                                  ('virtual', 'Virtual devices', 'virtual'),
                                  ('paths', 'Signal paths', 'paths')):
             value = Gtk.Label(label='—')

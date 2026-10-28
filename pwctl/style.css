@@ -140,62 +140,6 @@ scale.vol-stepped trough {
     margin: 2px;
 }
 
-/* ------------------------------- managed device list: running vs stopped -- */
-
-/* A running device gets an accent edge.  On an expander it runs the full
-   height, so the device and its mini-mixer read as one block instead of
-   dissolving into the rows below it.
-
-   Every row here paints its own background, so a shadow set only on the
-   expander survives just in the gaps between its children.  It has to be
-   repeated at the same offset on the nested rows *and* on the expander's own
-   header row — miss the header and the edge starts one row late. */
-row.enh-active,
-row.enh-active row.header,
-row.enh-inner {
-    box-shadow: inset 3px 0 0 0 @accent_color;
-}
-
-row.enh-active {
-    background: alpha(@accent_color, 0.07);
-    /* a little air underneath so a running device doesn't run straight into
-       the stopped ones listed below it */
-    margin-bottom: 10px;
-}
-
-/* Flow-stage headings inside a running device's mini-mixer. */
-.enh-section {
-    font-size: 0.8em;
-    font-weight: 700;
-    opacity: 0.55;
-}
-
-/* Nested rows keep a real surface — dropping it entirely would let the
-   window's translucency show straight through and break the list.  Sitting
-   on the block's tint, this reads as slightly lifted: nested, not sibling. */
-row.enh-inner {
-    background: @card_bg_color;
-}
-
-/* Stopped devices keep their layout but spend less ink, so the eye lands on
-   whatever is actually running. */
-/* Only the device's own icon and text fade — never the suffix buttons, which
-   stay just as clickable and must not read as disabled. */
-row.enh-idle .enh-icon,
-row.enh-idle label.subtitle {
-    opacity: 0.45;
-}
-
-/* stopped devices are separated too, just less than a running one */
-row.enh-idle {
-    margin-bottom: 6px;
-}
-
-row.enh-idle label.title {
-    opacity: 0.62;
-    font-weight: 400;
-}
-
 /* ---- Equalizer editor (eq_editor.py, eq_graph.py; DR-016) ----
    The curve runs blue -> green across the frequencies, the board's wire
    language; a point is blue.  Clipping and bypass are the warning hue, as
@@ -316,6 +260,151 @@ spinbutton.eq-value text {
 row.eq-row-selected {
     box-shadow: inset 3px 0 0 0 @pwctl_src;
     background: alpha(@blue_3, 0.07);
+}
+
+/* ---- Equalizer page: list beside the selected one (enhance_page.py,
+   eq_detail.py; the user's "Split View" template).  The list is a
+   secondary sidebar like Devices'; its rows keep .navigation-sidebar's own
+   selection (libadwaita's widget, so its accent is allowed: UI.md §2). */
+.eqp-list {
+    background-color: @secondary_sidebar_bg_color;
+    color: @secondary_sidebar_fg_color;
+}
+
+/* a file dragged over the list: an outline, so nothing changes size */
+.eqp-list.drop-ready {
+    outline: 2px dashed alpha(@pwctl_drop, 0.8);
+    outline-offset: -4px;
+}
+
+.eqp-group {
+    margin: 0 12px 2px 12px;
+}
+
+.eqp-row-title {
+    font-weight: 600;
+}
+
+.eqp-listbox > row.off .eqp-row-title {
+    opacity: 0.7;
+}
+
+.eqp-listbox > row.off .eq-thumb {
+    opacity: 0.55;
+}
+
+/* the default output's star keeps its yellow on the selected row too */
+.eqp-listbox > row image.eqp-star,
+.eqp-listbox > row:selected image.eqp-star {
+    color: @pwctl_default;
+}
+
+image.eqp-mic-icon {
+    min-width: 52px;
+    color: @pwctl_src;
+}
+
+/* changes not saved: a small dot after the name */
+.eqp-dirty {
+    min-width: 7px;
+    min-height: 7px;
+    border-radius: 99px;
+    background: @pwctl_src;
+}
+
+.eqp-drop {
+    margin: 6px 10px 10px 10px;
+    padding: 10px 12px;
+    border: 1px dashed alpha(currentColor, 0.22);
+    border-radius: 10px;
+    font-size: 0.85em;
+    opacity: 0.75;
+}
+
+/* the detail's own bar: back, name and state, Save */
+.eqp-top {
+    padding: 8px 10px 8px 14px;
+    border-bottom: 1px solid alpha(currentColor, 0.08);
+    min-height: 40px;
+}
+
+.eqp-title {
+    font-weight: 700;
+    font-size: 1.08em;
+}
+
+/* where the sound goes.  Default: the source hue, as a live route on the
+   board; otherwise neutral; failed: the error hue.  Surfaces are mixed
+   into the card colour, never alpha-only (UI.md §2). */
+.eqp-route {
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: mix(@card_bg_color, @window_fg_color, 0.04);
+    border: 1px solid alpha(currentColor, 0.08);
+}
+
+.eqp-route.default {
+    background: mix(@card_bg_color, @blue_3, 0.14);
+    border-color: alpha(@blue_3, 0.35);
+    color: @pwctl_src;
+}
+
+.eqp-route.failed {
+    background: mix(@card_bg_color, @error_color, 0.12);
+    border-color: alpha(@error_color, 0.35);
+}
+
+.eqp-route.off {
+    color: alpha(currentColor, 0.8);
+}
+
+.eqp-tile {
+    background: @card_bg_color;
+    border: 1px solid alpha(currentColor, 0.09);
+    border-radius: 12px;
+    padding: 8px 12px;
+}
+
+button.eqp-tile-action {
+    padding: 0 8px;
+    min-height: 20px;
+    border-radius: 99px;
+    font-size: 0.78em;
+    font-weight: 700;
+    background: alpha(@warning_color, 0.16);
+    color: @warning_color;
+    box-shadow: none;
+}
+
+.eqp-tile-title {
+    font-size: 0.78em;
+    font-weight: 700;
+    opacity: 0.62;
+}
+
+.eqp-tile-value {
+    font-size: 1.12em;
+    font-weight: 800;
+    font-feature-settings: "tnum";
+}
+
+.eqp-tile-value.good {
+    color: @pwctl_mix;
+}
+
+.eqp-tile-value.warn {
+    color: @warning_color;
+}
+
+.eqp-tile-sub {
+    font-size: 0.78em;
+    opacity: 0.62;
+}
+
+/* "Send an app here…": a link in the list, not a second title */
+row.eqp-send label {
+    color: @pwctl_src;
+    font-weight: 600;
 }
 
 /* inline info note (wraps, unlike Adw.Banner) */

@@ -1,11 +1,33 @@
-"""Enhancements page: parametric equalizer sinks and microphone cleanup.
+"""Equalizer page: equalizers and clean microphones, as a list beside the
+selected one (the user's "Split View" template, 2026-10-28).
 
-Two managed sections sharing one page.  Each equalizer / cleanup device runs
-as its own PipeWire process (see backend/enhance.py), so nothing here touches
-the main graph or needs a service restart — devices just start and stop.
+Left, the list: Equalizers or Mic, each running one above the ones that are
+not, with its curve (or a microphone), the default output's star, where its
+sound goes, and its switch.  A file dropped anywhere on it becomes a new
+equalizer.  Right, the selected one in full (`eq_detail`): for an
+equalizer, the editor that used to be a dialog, inline, with Save and
+Revert above it.
+
+Layout: an `Adw.NavigationSplitView` in the page's own `Adw.BreakpointBin`,
+as on Devices.  Below `COLLAPSE_SP` of page width it shows one pane at a
+time; picking a row slides its detail in, with a back button.  Each detail
+has a bin of its own, so the editor reflows to the width it gets.
+
+Leaving an equalizer with changes not saved asks first (Save, Discard,
+Keep editing): here, on another row, on the other tab, and when the window
+closes (`has_unsaved`, `app.Window`).  Leaving one that only Compare
+changed puts its saved curve back without asking.
+
+Live state comes from `livestate` while the page is mapped (the 3 s poll
+only where it cannot listen); each delivery is collected off the main loop
+(unit states, files) and applied in order, in place.  The list is rebuilt
+only when the set of rows changes, and a row that changes group (switched
+on or off) moves once the pointer leaves the list, never under it.
 """
 
 from __future__ import annotations
+
+from dataclasses import asdict
 
 import gi
 
@@ -13,706 +35,946 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
-from ..backend import balance, enhance, prefs, pw, rules, chains
-from ..backend import eqcurve
-from .eq_editor import EqEditor
-from .eq_graph import CurveThumb
-from .volume import make_volume
-from .widgets import async_call, confirm, esc, group, icon_button, \
-    page_scroller, pick_file, pill, state_style
+from ..backend import chains, enhance, livestate, prefs, pw, rules  # noqa: E402
+from ..backend import eqcurve as E  # noqa: E402
+from .eq_detail import DRAFT, EqDetail, MicDetail, _label, apps_into, \
+    raw_mic, route_of  # noqa: E402
+from .eq_graph import CurveThumb  # noqa: E402
+from .widgets import async_call, confirm, micro, pick_file  # noqa: E402
+
+COLLAPSE_SP = 700          # below this page width, one pane at a time
+MIN_PAGE_WIDTH = 352       # under the window's 360, as Devices
+TABS = (('eq', 'Equalizers'), ('mic', 'Mic'))
+GROUPS = {0: 'New', 1: 'Running', 2: 'Not running'}
+NOUN = {'eq': 'equalizer', 'mic': 'clean microphone'}
 
 
-class EnhancePage:
-    def __init__(self, window):
-        self.window = window
-        self.volume_style = prefs.get('volume_style') or 'meter'
-        self._chain_edges = {}
-        self._nodes = []
-        self._streams = []
-        self._sinks = []
-        self._items = []        # the Enhancements themselves, for chaining
+def collect(dump):
+    """Everything one delivery needs (runs off the main loop)."""
+    items = enhance.list_enhancements()
+    states = {e.id: enhance.status(e) for e in items}
+    nodes = pw.list_audio_nodes(dump)
+    streams = pw.list_streams(dump)
+    edges = chains.target_edges(chains.list_chains())
+    # which app is pinned where (rules.stream_is_bound reads the file per
+    # call; once per delivery here)
+    app_rules = [r for r in rules.app_rules() if rules.rule_enabled(r)]
+    bound = {}
+    for s in streams:
+        if not (s.is_playback and s.is_app):
+            continue
+        where = {(r.get('props') or {}).get('target.object')
+                 for r in app_rules if rules.rule_matches(r, s.props or {})}
+        where.discard(None)
+        if where:
+            bound[s.id] = where
+    return {'items': items, 'states': states, 'nodes': nodes,
+            'streams': streams, 'edges': edges, 'bound': bound}
 
-        eq_head = group(
-            'Equalizer',
-            'A parametric-equalizer output. Audio is only equalized when it '
-            'plays through it, so pick an equalizer below and use “Set as '
-            'default output” to route everything through it (it then feeds the '
-            'device you chose). Import an AutoEQ / APO file, or dial the bands '
-            'in by hand.')
-        eq_head.add(self._create_row(
-            'Create an equalizer',
-            'A new equalizer sink with a flat starting curve.',
-            lambda: self._open_eq(None)))
-        imp_row = Adw.ActionRow(
-            title='Import an AutoEQ / APO file',
-            subtitle='Load a ParametricEQ.txt curve (from AutoEq or '
-                     'Squiglink) — click to browse, or drag the file here.')
-        imp_btn = Gtk.Button(icon_name='document-open-symbolic',
-                             valign=Gtk.Align.CENTER)
-        imp_btn.connect('clicked', lambda *_: self._import_eq())
-        imp_row.add_suffix(imp_btn)
-        imp_row.set_activatable_widget(imp_btn)
-        # Drag-and-drop a file straight onto the row. This uses GTK's own DnD,
-        # so it works even where the desktop's file-chooser portal is broken.
+
+# ================================================================ list ==
+
+class _Entry:
+    """One row: an equalizer, a clean microphone, or the one being made."""
+
+    def __init__(self, page, kind, enh=None):
+        self.page = page
+        self.kind = kind
+        self.enh = enh
+        self.key = enh.id if enh is not None else DRAFT
+        self.rank = 0 if enh is None else (1 if enh.enabled else 2)
+        self.want_rank = self.rank
+        self._updating = False
+
+        row = Gtk.ListBoxRow()
+        row.entry = self
+        row.add_css_class('eqp-row')
+        box = Gtk.Box(spacing=10, margin_top=5, margin_bottom=5)
+        if kind == 'eq':
+            self.thumb = CurveThumb(enhance.curve_of(enh) if enh is not None
+                                    else E.default_curve(), width=52,
+                                    height=30)
+            box.append(self.thumb)
+        else:
+            self.thumb = None
+            icon = Gtk.Image.new_from_icon_name('pwctl-source-mic-symbolic')
+            icon.set_pixel_size(18)
+            icon.add_css_class('eqp-mic-icon')
+            icon.set_valign(Gtk.Align.CENTER)
+            box.append(icon)
+        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1,
+                      hexpand=True, valign=Gtk.Align.CENTER)
+        head = Gtk.Box(spacing=5)
+        self.title = _label(css=('eqp-row-title',))
+        head.append(self.title)
+        self.star = Gtk.Image.new_from_icon_name('starred-symbolic')
+        self.star.set_pixel_size(12)
+        self.star.add_css_class('eqp-star')
+        self.star.set_visible(False)
+        head.append(self.star)
+        self.dot = Gtk.Box(valign=Gtk.Align.CENTER, visible=False,
+                           tooltip_text='Changes not saved')
+        self.dot.add_css_class('eqp-dirty')
+        head.append(self.dot)
+        col.append(head)
+        self.sub = _label(css=('caption', 'dim-label'))
+        col.append(self.sub)
+        box.append(col)
+        self.switch = None
+        if enh is not None:
+            self.switch = Gtk.Switch(valign=Gtk.Align.CENTER,
+                                     active=enh.enabled,
+                                     tooltip_text='Running')
+            self.switch.connect('notify::active', self._switched)
+            box.append(self.switch)
+        row.set_child(box)
+        self.row = row
+
+    @property
+    def name(self):
+        return self.enh.name if self.enh is not None else ''
+
+    def _switched(self, sw, _p):
+        if self._updating or self.enh is None:
+            return
+        on = sw.get_active()
+        if on != self.enh.enabled:
+            self.page.set_running(self.enh, on)
+
+    def paint(self, data, detail):
+        mine = detail if detail is not None and detail.key == self.key \
+            else None
+        if self.enh is None:
+            self.title.set_label(mine.title if mine else 'New')
+            self.sub.set_label('Not created yet')
+            if self.thumb is not None and mine is not None:
+                self._thumb(mine.session.curve)
+            return
+        enh = self.enh
+        self.title.set_label(enh.name)
+        self.dot.set_visible(mine is not None and mine.dirty)
+        if self.thumb is not None:
+            self._thumb(mine.session.curve if mine is not None
+                        and mine.session.dirty else enhance.curve_of(enh))
+        if data is None:
+            return                  # live state comes with the first read
+        node = next((n for n in data['nodes'] if n.name == enh.node_name),
+                    None)
+        state = (data or {}).get('states', {}).get(enh.id, '')
+        sub = self._eq_sub(enh, node, state, data) if self.kind == 'eq' \
+            else self._mic_sub(enh, node, state, data)
+        self.sub.set_label(sub)
+        self.sub.set_tooltip_text(sub)
+        default = node is not None and node.is_default
+        self.star.set_visible(default)
+        self.star.set_tooltip_text('Default output' if self.kind == 'eq'
+                                   else 'Default input')
+        if self.switch.get_active() != enh.enabled:
+            self._updating = True
+            self.switch.set_active(enh.enabled)
+            self._updating = False
+        (self.row.remove_css_class if enh.enabled
+         else self.row.add_css_class)('off')
+        self.want_rank = 1 if enh.enabled else 2
+
+    def _thumb(self, curve):
+        if self.thumb.curve != curve:
+            self.thumb.curve = curve
+            self.thumb.queue_draw()
+
+    @staticmethod
+    def _eq_sub(enh, node, state, data):
+        if enh.enabled and node is not None:
+            n = len(apps_into(node, data))
+            apps = f'{n} app{"s" if n != 1 else ""}' if n else 'No apps'
+            if node.is_default:
+                return 'Default output' + (f' · {apps}' if n else '')
+            path = route_of(enh.node_name, data['nodes'], data['streams'])
+            out = (path[-1].description or path[-1].name) if path \
+                else 'not connected'
+            return f'{apps} → {out}'
+        if enh.enabled:
+            return 'Failed to start' if state == 'failed' else 'Starting…'
+        n = len(enhance.curve_of(enh).bands)
+        bands = f'{n} band{"s" if n != 1 else ""}'
+        origin = enhance.origin_of(enh)
+        return f'{origin[0]} · {bands}' if origin else bands
+
+    @staticmethod
+    def _mic_sub(enh, node, state, data):
+        if enh.enabled and node is not None:
+            src = raw_mic(enh, data)
+            frm = f'from {src.description or src.name}' if src else \
+                'from the default microphone'
+            return ('Default input · ' + frm) if node.is_default \
+                else frm[0].upper() + frm[1:]
+        if enh.enabled:
+            return 'Failed to start' if state == 'failed' else 'Starting…'
+        bits = (['noise'] if enh.params.get('noise_suppression', True)
+                else []) + ['echo']
+        return 'Removes ' + ' and '.join(bits)
+
+
+class EnhList:
+    """The pane: the two tabs, Import and New, the rows, the drop zone."""
+
+    def __init__(self, page):
+        self.page = page
+        self.entries = []
+        self.current = None
+        self._pointer_in = False
+        self._regroup_due = False
+        self._updating = False
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.add_css_class('eqp-list')
+        tools = Gtk.Box(spacing=6, margin_top=10, margin_bottom=6,
+                        margin_start=10, margin_end=10)
+        self.tabs = Adw.ToggleGroup(hexpand=True, can_shrink=True)
+        for name, label in TABS:
+            self.tabs.add(Adw.Toggle(name=name, label=label))
+        self.tabs.set_active_name('eq')
+        self.tabs.connect('notify::active-name', self._tab_picked)
+        tools.append(self.tabs)
+        self.import_btn = Gtk.Button(icon_name='document-open-symbolic',
+                                     valign=Gtk.Align.CENTER,
+                                     tooltip_text='Import an AutoEQ / APO '
+                                                  'file')
+        self.import_btn.add_css_class('flat')
+        self.import_btn.connect('clicked', lambda _b: page.import_file())
+        tools.append(self.import_btn)
+        self.add_btn = Gtk.Button(icon_name='list-add-symbolic',
+                                  valign=Gtk.Align.CENTER)
+        self.add_btn.add_css_class('flat')
+        self.add_btn.connect('clicked', lambda _b: page.new())
+        tools.append(self.add_btn)
+        box.append(tools)
+
+        self.listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.listbox.add_css_class('navigation-sidebar')
+        self.listbox.add_css_class('eqp-listbox')
+        self.listbox.set_sort_func(self._sort)
+        self.listbox.set_header_func(self._header)
+        self.placeholder = Gtk.Label(margin_top=24, margin_bottom=24,
+                                     wrap=True, justify=Gtk.Justification
+                                     .CENTER)
+        self.placeholder.add_css_class('dim-label')
+        self.listbox.set_placeholder(self.placeholder)
+        self.listbox.connect('row-activated', self._on_activate)
+        keys = Gtk.EventControllerKey(
+            propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        keys.connect('key-pressed', self._on_key)
+        self.listbox.add_controller(keys)
+        motion = Gtk.EventControllerMotion()
+        motion.connect('enter', lambda *_a: setattr(self, '_pointer_in',
+                                                    True))
+        motion.connect('leave', self._pointer_left)
+        self.listbox.add_controller(motion)
+        sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                vexpand=True, child=self.listbox)
+        box.append(sw)
+
+        self.drop_hint = Gtk.Box(spacing=8)
+        self.drop_hint.add_css_class('eqp-drop')
+        icon = Gtk.Image.new_from_icon_name('document-open-symbolic')
+        icon.set_valign(Gtk.Align.START)
+        self.drop_hint.append(icon)
+        self.drop_hint.append(_label('Drop a ParametricEQ.txt anywhere on '
+                                     'this list to add it.', wrap=True))
+        box.append(self.drop_hint)
         drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
         drop.connect('drop', self._on_drop)
-        imp_row.add_controller(drop)
-        eq_head.add(imp_row)
+        drop.connect('enter', lambda *_a: (box.add_css_class('drop-ready'),
+                                           Gdk.DragAction.COPY)[1])
+        drop.connect('leave', lambda *_a: box.remove_css_class('drop-ready'))
+        box.add_controller(drop)
+        self.widget = box
+        self.set_tab('eq')
 
-        # Experimental: live A/B.  Off by default — with it off the page
-        # behaves exactly as before.
-        self.ab_enabled = bool(prefs.get('eq_ab_compare'))
-        self._bypass = {}               # enh.id -> state dict from enhance.bypass
-        beta = group('Experimental',
-                     'Features still being tried out. They can be turned off '
-                     'again at any time and change nothing when off.')
-        ab_row = Adw.SwitchRow(
-            title='Live A/B compare',
-            subtitle='Switch an equalizer in and out while it keeps running, '
-                     'so playback never pauses. Bypassed audio goes straight '
-                     'to the output device.')
-        ab_row.add_prefix(Gtk.Image.new_from_icon_name(
-            'applications-science-symbolic'))
-        ab_row.set_active(self.ab_enabled)
-        ab_row.connect('notify::active', self._toggle_ab)
-        beta.set_header_suffix(pill('beta', 'warning'))
-        beta.add(ab_row)
-        self.beta_group = beta
+    # -- tabs -------------------------------------------------------------
+    def set_tab(self, tab):
+        self._updating = True
+        self.tabs.set_active_name(tab)
+        self._updating = False
+        eq = tab == 'eq'
+        self.import_btn.set_visible(eq)
+        self.drop_hint.set_visible(eq)
+        self.add_btn.set_tooltip_text(f'New {NOUN[tab]}')
+        self.placeholder.set_label(
+            'No equalizers yet.\nPress + to make one, or drop a file here.'
+            if eq else 'No clean microphones yet.\nPress + to make one.')
 
-        self.eq_listing = group('Configured equalizers')
-
-        mic_head = group(
-            'Microphone cleanup',
-            'A clean copy of your microphone with echo and background noise '
-            'removed (WebRTC), for calls, meetings and streaming. Pick the '
-            'clean microphone as your input in the app that needs it.')
-        mic_head.add(self._create_row(
-            'Create a clean microphone',
-            'Echo + noise cancellation on top of a real microphone.',
-            lambda: self._open_mic(None)))
-        self.mic_listing = group('Configured microphones')
-
-        self.widget = page_scroller(eq_head, self.beta_group, self.eq_listing,
-                                    mic_head, self.mic_listing)
-        self._eq_rows = []
-        self._mic_rows = []
-        self.widget.connect('map', lambda *_: self.refresh())
-
-    def _create_row(self, title, subtitle, on_click):
-        row = Adw.ActionRow(title=title, subtitle=subtitle)
-        btn = Gtk.Button(icon_name='list-add-symbolic', valign=Gtk.Align.CENTER)
-        btn.add_css_class('suggested-action')
-        btn.connect('clicked', lambda *_: on_click())
-        row.add_suffix(btn)
-        row.set_activatable_widget(btn)
-        return row
-
-    # ---------------------------------------------------------------- list --
-    def refresh(self):
-        def collect():
-            items = [(e, enhance.status(e))
-                     for e in enhance.list_enhancements()]
-            # extra context so an active EQ can show an inline mini-mixer
-            dump = pw.pw_dump()
-            nodes = pw.list_audio_nodes(dump)
-            # real app streams only — never our own EQ/mic helper streams
-            streams = [s for s in pw.list_streams(dump) if s.is_playback
-                       and not s.props.get('node.name', '').startswith('pwctl.')]
-            return items, nodes, streams, chains.target_edges(
-                chains.list_chains())
-        async_call(collect, self._apply)
-
-    def _apply(self, payload, error):
-        if error or payload is None:
+    def _tab_picked(self, group, _p):
+        if self._updating:
             return
-        items, nodes, streams, self._chain_edges = payload
-        self._nodes = nodes
-        self._streams = streams
-        self._items = [e for e, _ in items]
-        # Equalizer sinks stay in the list: one equalizer may feed another.
-        # Which of them a given row may pick is decided per row, in
-        # _output_row(), because that depends on where each one already sends.
-        self._sinks = [n for n in nodes if n.is_sink]
-        for row in self._eq_rows:
-            self.eq_listing.remove(row)
-        for row in self._mic_rows:
-            self.mic_listing.remove(row)
-        self._eq_rows, self._mic_rows = [], []
-        eqs = [(e, s) for e, s in items if e.kind == 'eq']
-        mics = [(e, s) for e, s in items if e.kind == 'mic']
-        self._fill(self.eq_listing, self._eq_rows, eqs,
-                   'No equalizers yet.', self._open_eq)
-        self._fill(self.mic_listing, self._mic_rows, mics,
-                   'No clean microphones yet.', self._open_mic)
+        tab = group.get_active_name()
+        if tab and tab != self.page.tab:
+            self.page.switch_tab(tab)
 
-    def _fill(self, listing, store, items, empty_text, editor):
-        if not items:
-            row = Adw.ActionRow(title=empty_text,
-                                subtitle='Create one above.')
-            listing.add(row)
-            store.append(row)
+    # -- rows -------------------------------------------------------------
+    def keys(self):
+        return [e.key for e in self.entries]
+
+    def rebuild(self, kind, items, draft):
+        child = self.listbox.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            if isinstance(child, Gtk.ListBoxRow):
+                self.listbox.remove(child)
+            child = nxt
+        self.entries = []
+        self.current = None
+        if draft is not None:
+            self.entries.append(_Entry(self.page, kind))
+        for enh in items:
+            self.entries.append(_Entry(self.page, kind, enh))
+        for e in self.entries:
+            self.listbox.append(e.row)
+        self._regroup_due = False
+        return self.entries
+
+    def entry(self, key):
+        return next((e for e in self.entries if e.key == key), None)
+
+    def ordered(self):
+        return sorted(self.entries, key=self._order)
+
+    @staticmethod
+    def _order(e):
+        return (e.rank, e.name.lower(), e.key)
+
+    def _sort(self, a, b):
+        ka, kb = self._order(a.entry), self._order(b.entry)
+        return (ka > kb) - (ka < kb)
+
+    def _header(self, row, before):
+        entry = row.entry
+        prev = before.entry if before is not None else None
+        if prev is not None and prev.rank == entry.rank:
+            row.set_header(None)
             return
-        for enh, state in items:
-            row = self._device_row(enh, state, editor)
-            listing.add(row)
-            store.append(row)
+        head = micro(GROUPS[entry.rank])
+        head.add_css_class('eqp-group')
+        head.set_margin_top(4 if prev is None else 14)
+        row.set_header(head)
 
-    def _device_row(self, enh, state, editor):
-        if enh.kind == 'eq':
-            n = len([b for b in enh.params.get('bands') or []
-                     if b.get('on', True)])
-            subtitle = f'{n} band{"s" if n != 1 else ""} active'
-            icon = 'pwctl-eq-symbolic'
-        else:
-            bits = []
-            if enh.params.get('noise_suppression', True):
-                bits.append('noise')
-            bits.append('echo')
-            if enh.params.get('gain_control'):
-                bits.append('auto-gain')
-            subtitle = 'Removing: ' + ', '.join(bits)
-            icon = 'audio-input-microphone-symbolic'
+    def regroup(self, force=False):
+        """Move rows whose state changed group -- now, or once the pointer
+        leaves the list, so a row never jumps away from under it."""
+        moved = [e for e in self.entries if e.want_rank != e.rank]
+        if not moved:
+            return
+        if self._pointer_in and not force:
+            self._regroup_due = True
+            return
+        for e in moved:
+            e.rank = e.want_rank
+        self._regroup_due = False
+        self.listbox.invalidate_sort()
+        self.listbox.invalidate_headers()
 
-        node = next((n for n in self._nodes if n.name == enh.node_name), None)
-        # A running equalizer gets an inline mini-mixer (volume, an app router
-        # and a live output picker) revealed under its row.
-        rich = enh.kind == 'eq' and enh.enabled and node is not None
-        row = (Adw.ExpanderRow if rich else Adw.ActionRow)(
-            title=esc(enh.name), subtitle=subtitle,
-            title_lines=1, subtitle_lines=1)
-        row.add_css_class('enh-active' if enh.enabled else 'enh-idle')
-        if enh.kind == 'eq':
-            # the curve itself tells two equalizers apart at a glance
-            prefix_icon = CurveThumb(
-                eqcurve.Curve() if enh.id in self._bypass
-                else enhance.curve_of(enh))
-            prefix_icon.set_tooltip_text(
-                f'{enhance.curve_of(enh).active} bands shaping the sound')
-        else:
-            prefix_icon = Gtk.Image.new_from_icon_name(icon)
-        prefix_icon.add_css_class('enh-icon')
-        row.add_prefix(prefix_icon)
-        sw = Gtk.Switch(valign=Gtk.Align.CENTER, active=enh.enabled,
-                        tooltip_text='Running (visible to apps)')
-        sw.connect('notify::active', self._toggled, enh)
-        # desired left→right order; ExpanderRow packs suffixes right-to-left,
-        # so add them reversed there to match the plain rows and the rest of
-        # the app (enable switch always on the far right).
-        suffixes = []
-        if enh.id in self._bypass:
-            suffixes.append(pill('bypassed', 'warning'))
-        elif enh.enabled:
-            suffixes.append(pill(state, state_style(state)))
-        if enh.kind == 'eq' and enh.enabled:
-            suffixes.append(icon_button(
-                'audio-speakers-symbolic',
-                'Set as default output — route all audio through this '
-                'equalizer', lambda *_: self._set_default(enh)))
-        suffixes.append(icon_button('document-edit-symbolic', 'Edit',
-                                    lambda *_: editor(enh)))
-        suffixes.append(icon_button(
-            'user-trash-symbolic', 'Delete',
-            lambda *_: confirm(
-                self.window, f'Delete “{enh.name}”?',
-                'The device is stopped and its configuration removed.',
-                'Delete', lambda: self._delete(enh))))
-        suffixes.append(sw)
-        for w in (reversed(suffixes) if rich else suffixes):
-            row.add_suffix(w)
-        if rich:
-            row.set_expanded(True)
-            # Laid out as the signal path — what this equalizer does, what is
-            # coming into it, where it goes — so the block reads top to bottom
-            # instead of as five unrelated settings.
-            inner = [self._volume_row(enh, node)]
-            if self.ab_enabled:
-                inner.append(self._ab_row(enh))
-            inner.append(self._send_row(enh, node))
-            inner.append(self._section('Playing through'))
-            inner.extend(self._routed_rows(enh, node))
-            inner.append(self._output_row(enh))
-            for r in inner:
-                r.add_css_class('enh-inner')
-                row.add_row(r)
-        return row
+    def _pointer_left(self, *_a):
+        self._pointer_in = False
+        if self._regroup_due:
+            self.regroup()
 
-    def _section(self, text):
-        """Small heading that splits the mini-mixer into its flow stages.
-
-        A real ListBoxRow, not a bare box: the accent edge is styled on the
-        `row` CSS node, so anything else here leaves a gap in that line.
-        """
-        label = Gtk.Label(label=text, xalign=0, margin_top=10,
-                          margin_bottom=3, margin_start=16, margin_end=16)
-        label.add_css_class('enh-section')
-        return Gtk.ListBoxRow(child=label, activatable=False,
-                              selectable=False)
-
-    # ----------------------------------------------- inline EQ mini-mixer --
-    def _volume_row(self, enh, node):
-        row = Adw.ActionRow(title='Volume', title_lines=1)
-        pct = Gtk.Label(label=f'{round((node.volume or 0) * 100)}%',
-                        width_chars=4, xalign=1)
-        pct.add_css_class('caption')
-        levels = balance.Levels(node.channels, node.channel_map)
-        ctl = make_volume(self.volume_style,
-                          lambda v: self._on_eq_volume(node, levels, v, pct),
-                          compact=True)
-        ctl.set_value(node.volume if node.volume is not None else 1.0)
-        ctl.set_meter(node.serial)
-        mute = Gtk.ToggleButton(
-            icon_name='audio-volume-muted-symbolic', valign=Gtk.Align.CENTER,
-            active=node.muted, tooltip_text='Mute this equalizer')
-        mute.add_css_class('flat')
-        mute.connect('toggled',
-                     lambda b: async_call(lambda: pw.set_mute(node.id,
-                                                              b.get_active())))
-        row.add_suffix(mute)
-        row.add_suffix(ctl.widget)
-        row.add_suffix(pct)
-        return row
-
-    def _on_eq_volume(self, node, levels, value, pct):
-        pct.set_text(f'{round(value * 100)}%')
-        values = levels.set_master(value)       # keeps a balance set elsewhere
-        async_call(lambda: pw.set_channel_volumes(
-            node.id, values, serial=node.serial, media_class=node.media_class))
-
-    # -- app routing ------------------------------------------------------
-    # Two Firefox windows are two streams with the same application.name, so
-    # the app name alone can't identify one.  Everything here is labelled
-    # "app — what it is playing" (media.name), which is what the user sees in
-    # the app itself.
-
-    def _stream_label(self, s):
-        # Both halves land in Adw row titles, which are Pango markup — and a
-        # media.name is whatever an app decided to call what it is playing.
-        detail = s.media or s.binary or ''
-        if detail and detail.strip().lower() == s.name.strip().lower():
-            detail = ''
-        return esc(s.name), esc(detail) or 'Playing'
-
-    def _stream_icon(self, s):
-        return Gtk.Image.new_from_icon_name(s.icon or 'multimedia-player-symbolic')
-
-    def _routed_here(self, enh, node):
-        """Streams currently playing into this equalizer.
-
-        While bypassed the streams have been moved to the output device on
-        purpose, so keep listing the ones we moved — they still belong to this
-        equalizer as far as the user is concerned.
-        """
-        state = self._bypass.get(enh.id)
-        if state and not state.get('live'):
-            ids = set(state.get('streams') or [])
-            return [s for s in self._streams if s.id in ids]
-        return [s for s in self._streams if s.target_id == node.id]
-
-    def _routed_rows(self, enh, node):
-        rows = []
-        routed = self._routed_here(enh, node)
-        bypassed = enh.id in self._bypass
-        for s in routed:
-            title, detail = self._stream_label(s)
-            row = Adw.ActionRow(title=title, subtitle=detail,
-                                title_lines=1, subtitle_lines=1)
-            row.add_prefix(self._stream_icon(s))
-            if bypassed:
-                row.add_suffix(pill('bypassed', 'dim'))
-            # Routing an app here is a live relink and dies with the session.
-            # This pins it with an application rule so it comes back on its
-            # own; off by default, so nothing changes unless it is pressed.
-            kept = rules.stream_is_bound(s, node.name)
-            keep = Gtk.ToggleButton(icon_name='pwctl-pin-symbolic',
-                                    active=kept, valign=Gtk.Align.CENTER,
-                                    css_classes=['flat'],
-                                    tooltip_text='Keep sending this app here, '
-                                                 'including after a restart')
-            keep.connect('toggled',
-                         lambda b, st=s, nn=node.name: self._keep_app(st, nn,
-                                                                      b))
-            row.add_suffix(keep)
-            row.add_suffix(icon_button(
-                'window-close-symbolic', 'Stop sending this app here',
-                lambda *_, st=s: self._unroute(enh, st)))
-            rows.append(row)
-        if not routed:
-            row = Adw.ActionRow(
-                title='Nothing yet',
-                subtitle='Send an app here, or make it the default output.',
-                title_lines=1, subtitle_lines=1)
-            row.add_prefix(Gtk.Image.new_from_icon_name(
-                'audio-volume-muted-symbolic'))
-            row.set_sensitive(False)
-            rows.append(row)
-        return rows
-
-    def _send_row(self, enh, node):
-        """Picker for apps that aren't already going through this equalizer."""
-        routed = {s.id for s in self._routed_here(enh, node)}
-        candidates = [s for s in self._streams if s.id not in routed]
-        # No prefix icon: this is a label plus a dropdown, so it lines up with
-        # the Output Device row rather than sitting indented against it.
-        row = Adw.ActionRow(title='Select an app for playback')
-        if not candidates:
-            row.set_subtitle('No other app is playing right now.')
-            row.set_sensitive(False)
-            return row
-
-        btn = Gtk.MenuButton(label='Choose an app…', valign=Gtk.Align.CENTER)
-        box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        box.add_css_class('boxed-list')
-        pop = Gtk.Popover(child=box, width_request=320)
-        for s in candidates:
-            title, detail = self._stream_label(s)
-            item = Adw.ActionRow(title=title, subtitle=detail, activatable=True,
-                                 title_lines=1, subtitle_lines=1)
-            item.add_prefix(self._stream_icon(s))
-            item.connect('activated',
-                         lambda *_, st=s: (pop.popdown(),
-                                           self._route(enh, node, st)))
-            box.append(item)
-        btn.set_popover(pop)
-        row.add_suffix(btn)
-        row.set_activatable_widget(btn)
-        return row
-
-    def _route(self, enh, node, s):
-        def done(ok, e):
-            self.window.toast(f'{s.name} → {enh.name}' if ok
-                              else 'Could not route that app')
-            GLib.timeout_add(500, lambda: (self.refresh(), False)[1])
-        async_call(lambda: pw.move_stream(s.id, node.serial), done)
-
-    def _keep_app(self, s, node_name, button):
-        # No `updating` guard needed: the button's initial state is set as a
-        # construct property, before 'toggled' is connected, and nothing sets
-        # it programmatically afterwards — the row is rebuilt instead.
-        keep = button.get_active()
-
-        def work():
-            if keep:
-                return bool(rules.bind_stream_to_node(s, node_name))
-            return rules.unbind_stream(s)
-
-        def done(done_ok, error):
-            if error:
-                self.window.toast(f'Failed: {error}')
-            elif keep:
-                self.window.toast(f'{s.name} will come back here' if done_ok
-                                  else 'Could not identify that app')
+    # -- the current row --------------------------------------------------
+    def highlight(self, current):
+        """The selected look without a selection, as Devices' list does."""
+        for e in self.entries:
+            on = e is current
+            if on:
+                e.row.set_state_flags(Gtk.StateFlags.SELECTED, False)
             else:
-                self.window.toast(f'{s.name} is no longer kept here')
-            self.window.flag_restart('pulse')
-        async_call(work, done)
+                e.row.unset_state_flags(Gtk.StateFlags.SELECTED)
+            e.row.update_state([Gtk.AccessibleState.SELECTED], [int(on)])
+        self.current = current
 
-    def _unroute(self, enh, s):
-        """Send one app back to the equalizer's output device."""
-        def work():
-            dest = enhance.eq_output_node(enh)
-            if dest is None:
-                return None
-            return dest.description if pw.move_stream(s.id, dest.serial) else None
+    def _on_activate(self, _lb, row):
+        entry = getattr(row, 'entry', None)
+        if entry is not None:
+            self.page.select(entry)
 
-        def done(where, e):
-            self.window.toast(f'{s.name} → {where}' if where
-                              else 'Could not move that app')
-            if self._bypass.get(enh.id):
-                ids = self._bypass[enh.id].get('streams') or []
-                self._bypass[enh.id]['streams'] = [i for i in ids if i != s.id]
-            GLib.timeout_add(500, lambda: (self.refresh(), False)[1])
-        async_call(work, done)
+    def _on_key(self, _ctl, keyval, _code, state):
+        if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK):
+            return False
+        if self.page.collapsed:
+            return False
+        if keyval in (Gdk.KEY_Up, Gdk.KEY_Down, Gdk.KEY_KP_Up,
+                      Gdk.KEY_KP_Down, Gdk.KEY_Home, Gdk.KEY_End):
+            GLib.idle_add(self._follow_focus)
+        return False
 
-    # -- experimental live A/B --------------------------------------------
-    def _toggle_ab(self, row, _p):
-        self.ab_enabled = row.get_active()
-        prefs.save(eq_ab_compare=self.ab_enabled)
-        if not self.ab_enabled:
-            # leaving the experiment must not strand anything in bypass
-            for enh in enhance.list_enhancements():
-                state = self._bypass.pop(enh.id, None)
-                if state:
-                    async_call(lambda e=enh, s=state: enhance.unbypass(e, s))
-        self.refresh()
+    def _follow_focus(self):
+        row = self.listbox.get_focus_child()
+        entry = getattr(row, 'entry', None)
+        if entry is not None and entry is not self.current:
+            self.page.select(entry, show=False)
+        return False
 
-    def _ab_row(self, enh):
-        bypassed = enh.id in self._bypass
-        # The toggle already states which side is live, so this only carries a
-        # subtitle while bypassed, where "it didn't stop" is the non-obvious
-        # part worth saying.
-        row = Adw.ActionRow(
-            title='Compare', title_lines=1, subtitle_lines=1,
-            subtitle=('Going straight to the output — the equalizer is still '
-                      'running.' if bypassed else ''))
-        row.add_prefix(Gtk.Image.new_from_icon_name(
-            'media-playlist-repeat-symbolic'))
-        box = Gtk.Box(valign=Gtk.Align.CENTER)
-        box.add_css_class('linked')
-        on_btn = Gtk.ToggleButton(label='Equalized', active=not bypassed)
-        off_btn = Gtk.ToggleButton(label='Bypassed', active=bypassed,
-                                   group=on_btn)
-        on_btn.set_tooltip_text('Play through the equalizer')
-        off_btn.set_tooltip_text('Play around the equalizer, without stopping '
-                                 'it — the streams move, so nothing pauses')
-        def clicked(btn, want_bypass):
-            # grouped toggles: the button being switched *off* also emits,
-            # so only act on the one that just became active
-            if not btn.get_active():
-                return
-            self._set_bypass(enh, want_bypass)
-        on_btn.connect('toggled', clicked, False)
-        off_btn.connect('toggled', clicked, True)
-        box.append(on_btn)
-        box.append(off_btn)
-        row.add_suffix(box)
-        return row
-
-    def _set_bypass(self, enh, want_bypass):
-        if want_bypass == (enh.id in self._bypass):
-            return
-
-        def done(result, e):
-            if want_bypass:
-                ok, msg, state = result if result else (False, str(e or ''), {})
-                if ok:
-                    self._bypass[enh.id] = state
-                    self.window.toast(f'Bypassed — playing straight to {msg}'
-                                      if msg else 'Bypassed')
-                else:
-                    self.window.toast(msg or 'Could not bypass')
-            else:
-                ok, msg = result if result else (False, str(e or ''))
-                self.window.toast('Back through the equalizer' if ok
-                                  else (msg or 'Could not restore'))
-            GLib.timeout_add(400, lambda: (self.refresh(), False)[1])
-
-        if want_bypass:
-            async_call(lambda: enhance.bypass(enh), done)
-        else:
-            state = self._bypass.pop(enh.id, {})
-            async_call(lambda: enhance.unbypass(enh, state), done)
-
-    def _output_row(self, enh):
-        row = Adw.ComboRow(title='Output Device')
-        sinks = enhance.eq_targets(enh, self._sinks, self._items,
-                                   getattr(self, '_chain_edges', None))
-        labels = ['Follow default'] + [n.description for n in sinks]
-        row.set_model(Gtk.StringList.new(labels))
-        target = enh.params.get('target', '')
-        sel = 0
-        if target:
-            sel = next((i + 1 for i, n in enumerate(sinks)
-                        if n.name == target), 0)
-        row.set_selected(sel)               # set BEFORE connecting
-
-        def on_sel(*_):
-            i = row.get_selected()
-            new = '' if i == 0 else sinks[i - 1].name
-            if new == enh.params.get('target', ''):
-                return
-            enh.params['target'] = new
-
-            def done(result, e):
-                ok, err = result if result else (False, str(e or ''))
-                self.window.toast('Output updated' if ok
-                                  else f'Failed: {err}')
-                GLib.timeout_add(500, lambda: (self.refresh(), False)[1])
-            async_call(lambda: enhance.apply(enh), done)
-        row.connect('notify::selected', on_sel)
-        return row
-
-    def _toggled(self, sw, _p, enh):
-        enabled = sw.get_active()
-        if enabled == enh.enabled:
-            return
-        # stopping the unit removes the sink, so any bypass bookkeeping for it
-        # is meaningless from here on
-        self._bypass.pop(enh.id, None)
-
-        def done(result, e):
-            ok, err = result if result else (False, str(e or ''))
-            self.window.toast(
-                (f'{enh.name} {"started" if enabled else "stopped"}')
-                if ok else (f'Failed: {err}' if err else 'Failed'))
-            GLib.timeout_add(400, lambda: (self.refresh(), False)[1])
-        async_call(lambda: enhance.set_enabled(enh, enabled), done)
-
-    def _delete(self, enh):
-        self._bypass.pop(enh.id, None)
-        async_call(lambda: enhance.delete(enh),
-                   lambda r, e: (self.window.toast('Deleted'), self.refresh()))
-
-    def _set_default(self, enh):
-        def done(result, e):
-            ok, msg = result if result else (False, str(e or ''))
-            if ok:
-                where = f' → {msg}' if msg else ''
-                self.window.toast(f'“{enh.name}” is now your output{where}. '
-                                  'Everything is equalized through it.')
-            else:
-                self.window.toast(msg or 'Could not set as default output')
-            self.refresh()
-        async_call(lambda: enhance.make_default_output(enh), done)
-
-    # ------------------------------------------------------------- editors --
-    def _open_eq(self, enh):
-        EqEditor(self.window, self, enh).present(self.window)
-
-    def _open_mic(self, enh):
-        MicDialog(self.window, self, enh).present()
-
-    def _import_eq(self):
-        pick_file(self.window, 'Import an AutoEQ / APO file', self._load_eq,
-                  filters=[('Parametric EQ', ['*.txt']), ('All files', ['*'])])
-
-    def _on_drop(self, _target, value, _x, _y):
+    def _on_drop(self, _t, value, _x, _y):
+        self.widget.remove_css_class('drop-ready')
         files = value.get_files() if value else []
         if not files:
             return False
-        self._load_eq(files[0].get_path())
+        self.page.import_path(files[0].get_path())
         return True
 
-    def _load_eq(self, path):
+
+# ================================================================ page ==
+
+class EnhancePage:
+    _POLL_SECONDS = 3       # only where livestate cannot listen
+
+    def __init__(self, window):
+        self.window = window
+        self.volume_style = prefs.get('volume_style') or 'meter'
+        self.tab = 'eq'
+        self.items = []
+        self.detail = None
+        self._draft = None              # the detail of a new one, if open
+        self._want = {'eq': None, 'mic': None}
+        self._data = None
+        self._live = None
+        self._poll = None
+        self._seq = 0
+        self._applied = 0
+        self._old = []
+
+        self.list = EnhList(self)
+
+        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType
+                               .CROSSFADE, transition_duration=150,
+                               vexpand=True, hhomogeneous=False)
+        self.stack.connect('notify::transition-running', self._drop_old)
+        self.stack.add_child(self._empty_page())
+
+        self.split = Adw.NavigationSplitView(
+            min_sidebar_width=250, max_sidebar_width=340,
+            sidebar_width_fraction=0.32)
+        self.split.set_sidebar(Adw.NavigationPage(
+            title='Equalizers', tag='list', child=self.list.widget))
+        self.split.set_content(Adw.NavigationPage(
+            title='Equalizer', tag='detail', child=self.stack))
+        self.split.connect('notify::collapsed', self._on_collapsed)
+
+        bin_ = Adw.BreakpointBin(width_request=MIN_PAGE_WIDTH,
+                                 height_request=200, child=self.split)
+        bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(
+            f'max-width: {COLLAPSE_SP}sp'))
+        bp.add_setter(self.split, 'collapsed', True)
+        bin_.add_breakpoint(bp)
+        self.widget = bin_
+        self.widget.connect('map', self._on_map)
+        self.widget.connect('unmap', self._on_unmap)
+        switch = getattr(window, 'adv_switch', None)
+        if isinstance(switch, Gtk.Widget):
+            switch.connect('notify::active', lambda *_a: self._on_advanced())
+
+    def _empty_page(self):
+        self._empty = Adw.StatusPage(icon_name='pwctl-eq-symbolic')
+        box = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
+        self._empty_new = Gtk.Button()
+        self._empty_new.add_css_class('pill')
+        self._empty_new.add_css_class('suggested-action')
+        self._empty_new.connect('clicked', lambda _b: self.new())
+        self._empty_import = Gtk.Button(label='Import a file…')
+        self._empty_import.add_css_class('pill')
+        self._empty_import.connect('clicked', lambda _b: self.import_file())
+        box.append(self._empty_new)
+        box.append(self._empty_import)
+        self._empty.set_child(box)
+        self._paint_empty()
+        return self._empty
+
+    def _paint_empty(self):
+        if self.tab == 'eq':
+            self._empty.set_icon_name('pwctl-eq-symbolic')
+            self._empty.set_title('No equalizers yet')
+            self._empty.set_description(
+                'An equalizer is an output of its own: whatever plays into '
+                'it is shaped by its curve, then sent on to your speakers '
+                'or headphones. Make one, or import an AutoEQ / APO file.')
+            self._empty_new.set_label('New equalizer')
+        else:
+            self._empty.set_icon_name('pwctl-source-mic-symbolic')
+            self._empty.set_title('No clean microphones yet')
+            self._empty.set_description(
+                'A clean microphone is your real one with echo and '
+                'background noise taken out, for calls and streaming. '
+                'Pick it as the input in the app that needs it.')
+            self._empty_new.set_label('New clean microphone')
+        self._empty_import.set_visible(self.tab == 'eq')
+
+    # ------------------------------------------------------------ layout --
+    @property
+    def collapsed(self):
+        return self.split.get_collapsed()
+
+    def _on_collapsed(self, *_a):
+        if self.detail is not None:
+            self.detail.set_collapsed(self.collapsed)
+
+    def show_list(self):
+        self.split.set_show_content(False)
+
+    def _on_advanced(self):
+        if isinstance(self.detail, MicDetail):
+            self.detail.set_advanced(bool(getattr(self.window, 'advanced',
+                                                  False)))
+
+    def _show(self, detail):
+        old = self.stack.get_visible_child()
+        child = detail.widget if detail is not None else self._empty
+        if child.get_parent() is None:
+            self.stack.add_child(child)
+        if child is old:
+            return
+        self.stack.set_visible_child(child)
+        if old is not None and old is not self._empty:
+            self._old.append(old)
+            if not self.stack.get_transition_running():
+                self._drop_old()
+
+    def _drop_old(self, *_a):
+        if self.stack.get_transition_running():
+            return
+        for w in self._old:
+            if w.get_parent() is self.stack and \
+                    w is not self.stack.get_visible_child():
+                self.stack.remove(w)
+        self._old = []
+
+    # -------------------------------------------------------- live state --
+    def _on_map(self, *_a):
+        if self._live is None:
+            self._live = livestate.subscribe(self._on_graph)
+        if self._live is not None:
+            return                  # its first delivery arrives by itself
+        self._collect()
+        if self._poll is None:
+            self._poll = GLib.timeout_add_seconds(self._POLL_SECONDS,
+                                                  self._tick)
+
+    def _on_unmap(self, *_a):
+        if self._live is not None:
+            livestate.unsubscribe(self._live)
+            self._live = None
+        if self._poll is not None:
+            GLib.source_remove(self._poll)
+            self._poll = None
+
+    def _tick(self):
+        self._collect()
+        return True
+
+    def _on_graph(self, dump):
+        self._collect(dump)
+
+    def _collect(self, dump=None):
+        self._seq += 1
+        seq = self._seq
+        async_call(lambda: collect(dump if dump is not None
+                                   else pw.pw_dump()),
+                   lambda r, e: self._collected(r, e, seq))
+
+    def _collected(self, data, error, seq):
+        # in order: an older read never lands on a newer one
+        if error or data is None or seq < self._applied:
+            return
+        self._applied = seq
+        self._apply(data)
+
+    def refresh(self):
+        if self._live is not None:
+            livestate.refresh()
+        else:
+            self._collect()
+
+    def _apply(self, data):
+        self._data = data
+        self.items = data['items']
+        mine = sorted((e for e in self.items if e.kind == self.tab),
+                      key=lambda e: e.name.lower())
+        draft = self._draft if self._draft is not None and \
+            self._draft.kind == self.tab else None
+        keys = ([DRAFT] if draft is not None else []) + [e.id for e in mine]
+        if set(keys) != set(self.list.keys()):
+            self.list.rebuild(self.tab, mine, draft)
+        else:
+            fresh = {e.id: e for e in mine}
+            for entry in self.list.entries:
+                if entry.enh is not None:
+                    entry.enh = fresh[entry.key]
+        d = self.detail
+        gone = d is not None and not d.draft and (
+            d.kind != self.tab or d.key not in keys)
+        if gone:
+            d.close()
+            self.detail = None
+        if self.detail is None:
+            self._restore_selection()
+        else:
+            self.list.highlight(self.list.entry(self.detail.key))
+            self.detail.paint(data)
+        for entry in self.list.entries:
+            entry.paint(data, self.detail)
+        self.list.regroup()
+
+    def _restore_selection(self):
+        entries = self.list.ordered()
+        if not entries:
+            self.list.highlight(None)
+            self._paint_empty()
+            self._show(None)
+            return
+        want = self._want.get(self.tab)
+        pick = self.list.entry(want) if want else None
+        if pick is None and self._draft is not None:
+            pick = self.list.entry(DRAFT)
+        if pick is None:
+            data = self._data or {}
+            defaults = {n.name for n in data.get('nodes', [])
+                        if n.is_default}
+            pick = next((e for e in entries if e.enh is not None
+                         and e.enh.node_name in defaults), entries[0])
+        self.select(pick, show=False, ask=False)
+
+    def detail_changed(self, detail):
+        """The detail's edit, name or settings changed: its row follows."""
+        if detail is not self.detail:
+            return
+        entry = self.list.entry(detail.key)
+        if entry is not None:
+            entry.paint(self._data, detail)
+
+    # --------------------------------------------------------- selection --
+    def select(self, entry, show=True, ask=True):
+        if entry is None:
+            return
+        d = self.detail
+        if d is not None and d.key == entry.key and d.kind == self.tab:
+            self.list.highlight(entry)
+            if show:
+                self.split.set_show_content(True)
+            return
+
+        def go():
+            self._leave()
+            self._open(entry)
+            if show:
+                self.split.set_show_content(True)
+        if ask:
+            self.confirm_leave(go)
+        else:
+            go()
+
+    def _open(self, entry):
+        self.list.highlight(entry)
+        if entry.key == DRAFT:
+            detail = self._draft
+        else:
+            self._want[self.tab] = entry.key
+            enh = entry.enh
+            # its own copy: the detail changes it only when it saves
+            enh = enhance.Enhancement(**{**asdict(enh),
+                                         'params': dict(enh.params)})
+            detail = EqDetail(self, enh) if entry.kind == 'eq' \
+                else MicDetail(self, enh)
+        self.detail = detail
+        if self._data is not None:
+            detail.paint(self._data)
+            entry.paint(self._data, detail)
+        self._show(detail)
+
+    def _leave(self):
+        """Drop the current detail (already asked): put back what plays,
+        and forget a new one."""
+        d = self.detail
+        if d is None:
+            return
+        self.detail = None
+        if d.draft:
+            if self._draft is d:
+                self._draft = None
+                entry = self.list.entry(DRAFT)
+                if entry is not None:
+                    self.list.entries.remove(entry)
+                    self.list.listbox.remove(entry.row)
+        else:
+            d.discard()
+
+    @property
+    def has_unsaved(self):
+        return self.detail is not None and self.detail.dirty
+
+    def confirm_leave(self, then, on_cancel=None):
+        """Run `then` once the current detail may go: at once when nothing
+        is unsaved, else after asking."""
+        d = self.detail
+        if d is None or not d.dirty:
+            then()
+            return
+        if d.draft:
+            dlg = Adw.AlertDialog(
+                heading=f'Discard the new {NOUN[d.kind]}?',
+                body='It has not been created yet.')
+            dlg.add_response('edit', 'Keep editing')
+            dlg.add_response('discard', 'Discard')
+            dlg.set_response_appearance('discard',
+                                        Adw.ResponseAppearance.DESTRUCTIVE)
+            dlg.set_default_response('edit')
+        else:
+            body = ('Your changes are playing, but they are not saved. '
+                    'Discarding puts the saved curve back.'
+                    if d.kind == 'eq' else 'Your changes are not saved.')
+            dlg = Adw.AlertDialog(heading=f'Save changes to “{d.title}”?',
+                                  body=body)
+            dlg.add_response('discard', 'Discard')
+            dlg.add_response('edit', 'Keep editing')
+            dlg.add_response('save', 'Save')
+            dlg.set_response_appearance('discard',
+                                        Adw.ResponseAppearance.DESTRUCTIVE)
+            dlg.set_response_appearance('save',
+                                        Adw.ResponseAppearance.SUGGESTED)
+            dlg.set_default_response('save')
+        dlg.set_close_response('edit')
+
+        def resp(_d, r):
+            if r == 'save':
+                d.save(then=then)
+            elif r == 'discard':
+                then()
+            elif on_cancel is not None:
+                on_cancel()
+        dlg.connect('response', resp)
+        dlg.present(self.window)
+
+    def switch_tab(self, tab):
+        def go():
+            self._leave()
+            self.tab = tab
+            self.list.set_tab(tab)
+            self._paint_empty()
+            self.list.rebuild(tab, [], None)
+            if self._data is not None:
+                self._apply(self._data)
+            self.refresh()
+        self.confirm_leave(go, on_cancel=lambda: self.list.set_tab(self.tab))
+
+    # ------------------------------------------------------------- new --
+    def new(self, curve=None, name='', notes=None, origin=None):
+        kind = self.tab
+
+        def go():
+            self._leave()
+            if kind == 'eq':
+                self._draft = EqDetail(self, None, curve=curve, name=name,
+                                       notes=notes, origin=origin)
+            else:
+                self._draft = MicDetail(self, None)
+            entry = _Entry(self, kind)
+            self.list.entries.insert(0, entry)
+            self.list.listbox.append(entry.row)
+            self._open(entry)
+            self.split.set_show_content(True)
+            if kind == 'eq' and not name:
+                GLib.idle_add(lambda: (self._draft is not None and
+                                       self._draft.name_row.grab_focus(),
+                                       False)[1])
+        self.confirm_leave(go)
+
+    def import_file(self):
+        pick_file(self.window, 'Import an AutoEQ / APO file',
+                  self.import_path,
+                  filters=[('Parametric EQ', ['*.txt']),
+                           ('All files', ['*'])])
+
+    def import_path(self, path):
         if not path:
             return
         try:
             with open(path, encoding='utf-8', errors='replace') as f:
-                parsed = eqcurve.parse_text(f.read())
+                parsed = E.parse_text(f.read())
         except OSError:
             self.window.toast('Could not read that file')
             return
         if not parsed.curve.bands:
             self.window.toast('No parametric EQ filters found in that file')
             return
-        name = GLib.path_get_basename(path).rsplit('.', 1)[0]
-        EqEditor(self.window, self, None, name=name, curve=parsed.curve,
-                 notes=parsed.notes).present(self.window)
+        base = GLib.path_get_basename(path)
+        if self.tab != 'eq':
+            self.tab = 'eq'
+            self.list.set_tab('eq')
+            self._paint_empty()
+            self.list.rebuild('eq', [], None)
+        self.new(curve=parsed.curve, name=base.rsplit('.', 1)[0],
+                 notes=parsed.notes, origin={'kind': 'file', 'name': base})
 
+    def discard_draft(self):
+        self._leave()
+        self._restore_selection()
 
-# ------------------------------------------------------------ mic dialog --
+    def created(self, enh):
+        """A new one was created (its unit asked to start)."""
+        self._want[enh.kind] = enh.id
+        if self.detail is not None and self.detail.draft:
+            self._leave()
+        self.refresh()
 
-class MicDialog(Adw.Window):
-    # (label, params-key, subtitle, advanced)
-    TOGGLES = [
-        ('Noise suppression', 'noise_suppression',
-         'Remove steady background noise (fans, hiss, hum).', False),
-        ('Automatic gain control', 'gain_control',
-         'Even out the microphone level automatically.', False),
-        ('High-pass filter', 'high_pass_filter',
-         'Cut low-frequency rumble below speech.', False),
-        ('Voice activity detection', 'voice_detection',
-         'Detect speech to gate the processing.', False),
-        ('Extended filter', 'extended_filter',
-         'Cancel echo with a longer tail (larger rooms).', True),
-        ('Delay-agnostic mode', 'delay_agnostic',
-         'Track a variable speaker-to-mic delay.', True),
-        ('Transient suppression', 'transient_suppression',
-         'Damp keyboard clicks and other short transients.', True),
-    ]
+    # --------------------------------------------------------- actions --
+    def _own(self, enh):
+        """The detail's copy of `enh` when it is the one shown."""
+        d = self.detail
+        if d is not None and d.enh is not None and d.enh.id == enh.id:
+            return d.enh
+        return enh
 
-    def __init__(self, window, page, enh):
-        super().__init__(title='Edit clean microphone' if enh
-                         else 'New clean microphone',
-                         transient_for=window, modal=True, resizable=True,
-                         default_width=620, default_height=760)
-        self.window = window
-        self.page = page
-        self.enh = enh
-        params = enh.params if enh else {}
-        self._source = params.get('source_target', '')
-
-        g = group('Microphone cleanup')
-        self.name_row = Adw.EntryRow(title='Name')
-        self.name_row.set_text(enh.name if enh else 'Clean Microphone')
-        g.add(self.name_row)
-
-        self.source_row = Adw.ComboRow(
-            title='Source microphone',
-            subtitle='The real microphone to clean up.')
-        g.add(self.source_row)
-
-        self.monitor_row = Adw.SwitchRow(
-            title='Reference from system output',
-            subtitle='Use whatever is playing on your speakers/headphones as '
-                     'the echo reference. Turn off only if you route the echo '
-                     'reference manually.')
-        self.monitor_row.set_active(bool(params.get('monitor_mode', True)))
-        g.add(self.monitor_row)
-
-        proc = group('Processing')
-        adv = group('Advanced processing')
-        self.toggle_rows = {}
-        for label, key, subtitle, is_adv in self.TOGGLES:
-            sw = Adw.SwitchRow(title=label, subtitle=subtitle)
-            sw.set_active(bool(params.get(key, enhance.WEBRTC_DEFAULTS[key])))
-            (adv if is_adv else proc).add(sw)
-            self.toggle_rows[key] = sw
-        # Modal dialog: the sidebar Advanced switch can't be reached while it's
-        # open, so gate the advanced group statically instead of registering it
-        # window-wide (which would leak this widget past the dialog's lifetime).
-        adv.set_visible(getattr(self.window, 'advanced', False))
-
-        save = Gtk.Button(label='Save' if enh else 'Create',
-                          halign=Gtk.Align.END, margin_top=12)
-        save.add_css_class('suggested-action')
-        save.connect('clicked', self._save)
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
-                      margin_top=12, margin_bottom=24,
-                      margin_start=18, margin_end=18)
-        box.append(g)
-        box.append(proc)
-        box.append(adv)
-        box.append(save)
-        sw = Gtk.ScrolledWindow(vexpand=True,
-                                hscrollbar_policy=Gtk.PolicyType.NEVER)
-        clamp = Adw.Clamp(maximum_size=560)
-        clamp.set_child(box)
-        sw.set_child(clamp)
-        view = Adw.ToolbarView()
-        view.add_top_bar(Adw.HeaderBar())
-        view.set_content(sw)
-        self.set_content(view)
-
-        async_call(pw.list_audio_nodes, self._nodes_loaded)
-
-    def _nodes_loaded(self, nodes, error):
-        if error or nodes is None:
-            nodes = []
-        self._sources = [n for n in nodes if not n.is_sink
-                         and not n.name.startswith('pwctl.mic.')]
-        names = ['Follow default'] + [n.description for n in self._sources]
-        self.source_row.set_model(Gtk.StringList.new(names))
-        if self._source:
-            idx = next((i + 1 for i, n in enumerate(self._sources)
-                        if n.name == self._source), 0)
-            self.source_row.set_selected(idx)
-
-    def _save(self, _b):
-        name = self.name_row.get_text().strip()
-        if not name:
-            self.window.toast('Give the microphone a name')
+    def set_running(self, enh, on, again=False):
+        enh = self._own(enh)
+        if on == enh.enabled and not again:
             return
-        source = ''
-        sel = self.source_row.get_selected()
-        if sel > 0 and 0 <= sel - 1 < len(getattr(self, '_sources', [])):
-            source = self._sources[sel - 1].name
-        params = {'source_target': source,
-                  'monitor_mode': self.monitor_row.get_active()}
-        for key, sw in self.toggle_rows.items():
-            params[key] = sw.get_active()
-        if self.enh:
-            enh = self.enh
-            enh.name = name
-            enh.params.update(params)
-        else:
-            enh = enhance.new_enhancement(name, 'mic', params=params)
-            enh.enabled = True
 
-        def done(result, e):
-            ok, err = result if result else (False, str(e or ''))
-            self.window.toast(f'“{name}” ready' if ok
-                              else f'Failed: {err or "unknown error"}')
-            self.page.refresh()
-        self.close()
+        def done(result, error):
+            ok, err = result if result else (False, str(error or ''))
+            if ok:
+                self.window.toast(f'{enh.name} '
+                                  f'{"started" if on else "stopped"}')
+            else:
+                self.window.toast(f'Failed: {err}' if err else 'Failed')
+            d = self.detail
+            if d is not None and d.enh is enh and d.kind == 'eq':
+                d.session.rebind()
+            self.refresh()
+        async_call(lambda: enhance.set_enabled(enh, on), done)
+
+    def make_default(self, detail):
+        enh = detail.enh
+        if detail.kind == 'mic':
+            node = detail._node
+            if node is None:
+                return
+            async_call(lambda: pw.set_default(node.id), lambda ok, e: (
+                self.window.toast(f'“{enh.name}” is now your input' if ok
+                                  else 'Could not set the default input'),
+                self.refresh()))
+            return
+        before = enh.params.get('target', '')
+
+        def done(result, error):
+            ok, msg = result if result else (False, str(error or ''))
+            if ok:
+                where = f' → {msg}' if msg else ''
+                self.window.toast(f'“{enh.name}” is now your output{where}. '
+                                  'Everything is equalized through it.')
+            else:
+                self.window.toast(msg or 'Could not set as default output')
+            after = enh.params.get('target', '')
+            if after != before:
+                # it pinned the output to the device it replaced
+                detail.saved_settings['target'] = after
+                if detail.settings['target'] == before:
+                    detail.settings['target'] = after
+                detail._targets_sig = None
+                detail.session.rebind()
+            self.refresh()
+        async_call(lambda: enhance.make_default_output(enh), done)
+
+    def delete(self, detail):
+        enh = detail.enh
+
+        def go():
+            entries = self.list.ordered()
+            keys = [e.key for e in entries]
+            if enh.id in keys:
+                i = keys.index(enh.id)
+                rest = keys[:i] + keys[i + 1:]
+                self._want[detail.kind] = rest[min(i, len(rest) - 1)] \
+                    if rest else None
+            if self.detail is detail:
+                self.detail = None
+            detail.close()
+            async_call(lambda: enhance.delete(enh), lambda *_a: (
+                self.window.toast(f'Deleted “{enh.name}”'),
+                self.refresh()))
+        confirm(self.window, f'Delete “{enh.name}”?',
+                'It is stopped and its settings removed.', 'Delete', go)
+
+    def duplicate(self, detail, params):
+        enh = detail.enh
+        source = enhance.Enhancement(**{**asdict(enh), 'params': params})
+        with_changes = detail.dirty
+
+        def done(copy, error):
+            if error or copy is None:
+                self.window.toast(f'Failed: {error}')
+                return
+            self.window.toast(f'Made “{copy.name}”'
+                              + (', with your changes' if with_changes
+                                 else ''))
+            # the changes live in the copy now: the original goes back to
+            # its saved curve without asking
+            self._want[enh.kind] = copy.id
+            if self.detail is detail:
+                self._leave()
+            self.refresh()
+        async_call(lambda: enhance.duplicate(source), done)
+
+    def rename(self, detail, name):
+        enh = detail.enh
+        old = enh.name
+        enh.name = name
+
+        def done(result, error):
+            ok, err = result if result else (False, str(error or ''))
+            if not ok:
+                enh.name = old
+                self.window.toast(f'Failed: {err}' if err else 'Failed')
+            else:
+                self.window.toast(f'Renamed to “{name}”')
+            detail._paint_top()
+            if detail.kind == 'eq':
+                detail.session.rebind()
+            self.refresh()
         async_call(lambda: enhance.apply(enh), done)
+
+    def route(self, enh, node, s):
+        def done(ok, _e):
+            self.window.toast(f'{s.name} → {enh.name}' if ok
+                              else 'Could not send that app here')
+            self.refresh()
+        async_call(lambda: pw.move_stream(s.id, node.serial), done)
+
+    def unroute(self, enh, s):
+        def work():
+            dest = enhance.eq_output_node(enh)
+            if dest is None:
+                return None
+            return dest.description if pw.move_stream(s.id, dest.serial) \
+                else None
+
+        def done(where, _e):
+            self.window.toast(f'{s.name} → {where}' if where
+                              else 'Could not move that app')
+            self.refresh()
+        async_call(work, done)
+
+    def keep_app(self, s, node_name, keep):
+        def work():
+            if keep:
+                return bool(rules.bind_stream_to_node(s, node_name))
+            return rules.unbind_stream(s)
+
+        def done(ok, error):
+            if error:
+                self.window.toast(f'Failed: {error}')
+            elif keep:
+                self.window.toast(f'{s.name} will come back here' if ok
+                                  else 'Could not identify that app')
+            else:
+                self.window.toast(f'{s.name} is no longer kept here')
+            flag = getattr(self.window, 'flag_restart', None)
+            if flag is not None:
+                flag('pulse')
+            self.refresh()
+        async_call(work, done)

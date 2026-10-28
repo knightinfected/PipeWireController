@@ -135,6 +135,10 @@ class EqGraph(Gtk.Box):
         self.curve = E.Curve()
         self.selected = None
         self.bypassed = False
+        self.ghost = None              # the saved curve, under an edit
+        self.hearing_saved = False     # Compare plays the ghost
+        self._ghost_key = None
+        self._ghost_total = []
         self.rate = E.RATE
         self.hover = None              # band index under the pointer
         self.pointer = None            # (x, y) while over the graph
@@ -183,12 +187,26 @@ class EqGraph(Gtk.Box):
                           lambda *_: self.area.queue_draw())
 
     # ------------------------------------------------------------ public --
-    def set_curve(self, curve: E.Curve, selected=None, bypassed=False):
+    def set_curve(self, curve: E.Curve, selected=None, bypassed=False,
+                  ghost=None, hearing_saved=False):
+        """`ghost`: the saved curve, drawn faint under an unsaved edit so
+        you see what changed; `hearing_saved`: Compare is playing it."""
         self.curve = curve
         self.selected = (selected if selected is not None
                          and 0 <= selected < len(curve.bands) else None)
         self.bypassed = bypassed
+        self.ghost = ghost if ghost is not None and ghost != curve else None
+        self.hearing_saved = bool(hearing_saved and self.ghost is not None)
         self.area.queue_draw()
+
+    def _ghost_points(self, plot, freqs):
+        key = (self.ghost, tuple(freqs[:1]), len(freqs))
+        if key != self._ghost_key:
+            self._ghost_total = self.ghost.response(freqs, self.rate,
+                                                    with_preamp=False)
+            self._ghost_key = key
+        return [(plot.x(f), plot.y(v))
+                for f, v in zip(freqs, self._ghost_total)]
 
     # ---------------------------------------------------------- geometry --
     def _plot(self):
@@ -455,6 +473,25 @@ class EqGraph(Gtk.Box):
             cr.set_source(grad)
             cr.fill()
 
+        # the saved curve under an edit: faint and dashed, or, while
+        # Compare plays it, the line you hear
+        if self.ghost is not None and resp.freqs and not self.bypassed:
+            gpts = self._ghost_points(plot, resp.freqs)
+            cr.set_line_join(1)
+            cr.set_line_cap(1)
+            cr.move_to(gpts[0][0], _clampy(plot, gpts[0][1]))
+            for x, y in gpts[1:]:
+                cr.line_to(x, _clampy(plot, y))
+            if self.hearing_saved:
+                cr.set_line_width(2.4)
+                cr.set_source(_gradient(plot, lo, hi, 1.0))
+            else:
+                cr.set_line_width(1.4)
+                cr.set_source_rgba(r, g, b, 0.38)
+                cr.set_dash([4, 3])
+            cr.stroke()
+            cr.set_dash([])
+
         # the curve
         if pts:
             cr.set_line_width(2.4)
@@ -463,13 +500,16 @@ class EqGraph(Gtk.Box):
             cr.move_to(*pts[0])
             for x, y in pts[1:]:
                 cr.line_to(x, _clampy(plot, y))
-            if self.bypassed:
+            if self.bypassed or self.hearing_saved:
                 cr.set_source_rgba(r, g, b, 0.35)
                 cr.set_dash([5, 4])
             else:
                 cr.set_source(_gradient(plot, lo, hi, 1.0))
             cr.stroke()
             cr.set_dash([])
+        if self.hearing_saved:
+            self._text(cr, 'Playing the saved curve', plot.left + 8,
+                       plot.top + 6, lo, bold=True)
         if self.bypassed:
             y = plot.y(0)
             cr.set_source_rgba(*byp[:3], 0.9)
