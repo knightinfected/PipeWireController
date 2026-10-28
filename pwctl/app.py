@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import signal
+import threading
 from pathlib import Path
 
 import gi
@@ -1155,6 +1156,12 @@ class App(Adw.Application):
         # The same goes for livestate's two listeners.
         levels.reap_orphans()
         livestate.reap_orphans()
+        # An equalizer left playing an unsaved preview or a bypass by a run
+        # that crashed goes back to its saved curve (DR-016).  Off the UI
+        # thread: it may restart a unit.
+        from .backend import enhance, eqlive
+        eqlive.reap_orphans()
+        threading.Thread(target=enhance.reconcile_all, daemon=True).start()
         # ...and make sure this run leaves nothing behind either: a plain
         # `kill` (or Ctrl-C) would otherwise skip every Gtk shutdown path.
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -1191,6 +1198,11 @@ class App(Adw.Application):
     def do_shutdown(self):
         levels.stop_all()
         livestate.stop()
+        # nothing unsaved keeps playing once the app is gone: an open
+        # editor's preview, a bypass from the page
+        from .backend import enhance, eqlive
+        eqlive.stop_all()
+        enhance.reconcile_all()
         Adw.Application.do_shutdown(self)
 
 

@@ -25,9 +25,11 @@ No GTK and no `enhance` import: `enhance` uses `write_now()` from here.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import threading
 import time
+import weakref
 
 # Measured: a 1 kHz sine written 20 times a second shows a step per write
 # (max second difference 0.119 against 0.0057 clean).  ~7 writes a second
@@ -36,6 +38,12 @@ import time
 LIVE_INTERVAL = 0.15
 
 _UNKNOWN = re.compile(r"unknown global '(\d+)'")
+
+# The persistent pw-cli runs under this name (argv[0]), so an orphan left by
+# a crash can be found and ended at the next start -- pw-cli does not exit
+# when its stdin closes -- and it shows as this client in pw-dump.
+WRITER_NAME = 'pwctl-eq-writer'
+_writers: 'weakref.WeakSet[ControlWriter]' = weakref.WeakSet()
 
 
 def format_params(controls: dict) -> str:
@@ -114,6 +122,7 @@ class ControlWriter:
         self._thread = threading.Thread(target=self._run, daemon=True,
                                         name='eq-control-writer')
         self._thread.start()
+        _writers.add(self)
 
     # -- public --
     def write(self, node_id: int, controls: dict, urgent: bool = False):
@@ -224,7 +233,9 @@ class ControlWriter:
         if proc is not None and proc.poll() is None:
             return proc
         try:
-            proc = self._popen(['pw-cli'], stdin=subprocess.PIPE,
+            proc = self._popen([WRITER_NAME],
+                               executable=shutil.which('pw-cli') or 'pw-cli',
+                               stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, text=True, bufsize=1)
         except (OSError, ValueError):
@@ -252,3 +263,34 @@ class ControlWriter:
             pass
         self._ready.set()
         self._acked.set()
+
+
+def stop_all(timeout: float = 1.0):
+    """End every writer of this process (app shutdown)."""
+    for writer in list(_writers):
+        writer.close(timeout)
+
+
+def reap_orphans() -> int:
+    """End writers an earlier run left behind (startup only; skips ours)."""
+    import os
+    import signal
+    from pathlib import Path
+
+    me = os.getpid()
+    marker = WRITER_NAME.encode() + b'\0'
+    killed = 0
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            if not (entry / 'cmdline').read_bytes().startswith(marker):
+                continue
+            stat = (entry / 'stat').read_text().rsplit(')', 1)[1].split()
+            if int(stat[1]) == me:
+                continue
+            os.kill(int(entry.name), signal.SIGTERM)
+            killed += 1
+        except (OSError, ValueError, IndexError):
+            continue
+    return killed
