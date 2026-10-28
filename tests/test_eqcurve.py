@@ -129,5 +129,34 @@ class Controls(unittest.TestCase):
         self.assertNotIn('b3:Gain', off)
 
 
+    def test_level_matched_bypass(self):
+        ctl = eq_controls(PROBE, bypass=True, bypass_db=-6.0)
+        self.assertAlmostEqual(ctl['pre:Mult'], 10 ** (-6 / 20))
+        self.assertEqual(ctl['b1:Gain'], 0.0)
+        # past the preamp's range it is clamped like a preamp
+        ctl = eq_controls(PROBE, bypass=True, bypass_db=40.0)
+        self.assertAlmostEqual(ctl['pre:Mult'], 10.0)
+
+
+class Loudness(unittest.TestCase):
+    """Curve.level_db: pink noise's loudness change, K-weighted."""
+
+    def test_a_preamp_is_its_own_level(self):
+        self.assertAlmostEqual(E.Curve(-6.0, ()).level_db(), -6.0, places=6)
+        self.assertAlmostEqual(E.Curve().level_db(), 0.0, places=6)
+
+    def test_what_you_hardly_hear_hardly_counts(self):
+        low_cut = E.Curve(0.0, (E.Band('HPQ', 30, 0.0, 0.7),))
+        self.assertGreater(low_cut.level_db(), -0.2)
+        mid = E.Curve(0.0, (E.Band('PK', 2000, 6.0, 1.0),)).level_db()
+        bass = E.Curve(0.0, (E.Band('PK', 40, 6.0, 1.0),)).level_db()
+        self.assertGreater(mid, bass)
+        self.assertTrue(0.0 < mid < 6.0)
+
+    def test_off_bands_change_nothing(self):
+        off = E.Curve(-2.0, (E.Band('PK', 1000, 9.0, 1.0, on=False),))
+        self.assertAlmostEqual(off.level_db(), -2.0, places=6)
+
+
 if __name__ == '__main__':
     unittest.main()

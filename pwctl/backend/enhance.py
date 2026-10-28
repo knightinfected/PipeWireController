@@ -166,6 +166,33 @@ def new_enhancement(name: str, kind: str, **kw) -> Enhancement:
     return Enhancement(id=eid, name=name, kind=kind, params=params, **kw)
 
 
+# Where an equalizer's curve came from, stored when it is created as
+# params['origin'] = {'kind': ..., 'name': ...}.  Equalizers made before
+# it existed have none, and nothing is guessed for them.
+ORIGINS = {'made': 'Made here', 'file': 'Imported', 'preset': 'Preset',
+           'paste': 'Pasted', 'copy': 'Copy'}
+
+
+def origin_of(enh: Enhancement) -> tuple[str, str] | None:
+    """(what, detail) for the page, e.g. ('Imported', 'HD 600.txt')."""
+    origin = enh.params.get('origin')
+    if not isinstance(origin, dict) or origin.get('kind') not in ORIGINS:
+        return None
+    return ORIGINS[origin['kind']], str(origin.get('name') or '')
+
+
+def duplicate(enh: Enhancement) -> Enhancement:
+    """A stopped copy of an equalizer (its curve, output and layout), to try
+    a variation on without touching the original."""
+    params = json.loads(json.dumps(enh.params))
+    if enh.kind == 'eq':
+        params['origin'] = {'kind': 'copy', 'name': enh.name}
+    copy = new_enhancement(f'{enh.name} (copy)', enh.kind, params=params)
+    copy.enabled = False
+    generate(copy)
+    return copy
+
+
 # --------------------------------------------------------- AutoEQ EQ file --
 # Format (AutoEQ / Equalizer APO "ParametricEQ.txt"), one filter per line:
 #   Preamp: -6.0 dB
@@ -222,13 +249,19 @@ def band_controls(band: eqcurve.Band, index: int) -> dict:
     return {f'{name}:{k}': float(v) for k, v in ctl.items()}
 
 
-def eq_controls(curve: eqcurve.Curve, bypass: bool = False) -> dict:
+def eq_controls(curve: eqcurve.Curve, bypass: bool = False,
+                bypass_db: float = 0.0) -> dict:
     """Every live control of the biquad graph for this curve.
 
-    `bypass=True` gives the same graph's exact pass-through: the preamp at
-    unity and every band at its identity value (see `eqcurve.TYPES`).
+    `bypass=True` gives the same graph's exact pass-through: every band at
+    its identity value (see `eqcurve.TYPES`) and the preamp at `bypass_db`,
+    0 for unity, or the curve's own loudness for a level-matched compare.
     """
-    out = {'pre:Mult': 1.0 if bypass else _db_to_mult(curve.preamp)}
+    if bypass:
+        db = min(max(bypass_db, eqcurve.PREAMP_MIN), eqcurve.PREAMP_MAX)
+        out = {'pre:Mult': 1.0 if abs(db) < 1e-9 else _db_to_mult(db)}
+    else:
+        out = {'pre:Mult': _db_to_mult(curve.preamp)}
     for i, b in enumerate(curve.bands, 1):
         out.update(band_controls(replace(b, on=False) if bypass
                                  else b, i))
@@ -657,12 +690,10 @@ def eq_targets(enh: Enhancement | None, sinks: list,
     return pick_targets(enh.node_name if enh else '', sinks, known)
 
 
-# ------------------------------------------------------------ live A/B --
-# Comparing "with EQ" against "without EQ" must never stop the unit: stopping
-# it removes the sink, and every stream playing into it is torn down (apps
-# pause, some stop outright).  Instead we leave the equalizer running and move
-# the streams around it — a target.object metadata change, which PipeWire
-# relinks without interrupting the stream.
+# ---------------------------------------------------------- the output --
+# Comparing with and without the equalizer is the editing session's job
+# (eqsession: Compare writes pass-through controls, never stops the unit or
+# moves a stream).  What is left here is where the equalizer's sound goes.
 
 def eq_output_node(enh: Enhancement, dump=None):
     """The sink the equalizer is actually feeding right now.
@@ -687,72 +718,6 @@ def eq_output_node(enh: Enhancement, dump=None):
             return node
     return next((n for n in nodes if n.is_sink and n.is_default
                  and n.name != enh.node_name), None)
-
-
-def _eq_streams(enh: Enhancement, dump):
-    """Real app streams currently playing into this equalizer."""
-    from . import pw
-    nodes = pw.list_audio_nodes(dump)
-    eq = next((n for n in nodes if n.name == enh.node_name), None)
-    if eq is None:
-        return None, []
-    streams = [s for s in pw.list_streams(dump)
-               if s.is_playback and s.target_id == eq.id
-               and not s.props.get('node.name', '').startswith('pwctl.')]
-    return eq, streams
-
-
-def bypass(enh: Enhancement) -> tuple[bool, str, dict]:
-    """Route everything playing into the equalizer straight to its output.
-
-    Returns (ok, message, state); pass `state` back to `unbypass()` to put the
-    streams (and the default sink, if we changed it) back.
-
-    A biquad graph is bypassed in place instead: every control goes to its
-    exact pass-through value, so nothing moves and nothing pauses, and
-    `state` is `{'live': True}`.
-    """
-    from . import pw
-    dump = pw.pw_dump()
-    eq, streams = _eq_streams(enh, dump)
-    if eq is None:
-        return False, 'The equalizer is not running.', {}
-    if is_live(enh, dump):
-        if not write_curve(enh, bypass=True, node_id=eq.id):
-            return False, 'Could not bypass the equalizer.', {}
-        mark_live(enh, 'bypass')
-        return True, '', {'live': True, 'streams': []}
-    dest = eq_output_node(enh, dump)
-    if dest is None or dest.name == enh.node_name:
-        return False, 'No output device to compare against.', {}
-    moved = [s.id for s in streams if pw.move_stream(s.id, dest.serial)]
-    # If the EQ is the system output, new streams would keep landing in it —
-    # move the default too, and remember to put it back.
-    was_default = eq.is_default
-    if was_default:
-        pw.set_default(dest.id)
-    return True, dest.description, {'streams': moved, 'was_default': was_default,
-                                    'dest': dest.name}
-
-
-def unbypass(enh: Enhancement, state: dict) -> tuple[bool, str]:
-    """Send the streams `bypass()` moved back into the equalizer."""
-    from . import pw
-    dump = pw.pw_dump()
-    nodes = pw.list_audio_nodes(dump)
-    eq = next((n for n in nodes if n.name == enh.node_name), None)
-    if eq is None:
-        return False, 'The equalizer is not running.'
-    if state.get('live'):
-        if not write_curve(enh, node_id=eq.id):
-            return False, 'Could not restore the equalizer.'
-        clear_live(enh)
-        return True, ''
-    for sid in state.get('streams') or []:
-        pw.move_stream(sid, eq.serial)
-    if state.get('was_default'):
-        pw.set_default(eq.id)
-    return True, ''
 
 
 def make_default_output(enh: Enhancement) -> tuple[bool, str]:

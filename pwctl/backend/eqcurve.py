@@ -368,6 +368,20 @@ class Curve:
                   if b.on and FREQ_MIN <= b.freq <= FREQ_MAX]
         return max(self.response(freqs, rate)) if freqs else self.preamp
 
+    def level_db(self, rate: int = RATE) -> float:
+        """How much louder (+) or quieter (-) the curve makes music, in dB,
+        preamp included.  For a fair A/B: louder always sounds better.
+
+        An estimate, not a measurement: the change in loudness (LUFS) of pink
+        noise played through the curve.  Pink noise has the same energy in
+        every octave, so it is an average over a log axis; each frequency is
+        weighted as ITU-R BS.1770 weights it (`_K_POWER`), so a cut below
+        30 Hz or a boost at 18 kHz hardly counts, as you hardly hear it.
+        """
+        resp = self.response(_K_FREQS, rate)
+        num = sum(w * 10 ** (r / 10) for w, r in zip(_K_POWER, resp))
+        return 10 * math.log10(max(num / _K_TOTAL, 1e-12))
+
     def fits_live(self) -> bool:
         return (self.preamp <= PREAMP_MAX + 1e-9
                 and all(b.fits_live() for b in self.bands))
@@ -379,6 +393,30 @@ class Curve:
     @property
     def active(self) -> int:
         return sum(1 for b in self.bands if not b.is_identity)
+
+
+def _k_power(freqs) -> list[float]:
+    """|H(f)|^2 of BS.1770's K-weighting (the two-stage filter loudness
+    meters use), from the standard's 48 kHz coefficients."""
+    stages = (((1.53512485958697, -2.69169618940638, 1.19839281085285),
+               (-1.69065929318241, 0.73248077421585)),
+              ((1.0, -2.0, 1.0),
+               (-1.99004745483398, 0.99007225036621)))
+    out = []
+    for f in freqs:
+        z1 = cmath.exp(-2j * math.pi * f / 48000)
+        z2 = z1 * z1
+        p = 1.0
+        for (b0, b1, b2), (a1, a2) in stages:
+            p *= abs(b0 + b1 * z1 + b2 * z2) ** 2 / \
+                abs(1 + a1 * z1 + a2 * z2) ** 2
+        out.append(p)
+    return out
+
+
+_K_FREQS = log_freqs(160)
+_K_POWER = _k_power(_K_FREQS)
+_K_TOTAL = sum(_K_POWER)
 
 
 def default_curve() -> Curve:

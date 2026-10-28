@@ -46,7 +46,7 @@ DEFAULTS = {
     'notify_services': True,     # … on failed audio services
     'notify_xruns': False,       # … on new xruns (Monitor page polling)
     'monitor_poll': 1,           # seconds between Monitor page samples
-    'eq_ab_compare': False,      # experimental live A/B on the Equalizer page
+    'eq_match_level': True,      # Equalizer: Compare at the same loudness
 }
 
 
