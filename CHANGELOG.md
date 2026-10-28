@@ -27,10 +27,23 @@ and commit log.
 
 **The Equalizer, redesigned: drag the curve and hear it**
 
-The band list of spin buttons is gone. Editing an equalizer now shows its
-frequency response, and a running equalizer plays every change as you make
-it.
+The Equalizer page is now a list of your equalizers beside the one you
+pick, and the band list of spin buttons is gone: the selected equalizer
+shows its frequency response, and a running one plays every change as you
+make it.
 
+- **The list**: running equalizers above the ones that are not, each drawn
+  as its own curve, with a star on the default output, where its sound goes
+  ("1 app → FiiO M3K"), and its on/off switch. A row switched on or off
+  moves to its group when the pointer leaves the list, not under it. Drop
+  an AutoEQ / APO file anywhere on the list to make a new equalizer from
+  it, or use the Import and **+** buttons above it.
+- **The selected equalizer**, top to bottom: where everything you hear goes
+  (and *Make default output* when it is not), the curve, a summary (where
+  it came from, bands, preamp, headroom), Listen (volume, with a level
+  meter), the apps playing through it (keep one there, send one back, or
+  *Send an app here*), and its output (another equalizer to stack both
+  curves, several devices at once, the channel layout).
 - **Drag a point** to move a band: left and right is frequency, up and down
   is gain. Scroll on it to make it wider or narrower. Double-click the graph
   to add a band there, and right-click (or long-press) a point for its menu.
@@ -39,16 +52,23 @@ it.
 - **Hear it as you go.** On a running equalizer, gain, frequency, width,
   the preamp and turning a band off all change the sound at once, without
   restarting it. Adding or removing a band, or changing its type, restarts
-  it once. **Save** keeps the changes; **Cancel** puts back what was saved.
-- **Bypass** compares with and without the equalizer while it keeps
-  running. Nothing playing through it moves or pauses.
+  it once. **Save** keeps the changes; **Revert** goes back to what was
+  saved. Until you save, the saved curve stays drawn faintly under your
+  edit, and the row shows a dot.
+- **Compare**: *Equalized*, *Saved* (your edit against the saved curve) and
+  *Bypassed* (no equalizer at all), while it keeps running, so nothing
+  playing through it moves or pauses. **B** switches bypass on and off.
+  *Compare at the same loudness*, on by default, plays Saved and Bypassed
+  at the curve's own loudness (estimated for pink noise, as loudness meters
+  weigh it), so the louder side never wins just by being louder. This
+  replaces the *Experimental › Live A/B compare* switch.
 - **Presets**: a few ready-made curves (bass boost, vocal clarity, late
   night, less harsh, speech…), your own (*Save as a preset*), and the curve
   of any of your other equalizers. Your presets are plain AutoEQ / Equalizer
   APO text files, so they work in those apps too.
 - **Auto gain** lowers the preamp just enough that nothing clips. The graph
-  shows where clipping starts, and a *Peak* label warns when the curve goes
-  past it.
+  shows where clipping starts, and the *Headroom* figure turns orange with
+  a *Fix* button when the curve goes past it.
 - **More filter types**: low cut, high cut and notch, beside bell and
   shelves.
 - **Import, paste, copy and export** the curve as AutoEQ / Equalizer APO
@@ -56,11 +76,17 @@ it.
   now reads more of Equalizer APO's format (bandwidth in octaves, shelf
   slopes, low and high pass, files with left and right sections) and says
   what it changed or left out instead of skipping it silently.
-- **Undo and redo** (Ctrl+Z, Ctrl+Shift+Z), and closing with unsaved
-  changes asks first.
-- Works in a narrow window: the editor becomes a sheet and its settings
-  stack into one column.
-- On the Equalizer page, each equalizer is drawn as its own curve.
+- **Undo and redo** (Ctrl+Z, Ctrl+Shift+Z; Ctrl+S saves). Leaving an
+  equalizer with changes you have not saved asks first: picking another
+  one, switching tab, or closing the window.
+- **Rename**, **Duplicate** (with your unsaved changes, if there are any:
+  a quick way to try a variation) and **Delete** are in its ⋯ menu.
+- **Mic** (was *Microphone cleanup*) is the page's second tab: each clean
+  microphone with its source, processing, a before/after level while an
+  app records from it, and *Make default input*. Looking at it never opens
+  the microphone.
+- Works in a narrow window: the list and the selected equalizer take turns,
+  and the editor's settings stack into one column.
 
 What changes for an equalizer you already have: nothing until you edit it or
 turn it off and on. Then it moves to the new engine, which sounds the same
