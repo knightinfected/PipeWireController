@@ -25,6 +25,58 @@ and commit log.
 
 ## Unreleased
 
+**The Equalizer, redesigned: drag the curve and hear it**
+
+The band list of spin buttons is gone. Editing an equalizer now shows its
+frequency response, and a running equalizer plays every change as you make
+it.
+
+- **Drag a point** to move a band: left and right is frequency, up and down
+  is gain. Scroll on it to make it wider or narrower. Double-click the graph
+  to add a band there, and right-click (or long-press) a point for its menu.
+  Hold Shift for fine steps. With the graph focused, the arrow keys, Page
+  Up/Down, Space and Delete work too.
+- **Hear it as you go.** On a running equalizer, gain, frequency, width,
+  the preamp and turning a band off all change the sound at once, without
+  restarting it. Adding or removing a band, or changing its type, restarts
+  it once. **Save** keeps the changes; **Cancel** puts back what was saved.
+- **Bypass** compares with and without the equalizer while it keeps
+  running. Nothing playing through it moves or pauses.
+- **Presets**: a few ready-made curves (bass boost, vocal clarity, late
+  night, less harsh, speech…), your own (*Save as a preset*), and the curve
+  of any of your other equalizers. Your presets are plain AutoEQ / Equalizer
+  APO text files, so they work in those apps too.
+- **Auto gain** lowers the preamp just enough that nothing clips. The graph
+  shows where clipping starts, and a *Peak* label warns when the curve goes
+  past it.
+- **More filter types**: low cut, high cut and notch, beside bell and
+  shelves.
+- **Import, paste, copy and export** the curve as AutoEQ / Equalizer APO
+  text. Paste takes what AutoEq's and Squiglink's sites copy. The importer
+  now reads more of Equalizer APO's format (bandwidth in octaves, shelf
+  slopes, low and high pass, files with left and right sections) and says
+  what it changed or left out instead of skipping it silently.
+- **Undo and redo** (Ctrl+Z, Ctrl+Shift+Z), and closing with unsaved
+  changes asks first.
+- Works in a narrow window: the editor becomes a sheet and its settings
+  stack into one column.
+- On the Equalizer page, each equalizer is drawn as its own curve.
+
+What changes for an equalizer you already have: nothing until you edit it or
+turn it off and on. Then it moves to the new engine, which sounds the same
+(measured within 0.005 dB of the old one). A curve with a band above +20 dB
+or narrower than Q 10 keeps the old engine, and the editor brings such a
+band inside those limits only when you save it. While you drag, the sound
+can tick as it follows the curve; it settles when you let go.
+
+**Bug: saving an equalizer sent the apps playing through it to the speakers**
+
+An app sent to an equalizer with *Send an app here* went to the default
+output whenever the equalizer restarted, which happened on every save,
+output change and on/off, and it stayed there, playing without the
+equalizer. Apps sent to it now come back once it has restarted, and saving
+a curve no longer restarts it at all.
+
 **The Patchbay, reworked**
 
 Patching many channels no longer means one drag per cable, and the graph
