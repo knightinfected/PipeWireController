@@ -196,6 +196,128 @@ row.enh-idle label.title {
     font-weight: 400;
 }
 
+/* ---- Equalizer editor (eq_editor.py, eq_graph.py; DR-016) ----
+   The curve runs blue -> green across the frequencies, the board's wire
+   language; a point is blue.  Clipping and bypass are the warning hue, as
+   the "bypassed" pill already is.  Cairo reads these through the invisible
+   eq-pen-* labels -- don't delete them. */
+.eq-pen-lo { color: @pwctl_src; }
+.eq-pen-hi { color: @pwctl_mix; }
+.eq-pen-node { color: mix(@blue_3, @window_fg_color, 0.15); }
+.eq-pen-hot { color: @warning_color; }
+.eq-pen-bypass { color: @warning_color; }
+.eq-pen-bg { color: @view_bg_color; }
+
+.eq-thumb { color: @pwctl_src; }
+
+.eq-card {
+    background: @card_bg_color;
+    border: 1px solid alpha(currentColor, 0.09);
+    border-radius: 14px;
+    padding: 12px 14px 14px;
+}
+
+.eq-card-title {
+    font-weight: 700;
+}
+
+.eq-hint,
+.eq-preset-sub {
+    font-size: 0.85em;
+    opacity: 0.62;
+}
+
+button.eq-peak {
+    padding: 2px 10px;
+    min-height: 0;
+    border-radius: 99px;
+    font-size: 0.85em;
+    font-weight: 700;
+    background: alpha(@warning_color, 0.16);
+    color: @warning_color;
+    box-shadow: none;
+}
+
+button.eq-bypass:checked {
+    background: alpha(@warning_color, 0.22);
+    color: @warning_color;
+}
+
+button.eq-chip {
+    padding: 5px 11px;
+    border-radius: 11px;
+    border: 1px solid alpha(currentColor, 0.12);
+    background: alpha(currentColor, 0.03);
+    box-shadow: none;
+}
+
+button.eq-chip.selected {
+    border-color: alpha(@blue_3, 0.55);
+    background: alpha(@blue_3, 0.13);
+}
+
+button.eq-chip.add {
+    border-style: dashed;
+}
+
+button.eq-chip.off label {
+    opacity: 0.5;
+}
+
+.eq-chip-dot {
+    min-width: 9px;
+    min-height: 9px;
+    border-radius: 99px;
+    background: @pwctl_src;
+}
+
+button.eq-chip.off .eq-chip-dot {
+    background: alpha(currentColor, 0.3);
+}
+
+.eq-chip-freq {
+    font-weight: 700;
+    font-feature-settings: "tnum";
+}
+
+.eq-chip-sub {
+    font-size: 0.82em;
+    opacity: 0.68;
+}
+
+button.eq-cut.active {
+    background: alpha(@blue_3, 0.15);
+    color: @pwctl_src;
+}
+
+.eq-field-label {
+    font-size: 0.82em;
+    font-weight: 700;
+    opacity: 0.65;
+}
+
+.eq-field-sub,
+.eq-field-unit {
+    font-size: 0.85em;
+    opacity: 0.6;
+}
+
+spinbutton.eq-value text {
+    font-weight: 700;
+    font-feature-settings: "tnum";
+}
+
+.eq-notes {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: alpha(@blue_3, 0.09);
+}
+
+row.eq-row-selected {
+    box-shadow: inset 3px 0 0 0 @pwctl_src;
+    background: alpha(@blue_3, 0.07);
+}
+
 /* inline info note (wraps, unlike Adw.Banner) */
 .pwctl-note {
     background: alpha(@accent_color, 0.12);

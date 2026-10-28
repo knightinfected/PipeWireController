@@ -13,21 +13,13 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
-from ..backend import balance, chains, enhance, prefs, pw, rules
-from ..backend.surround import LAYOUTS as _SPEAKER_LAYOUTS
+from ..backend import balance, enhance, prefs, pw, rules, chains
+from ..backend import eqcurve
+from .eq_editor import EqEditor
+from .eq_graph import CurveThumb
 from .volume import make_volume
-from .widgets import async_call, combine_devices, confirm, esc, group, \
-    icon_button, page_scroller, pick_file, pill, state_style
-
-# Same list the Virtual Devices page offers: the surround wizard's LAYOUTS
-# deliberately start at stereo, so mono is prepended for device-shaped uses.
-LAYOUTS = [('mono', 'Mono 1.0', ['MONO'])] + list(_SPEAKER_LAYOUTS)
-_STEREO_LAYOUT = next(i for i, l in enumerate(LAYOUTS) if l[0] == 'stereo')
-
-
-def _adj(lower, upper, value, step, page):
-    return Gtk.Adjustment(lower=lower, upper=upper, value=value,
-                          step_increment=step, page_increment=page)
+from .widgets import async_call, confirm, esc, group, icon_button, \
+    page_scroller, pick_file, pill, state_style
 
 
 class EnhancePage:
@@ -189,7 +181,15 @@ class EnhancePage:
             title=esc(enh.name), subtitle=subtitle,
             title_lines=1, subtitle_lines=1)
         row.add_css_class('enh-active' if enh.enabled else 'enh-idle')
-        prefix_icon = Gtk.Image.new_from_icon_name(icon)
+        if enh.kind == 'eq':
+            # the curve itself tells two equalizers apart at a glance
+            prefix_icon = CurveThumb(
+                eqcurve.Curve() if enh.id in self._bypass
+                else enhance.curve_of(enh))
+            prefix_icon.set_tooltip_text(
+                f'{enhance.curve_of(enh).active} bands shaping the sound')
+        else:
+            prefix_icon = Gtk.Image.new_from_icon_name(icon)
         prefix_icon.add_css_class('enh-icon')
         row.add_prefix(prefix_icon)
         sw = Gtk.Switch(valign=Gtk.Align.CENTER, active=enh.enabled,
@@ -303,7 +303,7 @@ class EnhancePage:
         equalizer as far as the user is concerned.
         """
         state = self._bypass.get(enh.id)
-        if state:
+        if state and not state.get('live'):
             ids = set(state.get('streams') or [])
             return [s for s in self._streams if s.id in ids]
         return [s for s in self._streams if s.target_id == node.id]
@@ -556,7 +556,7 @@ class EnhancePage:
 
     # ------------------------------------------------------------- editors --
     def _open_eq(self, enh):
-        EqDialog(self.window, self, enh).present()
+        EqEditor(self.window, self, enh).present(self.window)
 
     def _open_mic(self, enh):
         MicDialog(self.window, self, enh).present()
@@ -576,245 +576,17 @@ class EnhancePage:
         if not path:
             return
         try:
-            parsed = enhance.parse_eq_file(path)
+            with open(path, encoding='utf-8', errors='replace') as f:
+                parsed = eqcurve.parse_text(f.read())
         except OSError:
             self.window.toast('Could not read that file')
             return
-        if not parsed['bands']:
+        if not parsed.curve.bands:
             self.window.toast('No parametric EQ filters found in that file')
             return
         name = GLib.path_get_basename(path).rsplit('.', 1)[0]
-        EqDialog(self.window, self, None,
-                 preset={'name': name, **parsed}).present()
-
-
-# ------------------------------------------------------------- EQ dialog --
-
-class EqDialog(Adw.Window):
-    def __init__(self, window, page, enh, preset=None):
-        super().__init__(title='Edit equalizer' if enh else 'New equalizer',
-                         transient_for=window, modal=True, resizable=True,
-                         default_width=640, default_height=780)
-        self.window = window
-        self.page = page
-        self.enh = enh
-        self._band_rows = []
-
-        preset = preset or {}
-        params = enh.params if enh else {}
-        init_name = (enh.name if enh else preset.get('name', ''))
-        init_preamp = params.get('preamp', preset.get('preamp', 0.0))
-        init_bands = params.get('bands') or preset.get('bands') \
-            or enhance._default_bands()
-        self._target = params.get('target', '')
-
-        g = group('Equalizer')
-        self.name_row = Adw.EntryRow(title='Name')
-        self.name_row.set_text(init_name)
-        g.add(self.name_row)
-
-        self.preamp_row = Adw.SpinRow(
-            title='Preamp', subtitle='Overall level trim, in dB. Use a '
-            'negative preamp to leave headroom for boosted bands.',
-            adjustment=_adj(-24, 24, float(init_preamp), 0.5, 3), digits=1)
-        g.add(self.preamp_row)
-
-        self.target_row = Adw.ComboRow(
-            title='Output device',
-            subtitle='Where the equalized audio goes. “Follow default” lets '
-                     'you route it like any output, and picking another '
-                     'equalizer chains the two so both curves apply.')
-        g.add(self.target_row)
-
-        combine_row = Adw.ActionRow(
-            title='Send to several devices',
-            subtitle='Combines the outputs you pick into one target — for '
-                     'playing on speakers and HDMI at the same time.')
-        combine_btn = Gtk.Button(label='Combine…', valign=Gtk.Align.CENTER)
-        combine_btn.connect('clicked', self._combine)
-        combine_row.add_suffix(combine_btn)
-        combine_row.set_activatable_widget(combine_btn)
-        g.add(combine_row)
-
-        init_pos = list(params.get('positions') or ['FL', 'FR'])
-        self.layout_row = Adw.ComboRow(
-            title='Channel layout',
-            subtitle='Must match what feeds the equalizer. A stereo '
-                     'equalizer in a surround path folds it down to two '
-                     'channels.',
-            model=Gtk.StringList.new([l[1] for l in LAYOUTS]))
-        self.layout_row.set_selected(
-            next((i for i, l in enumerate(LAYOUTS) if list(l[2]) == init_pos),
-                 _STEREO_LAYOUT))
-        g.add(self.layout_row)
-
-        self.bands_group = group(
-            'Bands', 'Each band is one filter. Turn a band off with its '
-            'switch without deleting it.')
-        add_btn = Gtk.Button(icon_name='list-add-symbolic',
-                             valign=Gtk.Align.CENTER, tooltip_text='Add band')
-        add_btn.connect('clicked', lambda *_: self._add_band())
-        self.bands_group.set_header_suffix(add_btn)
-        for b in init_bands:
-            self._add_band(b)
-
-        save = Gtk.Button(label='Save' if enh else 'Create',
-                          halign=Gtk.Align.END, margin_top=12)
-        save.add_css_class('suggested-action')
-        save.connect('clicked', self._save)
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
-                      margin_top=12, margin_bottom=24,
-                      margin_start=18, margin_end=18)
-        box.append(g)
-        box.append(self.bands_group)
-        box.append(save)
-        sw = Gtk.ScrolledWindow(vexpand=True,
-                                hscrollbar_policy=Gtk.PolicyType.NEVER)
-        clamp = Adw.Clamp(maximum_size=560)
-        clamp.set_child(box)
-        sw.set_child(clamp)
-        view = Adw.ToolbarView()
-        view.add_top_bar(Adw.HeaderBar())
-        view.set_content(sw)
-        self.set_content(view)
-
-        async_call(lambda: (pw.list_audio_nodes(), chains.list_chains()),
-                   self._nodes_loaded)
-
-    def _nodes_loaded(self, result, error):
-        nodes, all_chains = result if not error and result else ([], [])
-        # Another equalizer is a perfectly good output, and so is a plugin
-        # rack: chaining them stacks the processing.  eq_targets() keeps out
-        # only this equalizer and anything that already leads back to it.
-        self._sinks = enhance.eq_targets(
-            self.enh, [n for n in nodes if n.is_sink], self.page._items,
-            chains.target_edges(all_chains))
-        names = ['Follow default'] + [n.description for n in self._sinks]
-        self.target_row.set_model(Gtk.StringList.new(names))
-        if self._target:
-            idx = next((i + 1 for i, n in enumerate(self._sinks)
-                        if n.name == self._target), 0)
-            self.target_row.set_selected(idx)
-
-    def _combine(self, _b):
-        def created(node_name, message):
-            if not node_name:
-                self.window.toast(message)
-                return
-            # The new sink is not in the model yet — add it and select it, so
-            # saving now targets it without waiting for a device rescan.
-            self._sinks.append(pw.AudioNode(
-                id=-1, name=node_name, description=message,
-                media_class='Audio/Sink'))
-            self.target_row.get_model().append(message)
-            self.target_row.set_selected(len(self._sinks))
-            self.window.toast(f'“{message}” created and selected')
-        combine_devices(self.window, list(self._sinks), created,
-                        name_hint=self.name_row.get_text().strip()
-                        or 'Combined output')
-
-    def _add_band(self, band=None):
-        band = band or {'on': True, 'type': 'PK', 'freq': 1000,
-                        'gain': 0.0, 'q': 1.0}
-        row = Adw.ExpanderRow()
-        row.set_show_enable_switch(True)
-        row.set_enable_expansion(bool(band.get('on', True)))
-
-        type_row = Adw.ComboRow(
-            title='Type',
-            model=Gtk.StringList.new(
-                [enhance.FILTER_TYPE_LABELS[t] for t in enhance.FILTER_TYPES]))
-        ftype = str(band.get('type', 'PK')).upper()
-        if ftype in enhance.FILTER_TYPES:
-            type_row.set_selected(enhance.FILTER_TYPES.index(ftype))
-        freq_row = Adw.SpinRow(title='Frequency (Hz)',
-                               adjustment=_adj(20, 20000,
-                                               float(band.get('freq', 1000)),
-                                               10, 100), digits=0)
-        gain_row = Adw.SpinRow(title='Gain (dB)',
-                               adjustment=_adj(-24, 24,
-                                               float(band.get('gain', 0.0)),
-                                               0.5, 3), digits=1)
-        q_row = Adw.SpinRow(title='Q (bandwidth)',
-                            adjustment=_adj(0.1, 10,
-                                            float(band.get('q', 1.0)),
-                                            0.1, 1), digits=2)
-        remove_row = Adw.ActionRow(title='Remove this band')
-        rm = icon_button('user-trash-symbolic', 'Remove band',
-                         lambda *_: self._remove_band(entry))
-        remove_row.add_suffix(rm)
-        for r in (type_row, freq_row, gain_row, q_row, remove_row):
-            row.add_row(r)
-
-        entry = {'row': row, 'type': type_row, 'freq': freq_row,
-                 'gain': gain_row, 'q': q_row}
-
-        def update_title(*_a):
-            t = enhance.FILTER_TYPES[type_row.get_selected()]
-            hz = freq_row.get_value()
-            label = f'{hz/1000:g} kHz' if hz >= 1000 else f'{hz:g} Hz'
-            row.set_title(f'{t} · {label}')
-            row.set_subtitle(f'{gain_row.get_value():+.1f} dB · '
-                             f'Q {q_row.get_value():.2f}')
-        for w in (type_row, freq_row, gain_row, q_row):
-            w.connect('notify::selected' if isinstance(w, Adw.ComboRow)
-                      else 'notify::value', update_title)
-        update_title()
-
-        self.bands_group.add(row)
-        self._band_rows.append(entry)
-
-    def _remove_band(self, entry):
-        if len(self._band_rows) <= 1:
-            self.window.toast('An equalizer needs at least one band')
-            return
-        self.bands_group.remove(entry['row'])
-        if entry in self._band_rows:
-            self._band_rows.remove(entry)
-
-    def _collect_bands(self):
-        out = []
-        for e in self._band_rows:
-            out.append({
-                'on': e['row'].get_enable_expansion(),
-                'type': enhance.FILTER_TYPES[e['type'].get_selected()],
-                'freq': round(e['freq'].get_value(), 3),
-                'gain': round(e['gain'].get_value(), 2),
-                'q': round(e['q'].get_value(), 3),
-            })
-        return out
-
-    def _save(self, _b):
-        name = self.name_row.get_text().strip()
-        if not name:
-            self.window.toast('Give the equalizer a name')
-            return
-        target = ''
-        sel = self.target_row.get_selected()
-        if sel > 0 and 0 <= sel - 1 < len(getattr(self, '_sinks', [])):
-            target = self._sinks[sel - 1].name
-        params = {
-            'preamp': round(self.preamp_row.get_value(), 2),
-            'bands': self._collect_bands(),
-            'positions': list(LAYOUTS[self.layout_row.get_selected()][2]),
-            'target': target,
-        }
-        if self.enh:
-            enh = self.enh
-            enh.name = name
-            enh.params.update(params)
-        else:
-            enh = enhance.new_enhancement(name, 'eq', params=params)
-            enh.enabled = True
-
-        def done(result, e):
-            ok, err = result if result else (False, str(e or ''))
-            self.window.toast(f'“{name}” ready' if ok
-                              else f'Failed: {err or "unknown error"}')
-            self.page.refresh()
-        self.close()
-        async_call(lambda: enhance.apply(enh), done)
+        EqEditor(self.window, self, None, name=name, curve=parsed.curve,
+                 notes=parsed.notes).present(self.window)
 
 
 # ------------------------------------------------------------ mic dialog --
