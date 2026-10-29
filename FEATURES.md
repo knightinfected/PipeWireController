@@ -326,8 +326,9 @@ folders, and *Reset all overrides*.
   settings* hides them.
 - **A narrow window works.** Below about 840 pixels the sidebar slides over
   the page, and the window goes down to 360 pixels wide, so it tiles beside
-  anything. Devices and the Equalizer show their list and the item you pick
-  in turn.
+  anything. Most pages fit that; Monitor, Surround Setup, the Dashboard and
+  the HRIR Library still need a little more. Devices and the Equalizer show
+  their list and the item you pick in turn.
 - **A restart banner** names the service a change needs restarted, with a
   button that does it. Changes that can apply instantly just do.
 

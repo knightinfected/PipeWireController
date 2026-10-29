@@ -57,7 +57,7 @@ the server clock.
 - **Patchbay, reworked**: connect whole devices or channel ranges in one go, and arrange the graph by signal flow.
 - **Balance and per-channel volume** for every output, input and app.
 - **Preferences**: start at login, start minimized in the background, light or dark.
-- **Narrow and tiled windows**: the app now fits down to 360 pixels wide.
+- **Narrow and tiled windows**: the window now goes down to 360 pixels wide, and most pages fit it.
 - **Live updates**: Devices and the Equalizer follow changes as they happen, instead of polling.
 - **17 bug fixes.** Every change, and every earlier release, is in the [changelog](CHANGELOG.md).
 
