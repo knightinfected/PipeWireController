@@ -63,8 +63,23 @@ HOLD_DECAY_PER_SEC = 0.35
 STALE_SEC = 0.4         # no data this long => silence, not a frozen bar
 
 
+# Preferences → General → Live level meters.  Off, nothing subscribes and
+# every running capture stops: one switch for every meter in the app.
+_enabled = [True]
+
+
+def set_enabled(on: bool):
+    _enabled[0] = bool(on)
+    if not _enabled[0]:
+        stop_all()
+
+
+def enabled() -> bool:
+    return _enabled[0]
+
+
 def available() -> bool:
-    return system.have('pw-record')
+    return _enabled[0] and system.have('pw-record')
 
 
 def to_norm(peak: float) -> float:
@@ -314,6 +329,8 @@ def at_capacity() -> bool:
     Lets the UI tell "no slot free right now, try again later" apart from
     "this system can't meter at all", so it only retries in the first case.
     """
+    if not _enabled[0]:
+        return False          # turned off, not full: no point retrying
     with _registry_lock:
         return len(_meters) >= MAX_METERS
 
