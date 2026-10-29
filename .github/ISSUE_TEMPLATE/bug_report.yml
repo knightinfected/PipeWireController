@@ -60,7 +60,7 @@ body:
         ```
         sh -c '. /etc/os-release; echo "distro: $PRETTY_NAME"; echo "pipewire: $(pipewire --version | tail -1)"; echo "wireplumber: $(wireplumber --version | tail -1)"'
         ```
-        Also tell us the **PipeWire Controller version** (it's in the app under **Tools → About**).
+        Also tell us the **PipeWire Controller version**. It's in the app under **Preferences → About**, the gear at the bottom of the sidebar (in v0.6.1 and older, **Tools → About**). Its *Debug information* has the version and the rest in one go, so pasting that works too.
       render: text
       placeholder: |
         distro: …
@@ -95,5 +95,5 @@ body:
       options:
         - label: I searched existing issues and this hasn't been reported yet
           required: true
-        - label: I'm on PipeWire (not PulseAudio/JACK standalone) with libadwaita ≥ 1.4
+        - label: I'm on PipeWire (not PulseAudio/JACK standalone) with libadwaita ≥ 1.7
           required: false
