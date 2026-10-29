@@ -124,6 +124,8 @@ make it.
 - Works in a narrow window: the list and the selected equalizer take turns,
   and the editor's settings stack into one column.
 
+![A new equalizer: five flat bands on the curve, ready to drag, before it is created](screenshots/equalizer-new.png)
+
 What changes for an equalizer you already have: nothing until you edit it or
 turn it off and on. Then it moves to the new engine, which sounds the same
 (measured within 0.005 dB of the old one). A curve with a band above +20 dB
@@ -177,6 +179,8 @@ says more about what is connected and what a drag will do.
 - Where two nodes overlap, a click picks the one on top, and a node you
   pick comes to the top.
 
+![Connect channels: a node and its channels on each side, picked from a searchable list](screenshots/patchbay-connect-channels.png)
+
 **Bug: a cable from a node back into the same node was hidden under it**
 
 Two MIDI devices patched to each other through the Midi-Bridge showed only
@@ -221,9 +225,9 @@ and virtual devices, and the one you pick is shown in full on the right.
   link to the page that made it.
 - **Settings** for a hardware device (its name, hiding it, sample rate,
   format, preferred quantum) are right there. Buffering and power settings,
-  and the device's technical names with a copy button each, show with
-  Advanced on. Hover a setting to see what it does; reset them all from the
-  ⋯ menu.
+  and the device's technical names with a copy button each, show unless
+  *Show advanced settings* is off in Preferences. Hover a setting to see
+  what it does; reset them all from the ⋯ menu.
 - **Test** plays a short chime on an output, left then right.
 - **Hidden devices** are at the bottom of the list, each with Unhide.
 - In a narrow window the list and the device take turns: pick one to open
@@ -251,7 +255,8 @@ Balance, because on a Pro Audio card they are often two separate outputs.
 - **A balanced device's slider shows its loudest channel**, as pavucontrol
   and GNOME do. It used to show the left channel. Nothing changes for a
   device whose channels are all at the same level.
-- Each channel slider follows the volume style you picked in the header.
+- Each channel slider follows the volume style you picked, in the header
+  or in Preferences.
 
 **Bug: moving a volume slider undid a balance set somewhere else**
 
@@ -306,9 +311,10 @@ Also worth knowing:
   already did for the level meters.
 - **If the app can't listen**, for example because `pw-dump` is missing, the
   page checks every three seconds, as before.
-- **For now this is the Devices page.** The Dashboard, Signal Paths and the
-  Patchbay still re-read every three seconds, and move over next. The Monitor
-  keeps its timer on purpose, because its graphs sample at a steady rate.
+- **So far this is the Devices and Equalizer pages.** The Dashboard, Signal
+  Paths and the Patchbay still re-read every three seconds, and move over
+  next. The Monitor keeps its timer on purpose, because its graphs sample at
+  a steady rate.
 
 **Bug: the Devices page did not follow changes made outside it**
 
@@ -320,10 +326,8 @@ again.
 
 It now follows the audio graph while it is on screen, and a change shows within
 about a tenth of a second (how, in the entry above). It moves the controls
-that are already there instead of redrawing the page — so a device you have
-expanded stays expanded, a slider you are dragging is not pulled back, and the
-level meters keep running. Making a device the default no longer folds up the
-one you had open, either.
+that are already there instead of redrawing the page, so a slider you are
+dragging is not pulled back and the level meters keep running.
 
 Thanks to @iibaranov-IG for the fix (#20), and to @The-M1k3y for the report
 (#19).
@@ -399,7 +403,7 @@ drawn outside it.
   window no longer takes the header past the window's edge with it.
 - **Up and Down in the sidebar still change pages.**
 - **Some pages still need more than 360 pixels**: Monitor, Surround Setup,
-  the Dashboard, Devices, the HRIR Library and Filter Chains.
+  the Dashboard and the HRIR Library.
   In a window narrower than that page, its right side is cut off at the
   window's edge. Making each of them fit is the next job.
 
