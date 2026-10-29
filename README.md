@@ -546,8 +546,7 @@ preferred graph clock master.
 routable output devices. VST3/CLAP are detected with a bridge-host hint.
 
 **Monitor** — service CPU/RAM, xrun and DSP-load meters, a live `pw-top`
-table, a follow-along journal, and optional desktop notifications for broken
-links, service failures and dropouts.
+table and a follow-along journal.
 
 **Surround Setup** — a guided wizard for real 5.1/7.1 rigs: choose the
 layout, pick the matching sound-card profile (★ suggests the right one;
@@ -558,10 +557,15 @@ headphone users there's a one-click **Virtual 7.1 Headphones** sink —
 clearly marked as virtual, never made the default automatically, and
 removable like any other chain.
 
-**Advanced toggle** (bottom-left) reveals a curated set of deeper settings
-across all pages — quantum hard limit, RT scheduling, strict checks,
-center-extraction cutoff, rear ambience delay, stereo widen, Hilbert taps,
-ALSA headroom, and more — each explained in plain language.
+**Preferences** (the gear at the bottom of the sidebar, or Ctrl+,) — the
+app's own choices, in four tabs: light/dark, the volume slider style, live
+meters and which page opens first; **start at login, start minimized** (no
+window, running in the background) and keep running when the window is
+closed; desktop notifications for broken links, service failures and
+dropouts; and About, with debug information for bug reports. Deeper settings
+across all pages (quantum hard limit, RT scheduling, strict checks,
+center-extraction cutoff, ALSA headroom and more, each explained in plain
+language) are shown by default; *Show advanced settings* hides them.
 
 **Device presets** (bookmark menu, top-right) — snapshot channel-mix
 settings, volume and card profile per output device, re-apply them with one
@@ -637,6 +641,7 @@ one-click *reset all overrides*.
 | Generated chain / virtual-device configs | `~/.config/pipewire-controller/generated/*.conf` |
 | HRIR library | `~/.config/pipewire-controller/hrir/` |
 | UI preferences & device presets | `~/.config/pipewire-controller/ui.json` |
+| Start at login (only while it's on) | `~/.config/autostart/io.github.knightinfected.PipeWireControlCenter.desktop` |
 | Chain / virtual-device runner unit | `~/.config/systemd/user/pwctl-chain@.service` |
 
 Deleting those paths removes every trace of the app. Base config files are

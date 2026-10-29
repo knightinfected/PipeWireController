@@ -25,6 +25,42 @@ and commit log.
 
 ## Unreleased
 
+**Preferences, and the app can start with your computer**
+
+A gear at the bottom of the sidebar opens Preferences (or press Ctrl+,),
+with its tabs along the top: General, Startup, Notifications and About.
+
+- **Advanced settings are shown by default.** The Advanced switch in the
+  sidebar is gone. To hide the expert rows again, turn off *Show advanced
+  settings* in General.
+- **General**: light, dark or follow the system; the volume slider style,
+  with each style there to try; live level meters on or off (each meter is
+  a small capture process, so off saves some CPU); which page opens at
+  start; and resets for the Patchbay layout and for the preferences
+  themselves. Favourites, presets and everything you built are kept.
+- **Startup** (#28): *Start at login*, *Start minimized* (no window: it runs
+  in the background until you quit it, and opening it from the app menu
+  shows the window), and *Keep running in the background* when the window
+  is closed. Only Device Presets switching by themselves and the desktop
+  notifications need the app running, and the tab says so. Where the
+  desktop doesn't start login apps by itself (Hyprland, Sway or niri
+  without uwsm), it shows the line to add to the compositor's config, with
+  a Copy button. Quit with Ctrl+Q or from this tab.
+- **Notifications**: the three switches moved here from the Monitor page,
+  plus a test notification that tells you when no notification service is
+  running.
+- **About**: the version, ways to support the project (GitHub Sponsors and
+  PayPal), links to report a bug, ask a question, the known issues and the
+  changelog, debug information to paste into a bug report, and the
+  credits. It replaces the About section on the Tools page.
+- `pipewire-control-center --background` starts the app with no window.
+
+**Bug: changing the volume slider style only changed the Dashboard**
+
+Devices, the Equalizer and Signal Paths kept the old style until the app
+was restarted. Every page with sliders follows the change at once now,
+whether it's made in Preferences or with the button in the header bar.
+
 **The Equalizer, redesigned: drag the curve and hear it**
 
 The Equalizer page is now a list of your equalizers beside the one you
