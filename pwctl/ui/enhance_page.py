@@ -467,9 +467,8 @@ class EnhancePage:
         self.widget = bin_
         self.widget.connect('map', self._on_map)
         self.widget.connect('unmap', self._on_unmap)
-        switch = getattr(window, 'adv_switch', None)
-        if isinstance(switch, Gtk.Widget):
-            switch.connect('notify::active', lambda *_a: self._on_advanced())
+        # Advanced settings: the window calls `_on_advanced()` when the
+        # preference changes (Preferences → General).
 
     def _empty_page(self):
         self._empty = Adw.StatusPage(icon_name='pwctl-eq-symbolic')
@@ -519,7 +518,7 @@ class EnhancePage:
         self.split.set_show_content(False)
 
     def restyle(self, style):
-        """The slider style changed, or meters were turned on/off."""
+        """Preferences changed the slider style, or turned meters on/off."""
         self.volume_style = style
         detail = self.detail
         if detail is None or not hasattr(detail, '_clear_volume'):

@@ -206,23 +206,18 @@ class MonitorPage:
         self._apply_history()
 
         # ---- notifications ----
-        notif = group('System notifications',
-                      'Desktop notifications while the app is running.')
-        for key, title, subtitle in (
-                ('notify_links', 'Broken or disconnected links',
-                 'Notify when a link between two live nodes disappears '
-                 '(e.g. a device vanished mid-stream).'),
-                ('notify_services', 'Service failures',
-                 'Notify when PipeWire, WirePlumber or PipeWire-Pulse '
-                 'enters the failed state.'),
-                ('notify_xruns', 'Audio dropouts (xruns)',
-                 'Notify when new xruns are detected while this page is '
-                 'monitoring.')):
-            row = Adw.SwitchRow(title=title, subtitle=subtitle)
-            row.set_active(bool(prefs.get(key)))
-            row.connect('notify::active',
-                        lambda r, _p, k=key: prefs.save(**{k: r.get_active()}))
-            notif.add(row)
+        # The switches moved to Preferences → Notifications (DR-010) with the
+        # app's other choices; this row is where people knew to look.
+        notif = group('System notifications')
+        row = Adw.ActionRow(
+            title='Desktop notifications',
+            subtitle='Broken links, service failures and audio dropouts. '
+                     'Choose which in Preferences.',
+            activatable=True)
+        row.add_suffix(Gtk.Image(icon_name='go-next-symbolic'))
+        row.connect('activated', lambda _r: self.window.open_preferences(
+            'notifications'))
+        notif.add(row)
 
         # ---- pw-top ----
         top = group('Node activity (pw-top)',

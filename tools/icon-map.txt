@@ -36,3 +36,10 @@ branch              pwctl-xover
 view-pin            pwctl-pin
 stopwatch           pwctl-latency
 signal-dots         pwctl-meter
+
+# --- Preferences (DR-010): no name both Adwaita and Breeze ship -------------
+cogged-wheel-big    pwctl-gear         # Preferences (sidebar, General). Debian 13 has no emblem-system; the small cogged-wheel flattens to a blob
+heart               pwctl-heart        # About → Support the project
+bug                 pwctl-bug          # About → Report a bug
+chat-bubble         pwctl-chat         # About → Ask a question
+bell                pwctl-bell         # the Notifications tab

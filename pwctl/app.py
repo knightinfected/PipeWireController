@@ -13,8 +13,8 @@ gi.require_version('Adw', '1')
 from gi.repository import (Adw, Gdk, Gio, GLib, GObject, Graphene,  # noqa: E402
                            Gsk, Gtk)
 
-from .backend import (graph, levels, livestate, prefs, presets, pw, system,
-                      units)
+from .backend import autostart, levels, livestate, prefs, presets, system
+from .ui.background import Watchers
 from .ui.chains_page import ChainsPage
 from .ui.dashboard import Dashboard
 from .ui.devices import DevicesPage
@@ -67,9 +67,10 @@ RESTART_UNITS = {
     'wireplumber': ('WirePlumber', system.restart_wireplumber),
 }
 
-# The services whose failure raises a desktop notification.
-WATCHED_SERVICES = ('pipewire.service', 'wireplumber.service',
-                    'pipewire-pulse.service')
+# How Preferences → Appearance maps onto libadwaita.
+COLOR_SCHEMES = {'system': Adw.ColorScheme.DEFAULT,
+                 'light': Adw.ColorScheme.FORCE_LIGHT,
+                 'dark': Adw.ColorScheme.FORCE_DARK}
 
 # The narrowest and shortest the window may be: GNOME's guideline for an app
 # that scales down to a phone.  A tiling compositor gives the window its tile
@@ -320,13 +321,16 @@ class Window(Adw.ApplicationWindow):
         self._closing = False
         self.connect('close-request', self._confirm_unsaved)
         self.connect('close-request', self._save_window_state)
+        # last: with "Keep running" on, closing hides the window instead
+        self.connect('close-request', self._close_to_background)
         self._pending_restarts: set[str] = set()
-        self.advanced = bool(prefs.get('advanced'))
         self._advanced_widgets: list = []
-        # Every page with sliders follows a style change at once, wherever
-        # it is made (DR-010 bug 1: only the Dashboard used to).
-        self._style_watch = prefs.watch('volume_style', self._on_style)
-        self._last_default_sink = None
+        self._watch_tokens = [
+            prefs.watch('show_advanced', self._on_advanced),
+            prefs.watch('volume_style', self._on_style),
+            prefs.watch('level_meters', self._on_meters),
+        ]
+        self._prefs_dialog = None
         self._current_row = None
 
         self.toaster = Adw.ToastOverlay()
@@ -397,21 +401,24 @@ class Window(Adw.ApplicationWindow):
         side_sw.set_child(self.listbox)
         side_view.set_content(side_sw)
 
-        # advanced-settings toggle, bottom-left
-        adv_box = Gtk.Box(spacing=8, margin_top=10, margin_bottom=10,
-                          margin_start=16, margin_end=16)
-        adv_box.append(Gtk.Image.new_from_icon_name(
-            'applications-engineering-symbolic'))
-        adv_label = Gtk.Label(label='Advanced', xalign=0, hexpand=True)
-        adv_box.append(adv_label)
-        self.adv_switch = Gtk.Switch(valign=Gtk.Align.CENTER,
-                                     active=self.advanced,
-                                     tooltip_text='Show advanced settings '
-                                                  'throughout the app')
-        self.adv_switch.connect('notify::active', self._on_advanced)
-        adv_box.append(self.adv_switch)
-        adv_box.add_css_class('pwctl-sidebar-footer')
-        side_view.add_bottom_bar(adv_box)
+        # Preferences, bottom-left, where the Advanced switch was: advanced
+        # settings are shown by default now, and the switch to hide them is
+        # in Preferences with the app's other choices (DR-010).
+        foot = Gtk.Box(margin_top=6, margin_bottom=6, margin_start=6,
+                       margin_end=6)
+        foot.add_css_class('pwctl-sidebar-footer')
+        inner = Gtk.Box(spacing=12, margin_start=6, margin_end=6)
+        inner.append(Gtk.Image.new_from_icon_name(
+            'pwctl-gear-symbolic'))
+        inner.append(Gtk.Label(label='Preferences', xalign=0, hexpand=True))
+        self.prefs_button = Gtk.Button(
+            child=inner, hexpand=True, tooltip_text='Preferences (Ctrl+,)')
+        self.prefs_button.add_css_class('flat')
+        self.prefs_button.add_css_class('pwctl-prefs-button')
+        self.prefs_button.connect('clicked',
+                                  lambda _b: self.open_preferences())
+        foot.append(self.prefs_button)
+        side_view.add_bottom_bar(foot)
 
         # content
         self.banner = Adw.Banner(revealed=False, button_label='Restart now')
@@ -533,54 +540,95 @@ class Window(Adw.ApplicationWindow):
         # The labels' widths follow the font, so a font or text-scale change
         # moves the width where they stop fitting.
         settings = Gtk.Settings.get_default()
-        handlers = [settings.connect(f'notify::{key}', self.fit_header)
-                    for key in ('gtk-font-name', 'gtk-xft-dpi')]
-        self.connect('destroy', lambda *_: [settings.disconnect(h)
-                                            for h in handlers])
+        # Dropped in teardown(): a window's own `destroy` never reaches
+        # Python (DR-010), so a handler left on the global settings would
+        # keep measuring a dead window.
+        self._font_handlers = (settings, [
+            settings.connect(f'notify::{key}', self.fit_header)
+            for key in ('gtk-font-name', 'gtk-xft-dpi')])
 
         start = 0
         import os
         self._debug_page = bool(os.environ.get('PWCTL_PAGE'))
-        want = os.environ.get('PWCTL_PAGE') or prefs.get('last_page')
+        want = os.environ.get('PWCTL_PAGE') or (
+            prefs.get('last_page') if prefs.get('start_page') != 'dashboard'
+            else 'dashboard')
         if want:
             for i, (n, _t, _i2, _s) in enumerate(PAGES):
                 if n == want:
                     start = i
         self.goto(PAGES[start][0])
-        GLib.timeout_add_seconds(5, self._autoload_tick)
+        # a restart a device preset asked for while the window was closed
+        watchers = getattr(app, 'watchers', None)
+        for which in sorted(getattr(watchers, 'pending_restarts', ())):
+            self.flag_restart(which)
+        if watchers is not None:
+            watchers.pending_restarts.clear()
 
-        # link / service watcher for system notifications
-        self._last_patch_ts = 0.0
-        self._watch_links = None       # set of (out_name, port, in_name, port)
-        self._watch_states: dict[str, str] = {}
-        self._watch_busy = False
-        # Service failures come from systemd's own signals when it is on the
-        # session bus: at once, and including a failure that is restarted
-        # before a poll would have looked.  The 5 s poll below covers them
-        # only when it is not.  Links stay on the poll (DR-004 step 4).
-        self._unit_watch = units.watch(WATCHED_SERVICES, self._service_state)
-        GLib.timeout_add_seconds(5, self._watch_tick)
+    def teardown(self):
+        """The window left the application (App._on_window_removed).
+
+        Not on `destroy`: GTK 4 never delivers a window's `destroy` to a
+        Python handler (measured, DR-010), so a watcher hung on it would
+        keep calling a dead window.
+        """
+        for t in self._watch_tokens:
+            prefs.unwatch(t)
+        self._watch_tokens = []
+        settings, handlers = getattr(self, '_font_handlers', (None, []))
+        for h in handlers:
+            settings.disconnect(h)
+        self._font_handlers = (None, [])
 
     # ------------------------------------------------------------ advanced --
+    @property
+    def advanced(self) -> bool:
+        """Whether advanced settings are shown (Preferences → General)."""
+        return bool(prefs.get('show_advanced'))
+
     def register_advanced(self, widget):
-        """Track a widget that is only visible while Advanced mode is on."""
+        """Track a widget that is only visible with advanced settings on."""
         self._advanced_widgets.append(widget)
         widget.set_visible(self.advanced)
 
-    def _on_advanced(self, switch, _p):
-        self.advanced = switch.get_active()
-        prefs.save(advanced=self.advanced)
+    def _on_advanced(self, value):
         for w in self._advanced_widgets:
-            w.set_visible(self.advanced)
+            w.set_visible(bool(value))
+        for name in ('devices', 'enhance'):
+            page = getattr(self, 'pages', {}).get(name)
+            if page is not None and hasattr(page, '_on_advanced'):
+                page._on_advanced()
 
-    # ------------------------------------------------------------ sliders --
+    # ---------------------------------------------- sliders and meters --
     def _on_style(self, value):
-        """The slider style changed: every page with sliders builds them
-        again in the new style."""
+        """The slider style changed (Preferences or the header button):
+        every page with sliders builds them again in the new style."""
+        self._restyle(style=value)
+
+    def _on_meters(self, value):
+        levels.set_enabled(bool(value))
+        self._restyle()
+
+    def _restyle(self, style=None):
         for page in getattr(self, 'pages', {}).values():
             fn = getattr(page, 'restyle', None)
             if fn is not None:
-                fn(value)
+                fn(style or prefs.get('volume_style'))
+
+    # --------------------------------------------------------- preferences --
+    def open_preferences(self, tab=None):
+        """Open Preferences (on `tab`), or bring the open one to it."""
+        from .ui.preferences import PreferencesDialog
+        dlg = self._prefs_dialog
+        if dlg is None:
+            dlg = PreferencesDialog(self)
+            self._prefs_dialog = dlg
+            dlg.connect('closed', lambda *_a: setattr(self, '_prefs_dialog',
+                                                       None))
+            dlg.present(self)
+        if tab:
+            dlg.show_tab(tab)
+        return dlg
 
     # ------------------------------------------------------ device presets --
     def _build_presets_button(self):
@@ -664,40 +712,12 @@ class Window(Adw.ApplicationWindow):
 
     def _apply_preset(self, _b, preset):
         self._presets_popover.popdown()
-
-        def done(actions, e):
-            if e or actions is None:
-                self.toast('Preset failed')
-                return
-            if any('channel-mix' in a for a in actions):
-                self.flag_restart('pulse')
-            self.toast(f'Applied preset for {preset["description"]}: '
-                       + (', '.join(actions) if actions else 'nothing to do'))
-        async_call(lambda: presets.apply(preset), done)
+        self.get_application().watchers.apply_preset(preset)
 
     def _delete_preset(self, _b, name):
         presets.delete(name)
         self._presets_popover.popdown()
         self.toast('Preset deleted')
-
-    def _autoload_tick(self):
-        if not prefs.get('autoload_presets'):
-            return True
-
-        def check():
-            return pw.read_default_names().get('default.audio.sink')
-
-        def done(name, e):
-            if e or not name:
-                return
-            prev, self._last_default_sink = self._last_default_sink, name
-            if prev is None or name == prev:
-                return
-            preset = presets.preset_for(name)
-            if preset:
-                self._apply_preset(None, preset)
-        async_call(check, done)
-        return True
 
     # ---------------------------------------------------------- navigation --
     def _sidebar_header(self, row, before):
@@ -1032,6 +1052,24 @@ class Window(Adw.ApplicationWindow):
                    win_maximized=self.is_maximized())
         return False
 
+    def _close_to_background(self, *_a):
+        """Hide instead of closing while the app is to keep running.
+
+        The window stays added to the application, so the process lives on
+        with the watchers (presets switching, notifications), and the pages
+        stop their polls once unmapped.  Launching the app again shows this
+        same window.
+        """
+        app = self.get_application()
+        if app is None or getattr(app, 'quitting', False) \
+                or not app.stays_running():
+            return False
+        if self._prefs_dialog is not None:
+            self._prefs_dialog.close()
+        self.set_visible(False)
+        app.went_to_background()
+        return True
+
     def goto(self, name):
         """Show a page.  Every way of changing page comes through here."""
         index = next((i for i, (n, _t, _i2, _s) in enumerate(PAGES)
@@ -1053,89 +1091,19 @@ class Window(Adw.ApplicationWindow):
             self.split.set_show_sidebar(False)
 
     # ------------------------------------------------------- notifications --
+    # The watchers live on the application (ui/background.py), so they run
+    # with no window open; these keep the window's old names for the pages.
     def notify_user(self, title: str, body: str):
         """Desktop notification (used for broken links, failures, xruns)."""
         app = self.get_application()
-        if not app:
-            return
-        note = Gio.Notification.new(title)
-        note.set_body(body)
-        note.set_priority(Gio.NotificationPriority.NORMAL)
-        app.send_notification(None, note)
+        if app is not None and getattr(app, 'watchers', None) is not None:
+            app.watchers.notify_user(title, body)
 
     def mark_user_patch(self):
         """Patch changes we made ourselves shouldn't raise link warnings."""
-        import time
-        self._last_patch_ts = time.monotonic()
-
-    def _service_state(self, unit, state):
-        """A service's state, from the signal or from the poll."""
-        prev = self._watch_states.get(unit)
-        self._watch_states[unit] = state
-        if (state == 'failed' and prev not in (None, 'failed')
-                and prefs.get('notify_services')):
-            self.notify_user('Audio service failed',
-                             f'{unit} entered the failed state — '
-                             'check the Monitor page.')
-
-    def _watch_tick(self):
-        import time
-        want_links = bool(prefs.get('notify_links'))
-        want_services = (bool(prefs.get('notify_services'))
-                         and self._unit_watch is None)
-        if (not want_links and not want_services) or self._watch_busy:
-            return True
-        self._watch_busy = True
-
-        def collect():
-            states = {}
-            if want_services:
-                for unit in WATCHED_SERVICES:
-                    states[unit] = system.unit_state(unit)
-            links, names = None, {}
-            if want_links:
-                g = graph.snapshot()
-                ports = {p.id: p for n in g.nodes.values()
-                         for p in n.inputs + n.outputs}
-                links = set()
-                for link in g.links:
-                    op, ip = ports.get(link.out_port), ports.get(link.in_port)
-                    if not op or not ip:
-                        continue
-                    key = (g.nodes[link.out_node].name, op.name,
-                           g.nodes[link.in_node].name, ip.name)
-                    links.add(key)
-                names = {n.name: n.label for n in g.nodes.values()}
-            return states, links, names
-
-        def done(result, error):
-            self._watch_busy = False
-            if error or result is None:
-                return
-            states, links, names = result
-            for unit, state in states.items():
-                self._service_state(unit, state)
-            if links is not None:
-                prev_links = self._watch_links
-                self._watch_links = links
-                recent_patch = (time.monotonic() - self._last_patch_ts) < 15
-                if prev_links is not None and not recent_patch:
-                    gone = prev_links - links
-                    # only links whose endpoints still exist: a closed app
-                    # takes its node away and is not a broken link
-                    broken = [(o, i) for o, _op, i, _ip in gone
-                              if o in names and i in names]
-                    if broken:
-                        o, i = broken[0]
-                        extra = (f' (and {len(broken) - 1} more)'
-                                 if len(broken) > 1 else '')
-                        self.notify_user(
-                            'Audio link disconnected',
-                            f'{names.get(o, o)} → {names.get(i, i)} was '
-                            f'disconnected{extra}.')
-            return
-        async_call(collect, done)
-        return True
+        app = self.get_application()
+        if app is not None and getattr(app, 'watchers', None) is not None:
+            app.watchers.mark_user_patch()
 
     # ------------------------------------------------------------ feedback --
     def toast(self, message, timeout=3):
@@ -1178,14 +1146,59 @@ class App(Adw.Application):
         # Matches the desktop entry filename, so the shell can associate the
         # window with its launcher icon, and is the id the Flatpak will use.
         super().__init__(
-            application_id='io.github.knightinfected.PipeWireControlCenter',
+            application_id=autostart.APP_ID,
             flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        self.add_main_option(
+            'background', 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
+            'Start without a window and keep running in the background '
+            '(what "Start minimized" uses at login)', None)
+        self.watchers = None
+        self.window = None
+        self.quitting = False
+        self._background = False     # this process was started --background
+        self._want_background = False
+        self._held = False
+        self._told_background = False
+        self.connect('window-removed', self._on_window_removed)
+
+    def do_handle_local_options(self, options):
+        if options.contains('background'):
+            # Already running: a login entry starting a second copy (or a
+            # second `--background`) must not pop the window open.
+            try:
+                self.register(None)
+            except GLib.Error:
+                return -1
+            if self.get_is_remote():
+                return 0
+            self._want_background = True
+        return -1
 
     def do_startup(self):
         Adw.Application.do_startup(self)
         # Preference changes reach their watchers on the main loop, even when
         # a worker thread saved them.
         prefs.set_dispatcher(GLib.idle_add)
+        levels.set_enabled(bool(prefs.get('level_meters')))
+        style = Adw.StyleManager.get_default()
+        style.set_color_scheme(COLOR_SCHEMES.get(
+            prefs.get('color_scheme'), Adw.ColorScheme.DEFAULT))
+        self._scheme_watch = prefs.watch(
+            'color_scheme', lambda v: style.set_color_scheme(
+                COLOR_SCHEMES.get(v, Adw.ColorScheme.DEFAULT)))
+        for name, accels, fn in (
+                ('preferences', ['<Control>comma'], self._on_preferences),
+                ('quit', ['<Control>q'], self._on_quit),
+                ('show-window', [], lambda *_a: self.activate())):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', fn)
+            self.add_action(action)
+            if accels:
+                self.set_accels_for_action(f'app.{name}', accels)
+        # The two things that need the app running: presets switching and
+        # notifications.  On the application, so they run with no window.
+        self.watchers = Watchers(self)
+        self.watchers.start()
         # Meters are child processes and outlive a crash or a kill, so clear
         # out anything an earlier run left behind before starting new ones.
         # The same goes for livestate's two listeners.
@@ -1223,14 +1236,92 @@ class App(Adw.Application):
                 Gdk.Display.get_default()).add_search_path(str(icons))
 
     def do_activate(self):
-        win = self.get_active_window() or Window(self)
+        if self._want_background:
+            # Started at login with "Start minimized": no window.  Held, so
+            # the process stays with none; a later launch shows one.
+            self._want_background = False
+            self._background = True
+            self._hold()
+            return
+        win = self.get_window() or self._new_window()
         win.present()
+        import os
+        tab = os.environ.pop('PWCTL_PREFS', None)
+        if tab:
+            win.open_preferences(tab)
+
+    def _new_window(self):
+        self.window = Window(self)
+        return self.window
+
+    def _on_window_removed(self, _app, win):
+        """A window was destroyed.  This signal, not the window's own
+        `destroy`, which GTK 4 never delivers to Python."""
+        if hasattr(win, 'teardown'):
+            win.teardown()
+        if self.window is win:
+            self.window = None
+        if self.quitting and not any(isinstance(w, Window)
+                                     for w in self.get_windows()):
+            self.quit()
+
+    def get_window(self):
+        """The window, shown or hidden, or None (also one a harness built)."""
+        windows = self.get_windows()
+        if self.window is not None and self.window in windows:
+            return self.window
+        return next((w for w in windows if isinstance(w, Window)), None)
+
+    def stays_running(self) -> bool:
+        """Whether closing the window should leave the app running."""
+        return self._background or bool(prefs.get('keep_running'))
+
+    def went_to_background(self):
+        """The window was closed into the background: say so, once."""
+        if self._told_background:
+            return
+        self._told_background = True
+        if self.watchers is not None:
+            self.watchers.notify_user(
+                'PipeWire Controller is still running',
+                'Device presets and notifications keep working. Open it '
+                'again from your app menu, or quit it here.',
+                buttons=(('Quit', 'app.quit'),))
+
+    def _hold(self):
+        if not self._held:
+            self._held = True
+            self.hold()
+
+    def _on_preferences(self, *_a):
+        win = self.get_window() or self._new_window()
+        win.present()
+        win.open_preferences()
+
+    def _on_quit(self, *_a):
+        """Quit for real, through the window's close guard (an unsaved
+        equalizer still asks first)."""
+        self.quitting = True
+        if self._held:
+            self._held = False
+            self.release()
+        win = self.get_window()
+        if win is None:
+            self.quit()
+            return
+        if not win.get_visible():
+            win.present()
+        # Closed: `destroy` quits.  Stopped by the guard: the guard closes
+        # it again once the user answers, and that close quits too.
+        win.close()
 
     def _on_signal(self):
         self.quit()     # runs do_shutdown: stops the meters and listeners
         return GLib.SOURCE_REMOVE
 
     def do_shutdown(self):
+        if self.watchers is not None:
+            self.watchers.stop()
         levels.stop_all()
         livestate.stop()
         # nothing unsaved keeps playing once the app is gone: an open

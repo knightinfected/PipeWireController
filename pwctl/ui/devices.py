@@ -135,12 +135,8 @@ class DevicesPage:
         self.widget = bin_
         self.widget.connect('map', self._on_map)
         self.widget.connect('unmap', self._on_unmap)
-
-        # The sidebar's Advanced switch; a window without one (a harness's
-        # stand-in) simply never changes it.
-        switch = getattr(window, 'adv_switch', None)
-        if isinstance(switch, Gtk.Widget):
-            switch.connect('notify::active', lambda *_a: self._on_advanced())
+        # Advanced settings: the window calls `_on_advanced()` when the
+        # preference changes (Preferences → General).
 
     # ------------------------------------------------------------ layout --
     @property
@@ -427,8 +423,8 @@ class DevicesPage:
         self.select(entry)
 
     def restyle(self, style):
-        """The slider style changed (or meters were turned on/off): the
-        rows (their meters) and the detail (its sliders) again."""
+        """Preferences changed the slider style, or turned meters on/off:
+        the rows (their meters) and the detail (its sliders) again."""
         self.volume_style = style
         if self._data is not None and self._rules is not None:
             self._rebuild(self._data, self._rules)

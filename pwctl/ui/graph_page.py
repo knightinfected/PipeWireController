@@ -1183,7 +1183,23 @@ class GraphPage:
         self.widget.connect('unmap', self._on_unmap)
         self._did_fit = False
 
+    def reset_layout(self):
+        """Forget every saved node position (Preferences → General).
+
+        Nodes go back to their default columns, as for a node never moved.
+        """
+        area = self.area
+        area.pos.clear()
+        if getattr(area, 'g', None) is not None:
+            area._ensure_positions()
+            area._save_positions()
+            area._invalidate()
+            area.queue_draw()
+        else:
+            prefs.save(graph_positions={})
+
     # -------------------------------------------------------------- refresh --
+
     def _on_map(self, *_a):
         self.refresh()
         if not self._timer:
