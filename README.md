@@ -22,54 +22,81 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/dashboard-0.6.0.png" alt="The dashboard: default output and input, pinned favorites, and a live level meter on every slider" width="92%">
+  <img src="screenshots/dashboard-0.6.2.png" alt="The dashboard: default output and input, pinned favorites, and a live level meter on every slider" width="92%">
 </p>
 
-## What do you want to do?
+<details open>
+<summary><h2>What do you want to do?</h2></summary>
 
 | I want to… | Go to |
 |---|---|
 | turn one app down, or move it to another device while it plays | **Dashboard** → *Mixer* |
+| balance my speakers, or turn down one side of my headphones | **Dashboard** → *Mixer*: the *Channels* button on any row |
 | keep the devices I use most one glance away | **Dashboard** → *Favorites*: pin any output, input or virtual device |
 | play on two devices at once | **Virtual Devices** → *Combined output* |
-| EQ my headphones with an AutoEQ profile | **Equalizer**: import the `ParametricEq.txt`, or drag it in |
-| stop my mic picking up echo and room noise | **Equalizer** → *Microphone cleanup*, then pick the clean mic as your input |
+| EQ my headphones with an AutoEQ profile | **Equalizer**: drop the `ParametricEq.txt` on the list, then drag the curve to taste |
+| stop my mic picking up echo and room noise | **Equalizer** → *Mic*, then pick the clean mic as your input |
 | hear 7.1 surround on headphones | **Surround Setup** → *Virtual 7.1 Headphones* |
 | set up real 5.1 or 7.1 speakers | **Surround Setup**: a wizard with a test tone for each speaker |
 | get better Bluetooth audio | **Session & Bluetooth**: SBC-XQ, mSBC, and a codec per device |
 | stop the pop or cut-off at the start of sounds | **Session & Bluetooth** → never suspend devices |
 | work out why the audio crackles | **Monitor**: dropouts, DSP load and a live `pw-top` |
+| start it with my computer, quietly in the background | **Preferences** → *Startup* |
 | put every setting back the way it was | **Tools** → *Reset all overrides* |
 
 That's the everyday half. **[All features](FEATURES.md)** goes from here to
 the advanced end: signal paths, filter chains, channel maps, per-app rules and
 the server clock.
 
-## A look inside
+</details>
+
+## What's new in v0.6.2
+
+- **Equalizer, redesigned**: drag the curve and hear it live, then compare it with the saved one at matched loudness.
+- **Devices, redesigned**: every device in one list; pick one to see what plays into it, where it goes, and its settings.
+- **Patchbay, reworked**: connect whole devices or channel ranges in one go, and arrange the graph by signal flow.
+- **Balance and per-channel volume** for every output, input and app.
+- **Preferences**: start at login, start minimized in the background, light or dark.
+- **Narrow and tiled windows**: the app now fits down to 360 pixels wide.
+- **Live updates**: Devices and the Equalizer follow changes as they happen, instead of polling.
+- **17 bug fixes.** Every change, and every earlier release, is in the [changelog](CHANGELOG.md).
+
+<details>
+<summary><h2>A look inside</h2></summary>
 
 <table>
   <tr>
     <td width="33%" valign="top">
+      <img src="screenshots/equalizer-0.6.2.png" alt="Equalizer: your equalizers beside the selected one's curve and bands">
+      <b>Equalizer</b><br>Drag the curve and hear it as you go. Compare with the saved curve, or with no EQ, at the same loudness. AutoEQ import, presets, and echo and noise removal for your mic.
+    </td>
+    <td width="33%" valign="top">
+      <img src="screenshots/devices-0.6.2.png" alt="Devices: every device in a list, beside the selected one">
+      <b>Devices</b><br>Every device in one list. Pick one to see what's playing into it and where it goes, with its port, profile, settings and a test chime.
+    </td>
+    <td width="33%" valign="top">
+      <img src="screenshots/patchbay-0.6.2.png" alt="Patchbay: the live graph arranged by signal flow, one output selected">
+      <b>Patchbay</b><br>The live graph of your session. Connect a whole device or a range of channels at once, arrange it by signal flow, and save it as a snapshot.
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/knightinfected/PipeWireController/main/screenshots/signal-paths-board.png">
         <img src="https://raw.githubusercontent.com/knightinfected/PipeWireController/main/screenshots/signal-paths-board-light.png" alt="Signal Paths board">
       </picture>
       <b>Signal Paths</b><br>Draw where your audio goes: sources on the left, mixes on the right, effects on each. Start from 26 templates.
     </td>
-    <td width="33%" valign="top">
+    <td valign="top">
       <img src="screenshots/mixer-apps.png" alt="Mixer">
-      <b>Mixer</b><br>Every app and device, with live meters. Move a stream to another device while it plays.
+      <b>Mixer</b><br>Every app and device, with live meters. Move a stream to another device while it plays, or set the balance of each channel.
     </td>
-    <td width="33%" valign="top">
-      <img src="screenshots/equalizer.png" alt="Equalizer">
-      <b>Equalizer</b><br>Parametric EQ with AutoEQ import and live A/B, plus echo and noise removal for your mic.
+    <td valign="top">
+      <img src="screenshots/preferences.png" alt="Preferences: appearance and the four volume slider styles">
+      <b>Preferences</b><br>Light or dark, four volume slider styles, and start at login, minimized to the background.
     </td>
   </tr>
   <tr>
-    <td valign="top">
-      <img src="screenshots/patchbay.png" alt="Patchbay">
-      <b>Patchbay</b><br>The live graph of your whole session. Drag a port onto another to connect, and save the result as a snapshot.
-    </td>
     <td valign="top">
       <img src="screenshots/virtual-devices.png" alt="Virtual Devices">
       <b>Virtual devices</b><br>Null sinks, virtual mics, one output that plays on several cards, buses, and per-channel maps.
@@ -78,12 +105,18 @@ the server clock.
       <img src="screenshots/surround-setup.png" alt="Surround Setup">
       <b>Surround</b><br>A wizard for real 5.1 and 7.1 speakers, and HRIR virtual surround for headphones.
     </td>
+    <td valign="top">
+      <img src="screenshots/narrow-window.png" alt="Three pages in a phone-width window: Devices, one device, and an equalizer">
+      <b>Narrow windows</b><br>Tiled, or as narrow as 360 pixels: the list and the item you pick take turns.
+    </td>
   </tr>
 </table>
 
 **Also:** server clock and quantum, stream processing, per-app routing rules,
 LADSPA/LV2 effect racks, filter chains, device presets and a live performance
 monitor. **[All features](FEATURES.md)** · **[Every screenshot](screenshots/)**
+
+</details>
 
 ## Install
 
@@ -201,6 +234,7 @@ these are the only places the app writes:
 | Settings drop-ins | `~/.config/pipewire/{pipewire,client,pipewire-pulse}.conf.d/99-pipewire-controller.conf` and `~/.config/wireplumber/wireplumber.conf.d/99-pipewire-controller.conf` |
 | Everything you build | `~/.config/pipewire-controller/`: chains, signal paths, equalizers, virtual devices, snapshots, HRIRs, rules, preferences |
 | The runner unit | `~/.config/systemd/user/pwctl-chain@.service`, its links in `pipewire.service.wants/`, and any `pwctl-chain@*.service.d/` folders |
+| *Start at login*, only while it's on | `~/.config/autostart/io.github.knightinfected.PipeWireControlCenter.desktop` |
 | The app-menu entry, if you made one from a checkout | `~/.local/share/applications/io.github.knightinfected.PipeWireControlCenter.desktop` |
 
 There's one exception. **Import existing devices** on the Virtual Devices
@@ -217,9 +251,11 @@ listed above.
 <a href="https://github.com/sponsors/knightinfected"><img alt="Sponsor on GitHub" src="https://img.shields.io/badge/GitHub-sponsor-EA4AAA?logo=githubsponsors&logoColor=white"></a>
 <a href="https://paypal.me/hmzknight"><img alt="Donate via PayPal" src="https://img.shields.io/badge/PayPal-support%20this%20project-00457C?logo=paypal&logoColor=white"></a>
 
-Any support lets me spend more time on this. If you can't, feedback and bug
-reports help just as much. It's optional, always: the app is GPL-3.0 and
-nothing is ever locked behind a donation.
+Right now PipeWire Controller is a one-person project: I design it, build it,
+test it and answer every issue myself. If it has earned a place on your
+desktop, sponsoring it or a one-off donation means more of my time goes into
+it. Bug reports, ideas and feedback count just as much. The app is GPL-3.0 and
+stays that way: nothing is ever locked behind a donation.
 
 Want to help with code? Read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
