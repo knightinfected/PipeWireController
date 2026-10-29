@@ -1163,6 +1163,14 @@ class PathsPage:
             return strips, states, nodes, streams
         async_call(collect, self._apply)
 
+    def restyle(self, style):
+        """Preferences changed the slider style, or turned meters on/off."""
+        self.volume_style = style
+        if self._sig is None:
+            return                      # nothing drawn yet
+        if not (self._dragging or getattr(self, '_editing', False)):
+            self._render()
+
     def _signature(self):
         """Everything on the board that a rebuild would change.
 

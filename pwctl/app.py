@@ -323,6 +323,9 @@ class Window(Adw.ApplicationWindow):
         self._pending_restarts: set[str] = set()
         self.advanced = bool(prefs.get('advanced'))
         self._advanced_widgets: list = []
+        # Every page with sliders follows a style change at once, wherever
+        # it is made (DR-010 bug 1: only the Dashboard used to).
+        self._style_watch = prefs.watch('volume_style', self._on_style)
         self._last_default_sink = None
         self._current_row = None
 
@@ -569,6 +572,15 @@ class Window(Adw.ApplicationWindow):
         prefs.save(advanced=self.advanced)
         for w in self._advanced_widgets:
             w.set_visible(self.advanced)
+
+    # ------------------------------------------------------------ sliders --
+    def _on_style(self, value):
+        """The slider style changed: every page with sliders builds them
+        again in the new style."""
+        for page in getattr(self, 'pages', {}).values():
+            fn = getattr(page, 'restyle', None)
+            if fn is not None:
+                fn(value)
 
     # ------------------------------------------------------ device presets --
     def _build_presets_button(self):
@@ -1171,6 +1183,9 @@ class App(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+        # Preference changes reach their watchers on the main loop, even when
+        # a worker thread saved them.
+        prefs.set_dispatcher(GLib.idle_add)
         # Meters are child processes and outlive a crash or a kill, so clear
         # out anything an earlier run left behind before starting new ones.
         # The same goes for livestate's two listeners.

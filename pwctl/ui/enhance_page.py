@@ -518,6 +518,16 @@ class EnhancePage:
     def show_list(self):
         self.split.set_show_content(False)
 
+    def restyle(self, style):
+        """The slider style changed, or meters were turned on/off."""
+        self.volume_style = style
+        detail = self.detail
+        if detail is None or not hasattr(detail, '_clear_volume'):
+            return
+        detail._clear_volume()
+        if self._data is not None:
+            detail.paint(self._data)
+
     def _on_advanced(self):
         if isinstance(self.detail, MicDetail):
             self.detail.set_advanced(bool(getattr(self.window, 'advanced',

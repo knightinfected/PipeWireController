@@ -426,6 +426,14 @@ class DevicesPage:
             self.list.dirs.set_active_name('all')
         self.select(entry)
 
+    def restyle(self, style):
+        """The slider style changed (or meters were turned on/off): the
+        rows (their meters) and the detail (its sliders) again."""
+        self.volume_style = style
+        if self._data is not None and self._rules is not None:
+            self._rebuild(self._data, self._rules)
+        self.reload_detail()
+
     def reload_detail(self):
         """Build the selected device's detail again (its rule was reset)."""
         entry = self.list.current

@@ -1585,6 +1585,8 @@ class Dashboard:
         if key == self.volume_style:
             return
         self.volume_style = key
+        # rebuilt below; the watcher's restyle() for this save is the same
+        self._restyled_for = key
         prefs.save(volume_style=key)
         for k, check in self._style_checks.items():
             check.set_opacity(1.0 if k == key else 0.0)
@@ -1594,6 +1596,19 @@ class Dashboard:
             f'Volume slider style: {self._style_title()}')
         # The new name is a different width, so the header's breakpoint moves.
         self.window.fit_header()
+        self._rebuild_sliders()
+
+    def restyle(self, style):
+        """Preferences changed the slider style, or turned meters on/off."""
+        if style != self.volume_style:
+            self._set_style(style)
+            self._restyled_for = None       # no watcher call follows this
+        elif getattr(self, '_restyled_for', None) == style:
+            self._restyled_for = None       # _set_style already rebuilt
+        else:
+            self._rebuild_sliders()
+
+    def _rebuild_sliders(self):
         for tab in (self.playback, self.recording, self.outputs, self.inputs):
             tab.clear()
         for ep in (self.out_card, self.in_card, self.fav):
