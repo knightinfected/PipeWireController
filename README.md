@@ -53,7 +53,12 @@ the server clock.
 
 </details>
 
-## What's new in v0.6.2
+## What's new in v0.6.3
+
+- **Search the whole app**: the search button at the top of every page, or **Ctrl+K**, finds any page, setting, device, app or thing you've set up, and takes you straight to it.
+- **Bug fix**: the line under the sidebar's header now meets the one under the page's header, on every theme ([#32](https://github.com/knightinfected/PipeWireController/issues/32)).
+
+### v0.6.2
 
 - **Equalizer, redesigned**: drag the curve and hear it live, then compare it with the saved one at matched loudness.
 - **Devices, redesigned**: every device in one list; pick one to see what plays into it, where it goes, and its settings.
@@ -143,7 +148,7 @@ Download the `.deb` from the [latest release](https://github.com/knightinfected/
 then, in the folder you saved it to:
 
 ```bash
-sudo apt install ./pipewire-control-center_0.6.2_all.deb
+sudo apt install ./pipewire-control-center_0.6.3_all.deb
 ```
 
 The `./` matters. It doesn't update itself, so install the next release's
@@ -166,13 +171,13 @@ On Fedora, take the file ending in your release, `fc43`, `fc44` or `fc45`
 (`rpm -E %fedora` prints which):
 
 ```bash
-sudo dnf install ./pipewire-control-center-0.6.2-1.fc44.noarch.rpm
+sudo dnf install ./pipewire-control-center-0.6.3-1.fc44.noarch.rpm
 ```
 
 On openSUSE Tumbleweed:
 
 ```bash
-sudo zypper install --allow-unsigned-rpm ./pipewire-control-center-0.6.2-1.tumbleweed.noarch.rpm
+sudo zypper install --allow-unsigned-rpm ./pipewire-control-center-0.6.3-1.tumbleweed.noarch.rpm
 ```
 
 The packages aren't signed, which is why zypper needs `--allow-unsigned-rpm`.

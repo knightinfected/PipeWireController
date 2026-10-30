@@ -38,6 +38,7 @@ order of its sidebar.
 | stop the pop or cut-off at the start of sounds | **Session & Bluetooth** → never suspend devices |
 | work out why the audio crackles | **Monitor**: dropouts, DSP load and a live `pw-top` |
 | start it with my computer, quietly in the background | **Preferences** → *Startup* |
+| find a setting, device or page without knowing where it lives | the search button at the top, or **Ctrl+K** |
 | put every setting back the way it was | **Tools** → *Reset all overrides* |
 
 ### Going further
@@ -306,6 +307,12 @@ folders, and *Reset all overrides*.
 
 ### All over the app
 
+- **Search** (the button at the top of every page, or Ctrl+K): type a few
+  letters to find a page, a setting, a device, an app that is playing, or
+  anything you've set up, such as a filter chain, an equalizer or an app
+  rule. Everyday words work ("eq", "bt", "crackling"), and so do config keys.
+  Pick a result and its page opens with that row in view and lit for a
+  moment. With nothing typed it lists your recent picks and every page.
 - **Live level meters** on every volume control. They're dB-mapped with a
   peak marker, and cost almost nothing: PipeWire's own resampler reports the
   peaks, so a meter reads about 100 bytes a second. They run only while their
