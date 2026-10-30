@@ -434,6 +434,7 @@ class EnhancePage:
         self.detail = None
         self._draft = None              # the detail of a new one, if open
         self._want = {'eq': None, 'mic': None}
+        self._reveal = False            # show the wanted one's detail
         self._data = None
         self._live = None
         self._poll = None
@@ -647,7 +648,8 @@ class EnhancePage:
                         if n.is_default}
             pick = next((e for e in entries if e.enh is not None
                          and e.enh.node_name in defaults), entries[0])
-        self.select(pick, show=False, ask=False)
+        show, self._reveal = self._reveal, False
+        self.select(pick, show=show, ask=False)
 
     def detail_changed(self, detail):
         """The detail's edit, name or settings changed: its row follows."""
@@ -758,6 +760,21 @@ class EnhancePage:
                 on_cancel()
         dlg.connect('response', resp)
         dlg.present(self.window)
+
+    def reveal(self, kind, key):
+        """Search picked an equalizer (`kind` 'eq') or a microphone ('mic'):
+        open it, through the same question as any other way of leaving an
+        edited one.  Before the list has it, it is the one to select."""
+        self._want[kind] = key
+        if kind != self.tab:
+            self._reveal = True
+            self.switch_tab(kind)       # asks first if an edit is unsaved
+            return
+        entry = self.list.entry(key)
+        if entry is not None:
+            self.select(entry)
+        else:
+            self._reveal = True         # selected when the list has it
 
     def switch_tab(self, tab):
         def go():

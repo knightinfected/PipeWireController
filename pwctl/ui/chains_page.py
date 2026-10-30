@@ -13,7 +13,8 @@ from gi.repository import Adw, Gtk  # noqa: E402
 from ..backend import chains, enhance, headroom, hrir, pw, system
 from ..backend.templates import TEMPLATES
 from .widgets import (async_call, confirm, esc, group, icon_button, page_scroller,
-                      pick_file, pill, state_style, text_viewer_dialog)
+                      pick_file, pill, state_style, text_viewer_dialog,
+                      unsearched)
 
 AUDIO_FILTER = [('Impulse responses', ['*.wav', '*.flac', '*.ogg', '*.w64',
                                        '*.aiff', '*.sofa'])]
@@ -40,6 +41,8 @@ class ChainsPage:
                                 'Each chain runs as its own process — '
                                 'toggling or editing one never interrupts '
                                 'the rest of your audio.')
+        # Its rows are found from their store, even before this page loads.
+        unsearched(self.list_group)
         actions = group('')
         new_row = Adw.ActionRow(
             title='New filter chain',

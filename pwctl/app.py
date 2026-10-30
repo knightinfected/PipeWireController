@@ -22,6 +22,7 @@ from .ui.effects_page import EffectsPage
 from .ui.enhance_page import EnhancePage
 from .ui.paths_page import PathsPage
 from .ui.graph_page import GraphPage
+from .ui.search import AppSearch
 from .ui.hrir_page import HrirPage
 from .ui.monitor_page import MonitorPage
 from .ui.policy_page import PolicyPage
@@ -102,15 +103,17 @@ HEADER_FADE_MAX_JUMP = 64
 class _HeaderFit(Gtk.Widget):
     """The content header bar, holding only what fits in it.
 
-    It decides as it is laid out, in two steps: narrower than `need`, the
-    labelled controls go to icons; in a narrow window (the sidebar
-    collapsed), narrower than `floor` (the header with icons only), the
-    Overview/Mixer switcher leaves it too, for a bar along the bottom of the
-    Dashboard.  Only then is the header allocated, so the first frame at a
-    new width is already right.  An `AdwBreakpointBin` was tried first and
+    It decides as it is laid out, in three steps: narrower than `need`, the
+    labelled controls go to icons.  In a narrow window (the sidebar
+    collapsed), narrower than `icons` (the header with icons only), the
+    slider-style button leaves it (Preferences → General has the same
+    choice), and narrower than `floor` the Overview/Mixer switcher leaves
+    too, for a bar along the bottom of the Dashboard.  Only then is the
+    header allocated, so the first frame at a new width is already right.  An `AdwBreakpointBin` was tried first and
     laid the header out one frame late, which painted the very overlap this
     prevents once at every crossing (measured on the real window).  The
-    window works out `need`, `floor`, `least` and `height` in `fit_header`.
+    window works out `need`, `icons`, `floor`, `least` and `height` in
+    `fit_header`.
 
     The change itself is a crossfade.  The layout still switches at once, so
     nothing ever overlaps; only the picture eases from the header as it was
@@ -119,21 +122,25 @@ class _HeaderFit(Gtk.Widget):
     with, not a second rendering.
     """
 
-    def __init__(self, child, set_compact, set_tight, loose):
+    def __init__(self, child, set_compact, set_snug, set_tight, loose):
         super().__init__()
         self._child = child
         child.set_parent(self)
         self._set_compact = set_compact
+        self._set_snug = set_snug
         self._set_tight = set_tight
         # () -> bool: the sidebar is collapsed.  Only then may the switcher
         # go.  Beside the sidebar the header is narrow only for a few frames
         # of its slide, and the switcher would pop out and back.
         self._loose = loose
         self.compact = False
+        self.snug = False
         self.tight = False
         self.need = 0        # narrower than this, the labels go
-        self.floor = 0       # the header's minimum width with icons only;
-        #                      narrower than this, the switcher goes
+        self.icons = 0       # the header's minimum width with icons only;
+        #                      narrower than this, the style button goes
+        self.floor = 0       # ...and without the style button; narrower
+        #                      than this, the switcher goes
         self.least = 0       # ...and its minimum once the switcher has gone
         self.height = 0      # the taller of the layouts
         self._last = None    # the header as it was last drawn: its node,
@@ -159,7 +166,7 @@ class _HeaderFit(Gtk.Widget):
             # is the one that counts.  Beside the sidebar that is the icons'
             # minimum, which is also what decides whether the sidebar's
             # slide has room for the page (`Window._squeezed`).
-            least = self.least if self._loose() else self.floor
+            least = self.least if self._loose() else self.icons
             low = min(low, least) if least else low
         else:
             low, nat = max(low, self.height), max(nat, self.height)
@@ -167,11 +174,16 @@ class _HeaderFit(Gtk.Widget):
 
     def do_size_allocate(self, width, height, baseline):
         compact = width < self.need
-        tight = width < self.floor and self._loose()
-        if (compact, tight) != (self.compact, self.tight):
+        loose = self._loose()
+        snug = width < self.icons and loose
+        tight = width < self.floor and loose
+        if (compact, snug, tight) != (self.compact, self.snug, self.tight):
             if compact != self.compact:
                 self.compact = compact
                 self._set_compact(compact)
+            if snug != self.snug:
+                self.snug = snug
+                self._set_snug(snug)
             if tight != self.tight:
                 self.tight = tight
                 self._set_tight(tight)
@@ -438,9 +450,10 @@ class Window(Adw.ApplicationWindow):
         # The widths are measured, never constants (see `fit_header`), so
         # they hold for any font.
         self._header_fit = _HeaderFit(content_header, self._set_header_compact,
+                                      self._set_header_snug,
                                       self._set_header_tight, self._is_narrow)
-        self._switcher_width = None    # see fit_header
-        self._switcher_share = 0
+        self._shares_for = None        # see fit_header
+        self._style_share = self._switcher_share = 0
         content_view = Adw.ToolbarView()
         content_view.add_top_bar(self._header_fit)
         content_view.add_top_bar(self.banner)
@@ -498,6 +511,17 @@ class Window(Adw.ApplicationWindow):
         self._sync_sidebar_tip()
         content_header.pack_start(self.sidebar_button)
 
+        # Search the whole app: pages, settings, devices, apps and what you
+        # have made.  Right after the sidebar button, so it is in the same
+        # place on every page; icon only, the header has no room for a
+        # label at 360.
+        self.search_button = Gtk.Button(icon_name='system-search-symbolic',
+                                        tooltip_text='Search (Ctrl+K)',
+                                        action_name='win.search')
+        self.search_button.update_property([Gtk.AccessibleProperty.LABEL],
+                                           ['Search'])
+        content_header.pack_start(self.search_button)
+
         # pages
         self.pages = {
             'dashboard': Dashboard(self),
@@ -519,6 +543,13 @@ class Window(Adw.ApplicationWindow):
         }
         for name, page in self.pages.items():
             self.stack.add_named(page.widget, name)
+
+        # Search: the header button and Ctrl+K (the accelerator is the
+        # application's, set in App.do_startup).
+        self.app_search = AppSearch(self, PAGES)
+        search = Gio.SimpleAction.new('search', None)
+        search.connect('activate', lambda *_a: self.app_search.open())
+        self.add_action(search)
 
         # Two Dashboard-owned controls that live in the window's header bar.
         # The Overview/Mixer switcher is packed at the start, where the mockup
@@ -639,6 +670,7 @@ class Window(Adw.ApplicationWindow):
         self._presets_popover = Gtk.Popover()
         self._presets_popover.connect('show', self._fill_presets_popover)
         btn.set_popover(self._presets_popover)
+        self.presets_button = btn
         return btn
 
     def _fill_presets_popover(self, _pop):
@@ -966,6 +998,17 @@ class Window(Adw.ApplicationWindow):
         if dash is not None:
             dash.set_header_compact(compact)
 
+    def _set_header_snug(self, snug):
+        """Take the slider-style button out of the header, or put it back.
+
+        In a narrow window it is the first thing to go: Preferences →
+        General has the same choice, and it buys the search button its
+        room without the switcher leaving any sooner than it did.
+        """
+        dash = getattr(self, 'pages', {}).get('dashboard')
+        if dash is not None:
+            dash.set_header_snug(snug)
+
     def _set_header_tight(self, tight):
         """Move the Overview/Mixer switcher out of the header, or back.
 
@@ -979,17 +1022,19 @@ class Window(Adw.ApplicationWindow):
             dash.set_header_tight(tight)
 
     def fit_header(self, *_a):
-        """Work out the widths below which the labels, then the switcher, go.
+        """Work out the widths below which the labels, the style button,
+        then the switcher go.
 
         Measured with the labels showing: the header bar's own minimum, plus
         what each labelled control wants beyond its minimum.  The title may
         still shrink to its minimum, but the controls may not shrink below
         their natural width, because the header bar then slides the title
-        over the switcher instead of squeezing them.  The switcher goes
-        below the minimum with icons only (`floor`), and `least` is the
-        minimum without it.  The widths depend on the font, the page title
-        and the current slider style's name, so they are measured again when
-        any of those changes.
+        over the switcher instead of squeezing them.  The style button goes
+        below the minimum with icons only (`icons`), the switcher below the
+        minimum without the style button (`floor`), and `least` is the
+        minimum without either.  The widths depend on the font, the page
+        title and the current slider style's name, so they are measured
+        again when any of those changes.
         """
         dash = getattr(self, 'pages', {}).get('dashboard')
         if dash is None or dash.style_button.get_parent() is None:
@@ -1011,23 +1056,32 @@ class Window(Adw.ApplicationWindow):
         # and C19 has to stay level with the sidebar's line.
         height = self.content_header.measure(vertical, -1)[0]
         self._set_header_compact(True)
-        floor = self.content_header.measure(horizontal, -1)[0]
+        style = dash.style_button
+        style.set_visible(True)
+        icons = self.content_header.measure(horizontal, -1)[0]
         height = max(height, self.content_header.measure(vertical, -1)[0])
-        # What the switcher takes up in the header, its spacing included.
-        # Measured by taking it out, which costs it the keyboard focus, so
-        # only when its own width has changed (a font or theme change) and
-        # never on a page change: the switcher's own click changes the page.
-        # Taking it out can only make the header lower, so `height` stands.
-        width = switcher.measure(horizontal, -1)[0]
-        if width != self._switcher_width:
+        # What the style button, then the switcher, take up in the header,
+        # spacing included.  Measured by taking them out, which costs the
+        # one taken out the keyboard focus, so only when their own widths
+        # have changed (a font or theme change) and never on a page change:
+        # the switcher's own click changes the page.  Taking them out can
+        # only make the header lower, so `height` stands.
+        widths = (switcher.measure(horizontal, -1)[0],
+                  style.measure(horizontal, -1)[0])
+        if widths != self._shares_for:
+            style.set_visible(False)
+            floor = self.content_header.measure(horizontal, -1)[0]
             switcher.set_visible(False)
+            self._style_share = icons - floor
             self._switcher_share = (
                 floor - self.content_header.measure(horizontal, -1)[0])
-            self._switcher_width = width
+            self._shares_for = widths
+        style.set_visible(not fit.snug)
         switcher.set_visible(not fit.tight)
         self._set_header_compact(fit.compact)
-        fit.need, fit.floor, fit.height = need, floor, height
-        fit.least = floor - self._switcher_share
+        fit.need, fit.icons, fit.height = need, icons, height
+        fit.floor = icons - self._style_share
+        fit.least = fit.floor - self._switcher_share
         fit.queue_resize()
 
     def _confirm_unsaved(self, *_a):
@@ -1195,6 +1249,9 @@ class App(Adw.Application):
             self.add_action(action)
             if accels:
                 self.set_accels_for_action(f'app.{name}', accels)
+        # The window's search (Window.app_search).  Ctrl+K, not Ctrl+F:
+        # pages with a search of their own (the Patchbay) keep Ctrl+F.
+        self.set_accels_for_action('win.search', ['<Control>k'])
         # The two things that need the app running: presets switching and
         # notifications.  On the application, so they run with no window.
         self.watchers = Watchers(self)

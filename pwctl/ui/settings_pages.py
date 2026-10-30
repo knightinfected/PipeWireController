@@ -10,7 +10,7 @@ from gi.repository import Adw, Gtk  # noqa: E402
 
 from ..backend import bluetooth, config, pw, schema
 from .widgets import (async_call, group, icon_button, page_scroller,
-                      prompt_number)
+                      prompt_number, searched, unsearched)
 
 # both native and pulse clients get the same stream defaults
 STREAM_CONFS = ('client.conf', 'pipewire-pulse.conf')
@@ -28,6 +28,7 @@ class SettingRow:
         self.window = window
         self.updating = False
         self.row = self._build()
+        searched(self.row, (setting.key,), 4.0 if setting.advanced else 8.0)
         self.reset_btn = icon_button(
             'edit-undo-symbolic', 'Reset to default', self._on_reset)
         self.row.add_suffix(self.reset_btn)
@@ -405,6 +406,7 @@ class WirePlumberPage:
             row = Adw.SwitchRow(title=title, subtitle=subtitle)
             row.set_active(bool(state.get(key)))
             row.connect('notify::active', self._toggled, key)
+            searched(row, boost=8.0)
             self.rows[key] = row
             in_power = key in ('disable_suspend', 'alsa_headroom')
             (power if in_power else bt).add(row)
@@ -415,6 +417,8 @@ class WirePlumberPage:
             'Connected Bluetooth devices',
             'Profile switches instantly through WirePlumber; the codec list '
             'shows what the device supports in its current profile.')
+        searched(self.bt_devs, ('codec', 'ldac', 'aac', 'aptx', 'profile',
+                                'a2dp', 'hfp'))
         self._bt_rows = []
         self.widget = page_scroller(power, bt, self.bt_devs)
         self.widget.connect('map', lambda *_: self.refresh_bt())
@@ -438,10 +442,10 @@ class WirePlumberPage:
             self.bt_devs.remove(row)
         self._bt_rows = []
         if not devices:
-            row = Adw.ActionRow(
+            row = unsearched(Adw.ActionRow(
                 title='No Bluetooth audio devices connected',
                 subtitle='Pair and connect a device; it appears here with '
-                         'its profile and codec options.')
+                         'its profile and codec options.'))
             self.bt_devs.add(row)
             self._bt_rows.append(row)
             return
@@ -449,10 +453,11 @@ class WirePlumberPage:
             self._bt_rows.append(self._bt_device_rows(dev))
 
     def _bt_device_rows(self, dev):
-        exp = Adw.ExpanderRow(
+        # The device itself is found from the graph (search's Devices).
+        exp = unsearched(Adw.ExpanderRow(
             title=dev.description,
             subtitle=dev.name + (f' · battery {dev.battery}' if dev.battery
-                                 else ''))
+                                 else '')))
         exp.set_expanded(True)
         exp.add_prefix(Gtk.Image.new_from_icon_name(
             'pwctl-session-symbolic'))

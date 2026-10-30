@@ -18,7 +18,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from ..backend import backends, chains, enhance, plugins, pw
 from .widgets import async_call, combine_devices, confirm, group, \
-    icon_button, page_scroller, pill, state_style
+    icon_button, page_scroller, pill, state_style, unsearched
 
 _CACHE = {'ladspa': None, 'lv2': None}
 
@@ -62,6 +62,8 @@ class EffectsPage:
         head.add(self.unsupported_row)
 
         self.racks = group('Effect inserts')
+        # Its rows are found from their store, even before this page loads.
+        unsearched(self.racks)
         self._rack_rows = []
         self.widget = page_scroller(head, self.racks)
         self.widget.connect('map', lambda *_: self.refresh())

@@ -11,7 +11,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from ..backend import pw, virtual
 from ..backend.surround import LAYOUTS as _SPEAKER_LAYOUTS
 from .widgets import async_call, confirm, esc, group, icon_button, page_scroller, \
-    pick_file, pill, state_style
+    pick_file, pill, state_style, unsearched
 
 POSITION_NAMES = virtual.POSITION_NAMES
 
@@ -79,6 +79,8 @@ class VirtualPage:
         head.add(imp_row)
 
         self.listing = group('Configured devices')
+        # Its rows are found from their store, even before this page loads.
+        unsearched(self.listing)
         self.widget = page_scroller(head, self.listing)
         self._rows = []
         self.widget.connect('map', lambda *_: self.refresh())

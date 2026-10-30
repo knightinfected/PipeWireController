@@ -11,7 +11,8 @@ gi.require_version('Adw', '1')
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from ..backend import prefs, stats, system
-from .widgets import async_call, group, page_scroller, pill, state_style
+from .widgets import (async_call, group, page_scroller, pill, searched,
+                      state_style)
 
 UNIT_LABELS = {'pipewire.service': 'PipeWire',
                'wireplumber.service': 'WirePlumber',
@@ -202,6 +203,10 @@ class MonitorPage:
         self.rate_row.set_selected(POLL_CHOICES.index(self._poll))
         # connected after set_selected, so restoring the pref can't re-enter
         self.rate_row.connect('notify::selected', self._on_rate)
+        # How often this page samples, not the audio's sample rate: found
+        # by those words, but below the real sample rate settings.
+        searched(self.rate_row, ('refresh', 'poll', 'interval', 'update'),
+                 boost=-30.0)
         health.add(self.rate_row)
         self._apply_history()
 

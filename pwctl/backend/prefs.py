@@ -94,6 +94,10 @@ PREFS: list[Pref] = [
     # 'cards': ['out:<node.name>'|'in:<node.name>']}.  Names, as Favourites
     # are, so a fold survives a reboot and the device coming back.
     Pref('devices_folded', {}, 'state'),
+    # Search (ui/search.py): the keys of the results last opened, newest
+    # first, shown before anything is typed.  Keys, not titles, so one a
+    # later run no longer has is just left out.
+    Pref('search_recent', [], 'state'),
 
     # -- what the user built -------------------------------------------------
     Pref('device_presets', {}, 'data'),  # node.name -> preset (backend/presets)

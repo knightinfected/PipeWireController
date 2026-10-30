@@ -15,7 +15,7 @@ from .. import __version__
 from ..backend import config, system
 from ..backend.schema import QUANTA, RATES
 from .widgets import (async_call, confirm, group, icon_button, page_scroller,
-                      text_viewer_dialog)
+                      searched, text_viewer_dialog, unsearched)
 
 
 class ToolsPage:
@@ -66,8 +66,10 @@ class ToolsPage:
         self.calc_result.add_suffix(self.calc_label)
         self.calc_rate.connect('notify::selected', self._recalc)
         self.calc_quantum.connect('notify::selected', self._recalc)
+        # The calculator is found by its name; its inputs are not settings.
+        searched(calc, ('latency', 'milliseconds', 'ms'))
         for r in (self.calc_rate, self.calc_quantum, self.calc_result):
-            calc.add(r)
+            calc.add(unsearched(r))
         self._recalc()
 
         # maintenance

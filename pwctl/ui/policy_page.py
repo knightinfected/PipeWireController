@@ -17,7 +17,7 @@ from gi.repository import Adw, Gtk  # noqa: E402
 
 from ..backend import pw, rules
 from .widgets import (async_call, esc, group, icon_button, page_scroller,
-                      pill)
+                      pill, searched, unsearched)
 
 MATCH_KEYS = [
     ('application.name', 'Application name'),
@@ -86,6 +86,8 @@ class PolicyPage:
             'device to make it win automatic selection; ★ on the Dashboard '
             'still overrides manually.')
         self._prio_rows = []
+        searched(self.priorities, ('priority', 'default device',
+                                   'automatic'))
 
         self.clock = group(
             'Graph clock source',
@@ -117,7 +119,7 @@ class PolicyPage:
             self.apps.remove(row)
         self._app_rows = []
         for i, rule in enumerate(data['apps']):
-            row = self._rule_row(i, rule, data['apps'])
+            row = unsearched(self._rule_row(i, rule, data['apps']))
             self.apps.add(row)
             self._app_rows.append(row)
 
@@ -127,7 +129,7 @@ class PolicyPage:
         hw = [n for n in nodes if not n.is_virtual]
         for node in sorted(hw, key=lambda n: (not n.is_sink,
                                               n.description.lower())):
-            row = self._priority_row(node, data)
+            row = unsearched(self._priority_row(node, data))
             self.priorities.add(row)
             self._prio_rows.append(row)
 

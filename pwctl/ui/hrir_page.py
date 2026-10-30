@@ -12,7 +12,7 @@ from gi.repository import Adw, Gtk  # noqa: E402
 
 from ..backend import hrir
 from .widgets import (async_call, confirm, esc, group, icon_button, page_scroller,
-                      pick_files, pick_folder, pill)
+                      pick_files, pick_folder, pill, unsearched)
 
 KIND_STYLE = {'hesuvi': 'success', 'true-stereo': 'warning',
               'stereo': 'dim', 'mono': 'dim', 'sofa': 'warning'}
@@ -60,6 +60,8 @@ class HrirPage:
         actions.add(demo_row)
 
         self.files_group = group('Files', '')
+        # Its rows are found from their store, even before this page loads.
+        unsearched(self.files_group)
         self._rows = []
         self.widget = page_scroller(actions, self.files_group)
         self.widget.connect('map', lambda *_: self.refresh())

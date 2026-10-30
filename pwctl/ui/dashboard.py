@@ -1379,6 +1379,11 @@ class Dashboard:
             toggle.set_tooltip(label if compact else '')
         self._style_content.set_label('' if compact else self._style_title())
 
+    def set_header_snug(self, snug: bool):
+        """The style button in the header, or not (the window's call, when
+        its header is too narrow for it; Preferences has the same choice)."""
+        self.style_button.set_visible(not snug)
+
     def set_header_tight(self, tight: bool):
         """The switcher in the header, or in the bar along the bottom.
 
@@ -1797,6 +1802,16 @@ class Dashboard:
                                 vexpand=True)
         sw.set_child(cards)
         return sw
+
+    def reveal_stream(self, playback, stream_id):
+        """Search picked an app: the Mixer's apps list for its direction,
+        nothing filtered out.  Returns how to find its row, which may only
+        be drawn on the next refresh."""
+        self._goto_mixer('output' if playback else 'input', 'apps')
+        if self.search.get_text():
+            self.search.set_text('')
+        tab = self.playback if playback else self.recording
+        return lambda: tab.rows.get(stream_id)
 
     def _goto_mixer(self, direction, kind):
         self.direction, self.kind = direction, kind

@@ -35,6 +35,28 @@ def esc(text) -> str:
     return GLib.markup_escape_text(str(text)) if text else ''
 
 
+def unsearched(*widgets):
+    """Leave these widgets, and everything in them, out of the app's search
+    (`ui/search.py`).
+
+    For rows that are one item of a list search reads from its own source
+    (a chain, a virtual device, an app rule: found even before their page
+    has loaded), and for controls that mean nothing away from their page
+    (a calculator's inputs).
+    """
+    for w in widgets:
+        w.pwctl_search = False
+    return widgets[0] if len(widgets) == 1 else widgets
+
+
+def searched(widget, keywords=(), boost=0.0):
+    """Extra words search finds `widget` by (never shown), and a nudge up or
+    down its results (`ui/search.py`)."""
+    widget.pwctl_search_keywords = tuple(keywords)
+    widget.pwctl_search_boost = boost
+    return widget
+
+
 def reduce_motion(widget) -> bool:
     """Whether the user asked for less motion on screen.
 

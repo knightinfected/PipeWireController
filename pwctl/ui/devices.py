@@ -85,6 +85,7 @@ class DevicesPage:
         self.dragging = None            # the stream an app chip is carrying
         self._held_rebuild = False      # a rebuild that waited for the drop
         self._want = None               # (ident, key) of the selection
+        self._reveal = False            # show the wanted one's detail
         self.detail = None
         self._codecs = {}               # (card name, profile) -> codecs
 
@@ -369,7 +370,8 @@ class DevicesPage:
                          and e.sink and e.node.is_default), None) \
                 or next((e for e in entries if isinstance(e, NodeEntry)),
                         entries[0])
-        self.select(pick, show=False, ctx=ctx)
+        show, self._reveal = self._reveal, False
+        self.select(pick, show=show, ctx=ctx)
 
     def _near(self, entries, ident):
         """After a profile switch: the same card, the same direction first."""
@@ -421,6 +423,22 @@ class DevicesPage:
             self.list.search.set_text('')
             self.list.dirs.set_active_name('all')
         self.select(entry)
+
+    def reveal_node(self, is_sink, name):
+        """Search picked a device: select it now, or as soon as the list
+        has it (the page reads the graph when it maps).  By direction and
+        `node.name`, which outlive the PipeWire id."""
+        ident = ('node', is_sink, name)
+        entry = next((e for e in self._entries.values()
+                      if getattr(e, 'ident', None) == ident), None)
+        if entry is not None:
+            self.select_node(entry.node)
+            return
+        # Not listed yet: nothing filtered may hide it when it is.
+        self.list.search.set_text('')
+        self.list.dirs.set_active_name('all')
+        self._want = (ident, None)
+        self._reveal = True
 
     def restyle(self, style):
         """Preferences changed the slider style, or turned meters on/off:
