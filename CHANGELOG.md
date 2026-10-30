@@ -23,6 +23,40 @@ and commit log.
 
 ---
 
+## Unreleased
+
+**Search the whole app**
+
+A search button now sits at the top of every page, right after the sidebar
+button, and **Ctrl+K** opens it from anywhere.
+
+- **Find anything by a few letters**: a page, a setting, a device, an app
+  that is playing or recording, Preferences, and everything you have set
+  up — filter chains, virtual devices, equalizers, Signal Paths strips, HRIR
+  files, app rules and device presets. Things you made are found even before
+  you have opened their page.
+- **Everyday words work.** "eq", "bt", "mic", "latency" or "crackling" find
+  what they mean, a setting is found by words from its description, and
+  power users can type a config key such as `default.clock.quantum`. Words
+  like "how", "the" or "mode" never stop a match.
+- **Land on the thing itself.** Pick a result and its page opens with the
+  row brought into view and lit for a moment, a folded row unfolded, a
+  device selected on Devices, an equalizer opened, an app's row shown on the
+  Mixer. A switch or menu row also gets the keyboard focus, so Space or
+  Enter acts on it at once; a number or text row never does, so a stray key
+  can't change a saved value.
+- **An advanced setting that is hidden** is still found, marked
+  *Advanced*, and a button shows advanced settings and takes you to it.
+- **Keyboard first**: the arrows move, Enter opens, Esc closes. With
+  nothing typed it lists your recent picks and every page, so it doubles as
+  a quick way to change page, also in a narrow window where the sidebar is
+  hidden.
+
+In a narrow window the slider-style button now leaves the header first to
+make room for search (the same choice is in Preferences → General). The
+Overview/Mixer switcher still moves to the bottom bar at the same width as
+before.
+
 ## [v0.6.2](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.2) — 2026-10-29
 **The Equalizer, Devices and Patchbay redesigned, Preferences with start at login, a balance and a volume for every channel, RPM packages for Fedora and openSUSE, and 17 bug fixes**
 
