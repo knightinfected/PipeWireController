@@ -1,8 +1,8 @@
 <h1 align="center">PipeWire Controller</h1>
 
 <p align="center">
-  <b>The audio control center for PipeWire.</b><br>
-  Mix, route, process and tune all of your audio in one native app, without hand-editing a config file.
+  <b>The most comprehensive audio control center for Linux, built on PipeWire.</b><br>
+  Mix, route, process and tune all of your audio in one app, without hand-editing a config file.
 </p>
 
 <p align="center">
