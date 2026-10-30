@@ -280,7 +280,7 @@ listed above.
 <a href="https://paypal.me/hmzknight"><img alt="Donate via PayPal" src="https://img.shields.io/badge/PayPal-support%20this%20project-00457C?logo=paypal&logoColor=white"></a>
 
 Right now PipeWire Controller is a one-person project: I design it, build it,
-test it and answer every issue myself. If it has earned a place on your
+test it, package it and answer every issue myself. If it has earned a place on your
 desktop, sponsoring it or a one-off donation means more of my time goes into
 it. Bug reports, ideas and feedback count just as much. The app is GPL-3.0 and
 stays that way: nothing is ever locked behind a donation.
@@ -323,4 +323,4 @@ Want to help with code? Read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
 <sub>Licensed [GPL-3.0-or-later](LICENSE). The icons in `pwctl/icons/` are from the GNOME
 [icon-development-kit](https://gitlab.gnome.org/Teams/Design/icon-development-kit), under CC0 1.0.
-Thanks to Wim Taymans, creator of PipeWire, for reviewing the Server page.</sub>
+Thanks to Wim Taymans, creator of PipeWire, for reviewing the app.</sub>
