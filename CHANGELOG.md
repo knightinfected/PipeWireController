@@ -57,6 +57,15 @@ make room for search (the same choice is in Preferences → General). The
 Overview/Mixer switcher still moves to the bottom bar at the same width as
 before.
 
+**Bug: the line under the sidebar's header didn't meet the one under the page's**
+
+Since v0.6.0 the line under the main header sat 3 pixels below the line
+under the sidebar's header on the default theme, and further off with a
+custom GTK theme or larger text. The two headers are now built the same
+way and share one height, so the lines meet whatever the theme or text
+size. The sidebar's app name now sits level with the page title. Reported
+in [#32](https://github.com/knightinfected/PipeWireController/issues/32).
+
 ## [v0.6.2](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.2) — 2026-10-29
 **The Equalizer, Devices and Patchbay redesigned, Preferences with start at login, a balance and a volume for every channel, RPM packages for Fedora and openSUSE, and 17 bug fixes**
 
