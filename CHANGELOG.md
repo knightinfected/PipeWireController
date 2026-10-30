@@ -23,7 +23,8 @@ and commit log.
 
 ---
 
-## Unreleased
+## [v0.6.3](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.3) — 2026-10-30
+**Search the whole app with Ctrl+K, and the header lines fixed on every theme**
 
 **Search the whole app**
 

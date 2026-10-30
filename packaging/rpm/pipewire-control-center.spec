@@ -24,7 +24,7 @@ Name:           pipewire-control-center
 # Must equal __version__ in pwctl/__init__.py, or be a snapshot of it
 # (0.6.2^git20261105, which sorts above 0.6.2 and below 0.6.3). %%prep
 # refuses anything else.
-Version:        0.6.2
+Version:        0.6.3
 Release:        1%{?dist}
 Summary:        GTK4/libadwaita control center for PipeWire
 
@@ -170,6 +170,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 %{_datadir}/applications/%{appid}.desktop
 
 %changelog
+* Fri Oct 30 2026 knightinfected <hmzmahmood5@gmail.com> - 0.6.3-1
+- New upstream release. See CHANGELOG.md.
+
 * Thu Oct 29 2026 knightinfected <hmzmahmood5@gmail.com> - 0.6.2-1
 - New upstream release. See CHANGELOG.md.
 - First release published as RPM packages, attached to the GitHub release.

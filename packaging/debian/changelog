@@ -1,3 +1,9 @@
+pipewire-control-center (0.6.3) unstable; urgency=medium
+
+  * New upstream release. See CHANGELOG.md.
+
+ -- knightinfected <hmzmahmood5@gmail.com>  Fri, 30 Oct 2026 08:06:14 -0400
+
 pipewire-control-center (0.6.2) unstable; urgency=medium
 
   * New upstream release. See CHANGELOG.md.
