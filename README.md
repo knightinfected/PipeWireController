@@ -12,6 +12,7 @@
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="https://github.com/knightinfected/PipeWireController/discussions">Discussions</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="WORKING-ON.md">Working on</a> ·
   <a href="#support">Support</a>
 </p>
 
