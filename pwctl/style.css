@@ -1024,51 +1024,42 @@ button.path-tpl-btn:hover {
 
 /* -------------------------------------------------- C3 / C14 header bars --
    The sidebar header and the content header are one band of chrome across the
-   top of the window, so their bottom hairlines have to be one line.  Left to
-   themselves they are not: measured 46px and 40px, because the sidebar's is
-   sized by the two-line brand block and the content's by the view switcher —
-   a 6px step exactly where the eye is most likely to follow a horizontal.
-   One declared height for both is the fix, and it has to be a real height
-   rather than a nudge to one side, or the next widget added to either header
-   moves the line again.
+   top of the window, so their bottom hairlines have to be one line, under any
+   theme.  The line is drawn under each side's top-bar area (AdwToolbarView's
+   RAISED_BORDER), not under the header bar itself.
 
-   The padding is deliberately lopsided.  Centred content in a 62px bar leaves
-   14px above and below; the switcher then floats, and the line reads as
-   unrelated to it.  Sitting the content low keeps the switcher tight to its
-   line — which is what makes the pairing read — and spends the rest of the
-   height as air under the window edge, where the app needs it.
+   **Never balance the two sides with different numbers.**  v0.6.0 to v0.6.2
+   did (16px on one side, 19px on the other), tuned on a desktop whose own
+   gtk.css had removed libadwaita's 3px under a stack of top bars.  On stock
+   Adwaita that left the content's line 3px below the sidebar's, and a theme
+   that pads header bars its own way (Fluent, issue #32) moved it again.  A
+   user's gtk.css outranks this file, as GTK intends, so the only alignment
+   that survives a theme is one where both sides are built alike:
 
-   Three measured facts hold this together, all taken with
-   `compute_bounds(window)` on the real window and checked against a render.
-   None of them is guessable, so change the numbers only with the same
-   measurement in hand — `test_header_align.local.py` asserts the result.
+   1. Both sides stack two top bars (app.py: the sidebar's second one is
+      empty), so libadwaita's `.collapse-spacing` rules, and any theme's,
+      apply to both.
+   2. Every rule here applies to both sides equally.
+   3. A size group in app.py gives both header bars one height, so the brand
+      block and the switcher can grow at larger text without a step.
 
-   1. The two header bars' inner boxes carry **different padding**: 6px top
-      and bottom in the sidebar, 3px in the content pane.  That alone is a 6px
-      step, and it is why the paddings below are not the same on both sides.
-   2. The content pane's top-bar area is a further **3px taller than its
-      header bar**, because it stacks two top bars (the header and the restart
-      banner) and libadwaita wraps them in a `.collapse-spacing` box.  The
-      hairline is drawn at the bottom of *that* box.  The sidebar has one top
-      bar and no such box.
-   3. The inner box is pinned to `min-height: 34px` — the view switcher's own
-      height, and the tallest thing in either header today — so the sidebar's
-      shorter brand block cannot make its header the shorter one.
-
-   Net: sidebar 16 + 46 = 62, content 19 + 40 + 3 = 62.  Both hairlines land
-   on 62, and the switcher keeps the 3px gap to its line that it has now. */
-headerbar.pwctl-header > windowhandle > box {
-    min-height: 34px;
-}
-
-headerbar.pwctl-header.pwctl-sidebar-header > windowhandle {
-    padding-top: 16px;
+   The look on stock Adwaita: the band ends at 62px, the content sits low in
+   it with the switcher 3px above its line, and the rest is air under the
+   window edge.  That is 3px of the stack's top padding, 19 here, the header's
+   own 3 + 34 + 3, and no bottom padding.  `test_header_align.local.py`
+   checks the two lines against hostile stylesheets and larger text. */
+toolbarview.pwctl-band > .top-bar .collapse-spacing {
     padding-bottom: 0;
 }
 
-headerbar.pwctl-header:not(.pwctl-sidebar-header) > windowhandle {
+headerbar.pwctl-header > windowhandle {
     padding-top: 19px;
     padding-bottom: 0;
+}
+
+/* The view switcher's own height, the tallest thing in either header. */
+headerbar.pwctl-header > windowhandle > box {
+    min-height: 34px;
 }
 
 /* The app name in the sidebar header (C4/C5).  AdwWindowTitle's two labels

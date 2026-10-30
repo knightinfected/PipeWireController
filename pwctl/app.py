@@ -402,11 +402,19 @@ class Window(Adw.ApplicationWindow):
         side_header.set_title_widget(app_title)
         side_view.add_top_bar(side_header)
         # C3 and C14 are one line of chrome, so their hairlines must land on
-        # one y.  Both are now drawn by the same libadwaita style rather than
-        # by a hand-written border on one side and a toolbar style on the
-        # other — that pairing is what put them 6px apart (the sidebar header
-        # measured 46, the content header 40).  Equal heights come from
-        # `.pwctl-header` in style.css.
+        # one y, under any theme.  The two sides are therefore built the same
+        # way, so every libadwaita or theme rule applies to both alike:
+        # - The content side has two top bars (its header and the restart
+        #   banner), and libadwaita styles a header in a stack of bars
+        #   differently from a lone one (`.collapse-spacing`).  This empty
+        #   second bar gives the sidebar the same stack.  It has no height.
+        # - Both use the same hairline style, and the same `.pwctl-header`
+        #   padding in style.css.
+        # - `_band` below makes the two header bars one height, so neither
+        #   side's contents (the brand block, the switcher) can make one
+        #   taller than the other at a larger text size.
+        side_view.add_top_bar(Gtk.Box())
+        side_view.add_css_class('pwctl-band')
         side_view.set_top_bar_style(Adw.ToolbarStyle.RAISED_BORDER)
         side_sw = Gtk.ScrolledWindow(
             hscrollbar_policy=Gtk.PolicyType.NEVER)
@@ -457,6 +465,14 @@ class Window(Adw.ApplicationWindow):
         content_view = Adw.ToolbarView()
         content_view.add_top_bar(self._header_fit)
         content_view.add_top_bar(self.banner)
+        content_view.add_css_class('pwctl-band')
+        # One height for the two header bars (see the sidebar's above).  The
+        # content side's member is `_HeaderFit`, not the bar inside it: it
+        # holds the header at the tallest of its layouts (`fit_header`), and
+        # that height has to reach the sidebar too.
+        self._band = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.VERTICAL)
+        self._band.add_widget(side_header)
+        self._band.add_widget(self._header_fit)
         self._page_room = _PageRoom(self.stack, self._is_narrow)
         content_view.set_content(self._page_room)
         # The hairline under the header bar (and under the restart banner when
