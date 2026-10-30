@@ -21,6 +21,9 @@ feature requests. Thanks!
 | Dashboard | EasyEffects and JamesDSP presets, managed from the Dashboard | *Designed* |
 | Dashboard | Event-driven updates instead of polling | *Designed* |
 | Signal Paths | Mic → effects → virtual mic: pick the capture mic per strip ([#29](https://github.com/knightinfected/PipeWireController/issues/29)) | *Built, being finished* |
+| Patchbay | Matrix view: connect many channels at once ([#27](https://github.com/knightinfected/PipeWireController/issues/27)) | *Planned* |
+| Network | Network audio: AirPlay speakers, other PCs, listen on your phone | *Designed* |
+| Session & Bluetooth | WirePlumber session settings done properly: every live setting, no restart | *Designed* |
 | Effects | Plugin knobs: sliders for LADSPA/LV2 controls ([#15](https://github.com/knightinfected/PipeWireController/issues/15)) | *Designed* |
 | Saving | Scenes (switchable setups, auto-switch on device plug-in) and backup/restore | *Designed* |
 | Saving | Snapshot and preset bugs: an app playing on two outputs, settings leaking between devices | *Fixes worked out* |
