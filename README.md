@@ -17,7 +17,9 @@
 
 <p align="center">
   <a href="https://aur.archlinux.org/packages/pipewire-control-center"><img alt="AUR" src="https://img.shields.io/aur/version/pipewire-control-center?logo=archlinux&label=AUR"></a>
-  <a href="https://github.com/knightinfected/PipeWireController/releases/latest"><img alt="Latest .deb" src="https://img.shields.io/github/v/release/knightinfected/PipeWireController?logo=debian&label=.deb"></a>
+  <a href="https://github.com/knightinfected/PipeWireController/releases/latest"><img alt="Debian and Ubuntu: .deb" src="https://img.shields.io/badge/Debian%20%C2%B7%20Ubuntu-.deb-A81D33?logo=debian&logoColor=white"></a>
+  <a href="https://github.com/knightinfected/PipeWireController/releases/latest"><img alt="Fedora: .rpm" src="https://img.shields.io/badge/Fedora-.rpm-51A2DA?logo=fedora&logoColor=white"></a>
+  <a href="https://github.com/knightinfected/PipeWireController/releases/latest"><img alt="openSUSE: .rpm" src="https://img.shields.io/badge/openSUSE-.rpm-73BA25?logo=opensuse&logoColor=white"></a>
   <a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue"></a>
 </p>
 
