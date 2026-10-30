@@ -59,6 +59,7 @@ the server clock.
 - **Preferences**: start at login, start minimized in the background, light or dark.
 - **Narrow and tiled windows**: the window now goes down to 360 pixels wide, and most pages fit it.
 - **Live updates**: Devices and the Equalizer follow changes as they happen, instead of polling.
+- **RPM packages** for Fedora 43 to 45 and openSUSE Tumbleweed, beside the `.deb`.
 - **17 bug fixes.** Every change, and every earlier release, is in the [changelog](CHANGELOG.md).
 
 <details>
@@ -139,7 +140,7 @@ Download the `.deb` from the [latest release](https://github.com/knightinfected/
 then, in the folder you saved it to:
 
 ```bash
-sudo apt install ./pipewire-control-center_0.6.1_all.deb
+sudo apt install ./pipewire-control-center_0.6.2_all.deb
 ```
 
 The `./` matters. It doesn't update itself, so install the next release's
@@ -153,7 +154,32 @@ rm -f ~/.local/bin/pipewire-control-center ~/.local/bin/pwcc \
 </details>
 
 <details>
-<summary><b>Fedora, and running from source anywhere</b></summary>
+<summary><b>Fedora 43+, openSUSE Tumbleweed</b> (.rpm)</summary>
+
+Download the `.rpm` for your system from the [latest release](https://github.com/knightinfected/PipeWireController/releases/latest),
+then run the line for your distro in the folder you saved it to.
+
+On Fedora, take the file ending in your release, `fc43`, `fc44` or `fc45`
+(`rpm -E %fedora` prints which):
+
+```bash
+sudo dnf install ./pipewire-control-center-0.6.2-1.fc44.noarch.rpm
+```
+
+On openSUSE Tumbleweed:
+
+```bash
+sudo zypper install --allow-unsigned-rpm ./pipewire-control-center-0.6.2-1.tumbleweed.noarch.rpm
+```
+
+The packages aren't signed, which is why zypper needs `--allow-unsigned-rpm`.
+They don't update themselves, so install the next release's `.rpm` the same
+way. If you ran it from a checkout before, remove the old menu entry first, as
+in the Debian section above.
+</details>
+
+<details>
+<summary><b>Running from source, on any distro</b></summary>
 
 Install the dependencies:
 

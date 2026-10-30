@@ -23,7 +23,29 @@ and commit log.
 
 ---
 
-## Unreleased
+## [v0.6.2](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.2) — 2026-10-29
+**The Equalizer, Devices and Patchbay redesigned, Preferences with start at login, a balance and a volume for every channel, RPM packages for Fedora and openSUSE, and 17 bug fixes**
+
+**RPM packages for Fedora and openSUSE**
+
+Fedora and openSUSE users no longer need a git checkout. Each release now
+comes with `.rpm` packages attached beside the `.deb`: one for each Fedora
+release (43, 44 and 45) and one for openSUSE Tumbleweed. On Fedora, take the
+file ending in your release (`rpm -E %fedora` prints it):
+
+```bash
+sudo dnf install ./pipewire-control-center-0.6.2-1.fc44.noarch.rpm
+sudo zypper install --allow-unsigned-rpm ./pipewire-control-center-0.6.2-1.tumbleweed.noarch.rpm
+```
+
+They install the same files in the same places as the AUR package and the
+`.deb`, and pull in everything the app needs; on Fedora that includes the LV2
+and SOFA plugin support it packages separately. Removing the package takes it
+all off again, and neither touches your chains or settings in `~/.config`. The
+packages aren't signed, which is why zypper needs `--allow-unsigned-rpm`, and
+there's no repository, so install the next release's `.rpm` the same way.
+Fedora 42 and older lack packages the app needs, so dnf refuses there.
+openSUSE Leap hasn't been tried.
 
 **Preferences, and the app can start with your computer**
 

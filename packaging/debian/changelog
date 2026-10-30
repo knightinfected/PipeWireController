@@ -1,3 +1,11 @@
+pipewire-control-center (0.6.2) unstable; urgency=medium
+
+  * New upstream release. See CHANGELOG.md.
+  * RPM packages for Fedora and openSUSE are now attached to the GitHub
+    release beside this one.
+
+ -- knightinfected <hmzmahmood5@gmail.com>  Thu, 29 Oct 2026 21:19:30 -0400
+
 pipewire-control-center (0.6.1) unstable; urgency=medium
 
   * New upstream release. See CHANGELOG.md.
