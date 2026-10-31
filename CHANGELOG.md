@@ -23,6 +23,28 @@ and commit log.
 
 ---
 
+## Unreleased
+
+**A compact, cleaner top of the window**
+
+The header across the top is redone the way current desktop apps build it.
+Every button is where it was.
+
+- **A quarter shorter.** Both headers are now the standard libadwaita height
+  (46 px on the default theme, down from 62), so every page starts higher.
+  A GTK theme now styles them exactly as it styles every other app, so the
+  extra height reported under the Fluent theme in
+  [#32](https://github.com/knightinfected/PipeWireController/issues/32) is
+  gone too.
+- **The sidebar is one surface** from the top of the window down. The white
+  band that ran across the top of it is gone, and one line runs under both
+  headers, straight across the window.
+- **The app's name and tagline** use the standard title sizes, so they fit
+  the shorter header.
+- **Bug: with the window buttons on the left, the app's name was cut off**
+  (since v0.6.0). The buttons now have the top of the sidebar to
+  themselves, as in a macOS sidebar.
+
 ## [v0.6.3](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.3) — 2026-10-30
 **Search the whole app with Ctrl+K, and the header lines fixed on every theme**
 
