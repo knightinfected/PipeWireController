@@ -388,31 +388,38 @@ class Window(Adw.ApplicationWindow):
         self.listbox.set_header_func(self._sidebar_header)
 
         side_view = Adw.ToolbarView()
-        # The sidebar is a slightly lifted surface, the way the Overview's
-        # cards are, so the two panes read as foreground and background rather
-        # than one flat field.  The tone and the footer hairline are in
+        # The sidebar is one surface from the window's top edge to its
+        # bottom, its header included, a step lifted from the page the way
+        # the Overview's cards are.  The tone, the footer hairline and the
+        # rule that keeps the header-bar colour off its header are in
         # style.css; this is only where the classes go on.
         side_view.add_css_class('pwctl-sidebar')
         side_header = Adw.HeaderBar()
         side_header.add_css_class('pwctl-sidebar-header')
         side_header.add_css_class('pwctl-header')
+        # The app's name and tagline at libadwaita's own title sizes, which
+        # fit its standard header: v0.6.0-0.6.3 set them larger and made the
+        # header 62px to hold them.
         app_title = Adw.WindowTitle(title='PipeWire Controller',
                                     subtitle='audio control center')
         app_title.add_css_class('app-title')
         side_header.set_title_widget(app_title)
+        self._app_title = app_title
         side_view.add_top_bar(side_header)
-        # C3 and C14 are one line of chrome, so their hairlines must land on
-        # one y, under any theme.  The two sides are therefore built the same
-        # way, so every libadwaita or theme rule applies to both alike:
+        # One line runs under both header bars, across the window, under any
+        # theme and text size.  So the two sides are built alike, and every
+        # libadwaita or theme rule applies to both:
         # - The content side has two top bars (its header and the restart
         #   banner), and libadwaita styles a header in a stack of bars
         #   differently from a lone one (`.collapse-spacing`).  This empty
         #   second bar gives the sidebar the same stack.  It has no height.
-        # - Both use the same hairline style, and the same `.pwctl-header`
-        #   padding in style.css.
+        # - No padding or height of our own on either: that was what left
+        #   v0.6.0–0.6.3 tall and at the mercy of a theme (issue #32).
+        # - Both draw the line with libadwaita's RAISED_BORDER, so it is the
+        #   same line, from the same rule, on both sides.
         # - `_band` below makes the two header bars one height, so neither
-        #   side's contents (the brand block, the switcher) can make one
-        #   taller than the other at a larger text size.
+        #   side's contents (the name, the switcher) can make one taller
+        #   than the other at a larger text size.
         side_view.add_top_bar(Gtk.Box())
         side_view.add_css_class('pwctl-band')
         side_view.set_top_bar_style(Adw.ToolbarStyle.RAISED_BORDER)
@@ -475,10 +482,12 @@ class Window(Adw.ApplicationWindow):
         self._band.add_widget(self._header_fit)
         self._page_room = _PageRoom(self.stack, self._is_narrow)
         content_view.set_content(self._page_room)
-        # The hairline under the header bar (and under the restart banner when
-        # it is showing).  libadwaita's own top-bar style, so it follows the
-        # theme instead of guessing at a border colour.
+        # The line under the header bar (and under the restart banner when it
+        # is showing), always there, on every page: the sidebar draws the
+        # same one, so the two meet.  libadwaita's own top-bar style, so it
+        # follows the theme instead of guessing at a border colour.
         content_view.set_top_bar_style(Adw.ToolbarStyle.RAISED_BORDER)
+        self.content_view = content_view
 
         # An overlay split, not a navigation split.  Both collapse, but a
         # collapsed navigation split makes the sidebar and the page separate
@@ -593,6 +602,9 @@ class Window(Adw.ApplicationWindow):
         self._font_handlers = (settings, [
             settings.connect(f'notify::{key}', self.fit_header)
             for key in ('gtk-font-name', 'gtk-xft-dpi')])
+        # The app's name steps aside for window buttons at the sidebar
+        # header's start (see `_sync_app_title`).
+        self._watch_start_buttons(side_header)
 
         start = 0
         import os
@@ -1005,6 +1017,51 @@ class Window(Adw.ApplicationWindow):
             self.content_title.set_title(title)
             self.content_header.set_title_widget(self.content_title)
         self.fit_header()
+
+    def _watch_start_buttons(self, header):
+        """Follow the window buttons at the start of the sidebar's header.
+
+        The header bar keeps them in a `Gtk.WindowControls`, whose `empty`
+        says whether it is drawing any (measured: true for GNOME's
+        `appmenu:close`, and for `menu:`/`icon:` when the window has no
+        icon; false for `close,minimize,maximize:`).  It changes with the
+        desktop's button layout while the app runs, and the header bar
+        hides the controls where they are not at the window's edge.
+        """
+        self._start_buttons = None
+        stack = [header]
+        while stack:
+            w = stack.pop()
+            if (isinstance(w, Gtk.WindowControls)
+                    and w.get_side() == Gtk.PackType.START):
+                self._start_buttons = w
+                break
+            child = w.get_first_child()
+            while child is not None:
+                stack.append(child)
+                child = child.get_next_sibling()
+        if self._start_buttons is not None:
+            for prop in ('empty', 'visible'):
+                self._start_buttons.connect(f'notify::{prop}',
+                                            self._sync_app_title)
+        self._sync_app_title()
+
+    def _sync_app_title(self, *_a):
+        """The app's name in the sidebar header, unless window buttons are
+        there.
+
+        With the buttons on the left (`close,minimize,maximize:`), beside
+        them the name has a third of a 210-240px header: v0.6.0-0.6.3 cut it
+        to "PipeWir…".  So the buttons get the top of the sidebar to
+        themselves, as they do in a macOS sidebar, and the name stays the
+        window's title, where the task switcher and window list show it.
+        Without the controls to ask (a libadwaita built differently), the
+        name stays.
+        """
+        ctl = self._start_buttons
+        crowded = (ctl is not None and ctl.get_visible()
+                   and not ctl.get_empty())
+        self._app_title.set_visible(not crowded)
 
     # -------------------------------------------------------- header width --
     def _set_header_compact(self, compact):

@@ -1008,14 +1008,20 @@ button.path-tpl-btn:hover {
     border-right: 1px solid alpha(currentColor, 0.13);
 }
 
-/* The sidebar's own header keeps the pane's tone rather than the header-bar
-   colour, so the pane is one surface top to bottom.  Its hairline is NOT
-   written here: both header bars get it from AdwToolbarView's RAISED_BORDER
-   style, which is the only way to be sure the two land on the same y (see
-   .pwctl-header below).  Only the footer still draws its own, because no
-   libadwaita style covers a bottom bar that has to keep this background. */
+/* The sidebar is one surface from the window's top edge down: its header
+   keeps the pane's tone.  Its top bar is RAISED_BORDER (app.py) for the line
+   under it, the same line as the content header's, and that style would
+   paint the header-bar colour across the grey pane (v0.6.0-0.6.3's white
+   band), so these rules take the colour off and leave the line.  The footer
+   draws its own hairline, because no libadwaita style covers a bottom bar
+   that has to keep this background. */
 .pwctl-sidebar headerbar.pwctl-sidebar-header {
     background: transparent;
+}
+
+toolbarview.pwctl-sidebar > .top-bar.raised,
+toolbarview.pwctl-sidebar > .top-bar.raised:backdrop {
+    background-color: transparent;
 }
 
 .pwctl-sidebar .pwctl-sidebar-footer {
@@ -1023,65 +1029,20 @@ button.path-tpl-btn:hover {
 }
 
 /* -------------------------------------------------- C3 / C14 header bars --
-   The sidebar header and the content header are one band of chrome across the
-   top of the window, so their bottom hairlines have to be one line, under any
-   theme.  The line is drawn under each side's top-bar area (AdwToolbarView's
-   RAISED_BORDER), not under the header bar itself.
+   Both header bars are libadwaita's own, at libadwaita's own height (46px on
+   stock Adwaita), with nothing of ours on their padding or height.  That is
+   the whole design, and the reason for it: v0.6.0–0.6.3 declared a 62px band
+   with hand-tuned padding, which wasted a third of it on air and was undone
+   by any theme that pads header bars its own way (issue #32).  A theme now
+   styles these bars exactly as it styles every other libadwaita app.
 
-   **Never balance the two sides with different numbers.**  v0.6.0 to v0.6.2
-   did (16px on one side, 19px on the other), tuned on a desktop whose own
-   gtk.css had removed libadwaita's 3px under a stack of top bars.  On stock
-   Adwaita that left the content's line 3px below the sidebar's, and a theme
-   that pads header bars its own way (Fluent, issue #32) moved it again.  A
-   user's gtk.css outranks this file, as GTK intends, so the only alignment
-   that survives a theme is one where both sides are built alike:
+   **Do not add padding, margins or a min-height to either bar.**  The two
+   sides line up because they are built alike (app.py: both stack two top
+   bars, and a size group gives them one height), not because of numbers.
+   `test_header_align.local.py` checks it under hostile stylesheets.
 
-   1. Both sides stack two top bars (app.py: the sidebar's second one is
-      empty), so libadwaita's `.collapse-spacing` rules, and any theme's,
-      apply to both.
-   2. Every rule here applies to both sides equally.
-   3. A size group in app.py gives both header bars one height, so the brand
-      block and the switcher can grow at larger text without a step.
-
-   The look on stock Adwaita: the band ends at 62px, the content sits low in
-   it with the switcher 3px above its line, and the rest is air under the
-   window edge.  That is 3px of the stack's top padding, 19 here, the header's
-   own 3 + 34 + 3, and no bottom padding.  `test_header_align.local.py`
-   checks the two lines against hostile stylesheets and larger text. */
-toolbarview.pwctl-band > .top-bar .collapse-spacing {
-    padding-bottom: 0;
-}
-
-headerbar.pwctl-header > windowhandle {
-    padding-top: 19px;
-    padding-bottom: 0;
-}
-
-/* The view switcher's own height, the tallest thing in either header. */
-headerbar.pwctl-header > windowhandle > box {
-    min-height: 34px;
-}
-
-/* The app name in the sidebar header (C4/C5).  AdwWindowTitle's two labels
-   carry the .title / .subtitle classes. */
-.app-title .title {
-    font-size: 1.15em;
-    font-weight: 800;
-}
-
-.app-title .subtitle {
-    font-size: 0.72em;
-}
-
-/* The page name in the content header.  At the default .title size it was the
-   smallest text in a band that also holds a 1.15em brand and two bold button
-   labels, so the one word naming the whole page read as the least important
-   thing on the row.  It matches the brand now: the two ends of the band are
-   the same weight, and the header has the height to carry it. */
-.page-title .title {
-    font-size: 1.15em;
-    font-weight: 800;
-}
+   The line under them (C19) is AdwToolbarView's RAISED_BORDER on both
+   sides, so it is one line across the window, drawn by one rule. */
 
 .dash-card {
     background: @card_bg_color;
