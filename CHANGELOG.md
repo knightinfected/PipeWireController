@@ -45,6 +45,19 @@ Every button is where it was.
   (since v0.6.0). The buttons now have the top of the sidebar to
   themselves, as in a macOS sidebar.
 
+**Pages switch at once**
+
+Changing page used to fade the old page into the new one. On the bigger
+pages (Signal Paths, Patchbay, Devices, Equalizer) the fade skipped frames,
+which made switching feel sluggish. Pages now switch instantly.
+
+**Bug: after you opened the Patchbay, the app kept redrawing on every page**
+
+Since v0.3.0, one visit to the Patchbay left the window redrawing 60 times a
+second on every page until you closed the app. Nothing looked different,
+but it used about three times the CPU while idle, which costs battery on a
+laptop. The Patchbay now redraws only while it is on screen.
+
 ## [v0.6.3](https://github.com/knightinfected/PipeWireController/releases/tag/v0.6.3) — 2026-10-30
 **Search the whole app with Ctrl+K, and the header lines fixed on every theme**
 
