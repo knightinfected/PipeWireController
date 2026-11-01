@@ -350,8 +350,11 @@ class Window(Adw.ApplicationWindow):
         # widest page on every page, so the Patchbay's toolbar set the
         # narrowest width of the Dashboard too.  Vertical sizing stays
         # homogeneous: pages are scrollers, so nothing gains from it.
+        # No transition: a crossfade draws both whole pages on every frame,
+        # and on the heavy pages (Signal Paths, Patchbay, Devices, Equalizer)
+        # it dropped 3-5 frames, which felt worse than switching at once.
         self.stack = Gtk.Stack(
-            transition_type=Gtk.StackTransitionType.CROSSFADE,
+            transition_type=Gtk.StackTransitionType.NONE,
             hhomogeneous=False)
 
         # sidebar
