@@ -164,7 +164,22 @@ class GraphArea(Gtk.DrawingArea):
         motion.connect('leave', self._leave)
         self.add_controller(motion)
 
-        self.add_tick_callback(self._tick)
+        # Moving cables redraw every frame, but only while the canvas is on
+        # screen: a tick callback keeps the window's frame clock running
+        # whether it draws or not, so one left in place kept the whole
+        # window at 60 frames a second on every page after the Patchbay.
+        self._tick_id = None
+        self.connect('map', self._start_ticking)
+        self.connect('unmap', self._stop_ticking)
+
+    def _start_ticking(self, *_a):
+        if self._tick_id is None:
+            self._tick_id = self.add_tick_callback(self._tick)
+
+    def _stop_ticking(self, *_a):
+        if self._tick_id is not None:
+            self.remove_tick_callback(self._tick_id)
+            self._tick_id = None
 
     def do_dispose(self):
         # A widget must unparent what it parented, or GTK warns at finalize.
