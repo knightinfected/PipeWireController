@@ -20,7 +20,7 @@ feature requests. Thanks!
 | Dashboard | Game/chat mix knob, mic and output picked manually | *Planned* |
 | Dashboard | EasyEffects and JamesDSP presets, managed from the Dashboard | *Designed* |
 | Dashboard | Event-driven updates instead of polling | *Designed* |
-| Signal Paths | Mic → effects → virtual mic: pick the capture mic per strip ([#29](https://github.com/knightinfected/PipeWireController/issues/29)) | *Built, being finished* |
+| Signal Paths | Overhaul: mic → effects → virtual mic ([#29](https://github.com/knightinfected/PipeWireController/issues/29)), channel strips (level after the effects, per-send levels, a master over mixes, [#33](https://github.com/knightinfected/PipeWireController/issues/33)), live edits without restarts, more stage types + plugin knobs, meters in/out per channel above 0 dB, new Flow/Console/Matrix views with groups ([#6](https://github.com/knightinfected/PipeWireController/issues/6)) | *In progress* |
 | Patchbay | Matrix view: connect many channels at once ([#27](https://github.com/knightinfected/PipeWireController/issues/27)) | *Planned* |
 | Network | Network audio: AirPlay speakers, other PCs, listen on your phone | *Designed* |
 | Session & Bluetooth | WirePlumber session settings done properly: every live setting, no restart | *Designed* |
